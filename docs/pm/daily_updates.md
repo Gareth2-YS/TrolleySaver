@@ -2,6 +2,19 @@
 
 Newest entry first. Each entry covers: **Done**, **Decisions**, **Next**, **Blockers / Needs from others**.
 
+## 20 Oct 2026 (Tue): Nancy
+
+**Done**
+- Attended the team meeting, where project roles were assigned and requirements were clarified [add the remaining outcome, e.g. next milestones].
+- Drafted the Excel data-collection sheet for the database, in accordance with the architecture diagram.
+- Collected product price data from all three supermarkets for testing purposes.
+
+**Decisions (draft, open for team comments)**
+- Seeking team confirmation on whether the proposed database design [specify aspect, e.g. structure/scope] is acceptable.
+
+**Next**
+- Upon approval, proceed to add product listings.
+
 ---
 
 ## 18 Oct 2026 (Sat): Yong Hsien
