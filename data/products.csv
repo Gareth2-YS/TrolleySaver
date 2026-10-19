@@ -1,5 +1,0 @@
-id	name	brand	packQty	packUnit	category	hcs	searchTerms	minCents	maxCents	retailerID	priceType	minQty	priceCents	observedAt	submittedAt	conditionalNote	offerEndDate
-29fe1841-ec20-40a8-9889-2bb67c9d8d0f	Coca-Cola Light	The Coca-Cola Company	300	mL	soft drinks	TRUE	"hcs, lowsugar, lowfat"	500	1500	Cold Storage	promo	12	875	19/10/2026 23:40	19/10/2026 23:41	sold out	
-3efa5669-2dd8-444e-9f3a-da2d995f7e7d	Coca-Cola Light	The Coca-Cola Company	300	mL	soft drinks	TRUE	"hcs, lowsugar, lowfat"	500	1500	Cold Storage	regular	12	1215	18/10/2026 23:45	19/10/2026 23:47		
-d46deb78-63f2-426a-b0c2-0ed7caa730fb	Coca-Cola Light	The Coca-Cola Company	300	mL	soft drinks	TRUE	"hcs, lowsugar, lowfat"	500	1500	Fairprice	regular	12	1140	19/10/2026 23:51	19/10/2026 23:51		
-7afad27e-faf7-4750-be1b-75439ffe74d7	Coca-Cola Light	The Coca-Cola Company	300	mL	soft drinks	TRUE	"hcs, lowsugar, lowfat"	500	1500	Sheng Shiong	regular	12	1140	19/10/2026 23:52	19/10/2026 23:53		
