@@ -32,12 +32,27 @@ describe("authentication pages", () => {
   })
 
   it("does not grant admin access based on the selected login mode", async () => {
-    const user = userEvent.setup(); renderAt("/login", service("user"))
+    const user = userEvent.setup()
+    const authService = service("user")
+    renderAt("/login", authService)
     await screen.findByRole("heading", { name: "Welcome back" })
     await user.click(screen.getByRole("button", { name: /^admin$/i }))
     await user.type(screen.getByRole("textbox", { name: /Email address/i }), "alex@example.com")
     await user.type(screen.getByLabelText("Password", { selector: "input" }), "password")
     await user.click(screen.getByRole("button", { name: "Log in as admin" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("does not have administrator access")
+    expect(authService.signOut).toHaveBeenCalledOnce()
+  })
+
+  it("does not allow an administrator account through the user login tab", async () => {
+    const user = userEvent.setup()
+    const authService = service("admin")
+    renderAt("/login", authService)
+    await screen.findByRole("heading", { name: "Welcome back" })
+    await user.type(screen.getByRole("textbox", { name: /Email address/i }), "admin@example.com")
+    await user.type(screen.getByLabelText("Password", { selector: "input" }), "password")
+    await user.click(screen.getByRole("button", { name: "Log in as user" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("must log in through the Admin tab")
+    expect(authService.signOut).toHaveBeenCalledOnce()
   })
 })

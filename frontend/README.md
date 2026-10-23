@@ -25,7 +25,9 @@ Open `http://localhost:5173`. Smart Basket and Search are public. Price & Image 
 
 Type either dummy account into the normal login form. New registrations are immediately usable, always receive the `user` role, and duplicate emails are rejected. These credentials exist only in the local mock adapter.
 
-Smart Basket, Search & Filter, and Price & Image Upload intentionally contain only the shared header for now so the feature owners can implement them without removing placeholder UI.
+Price & Image Upload is implemented for local development testing. Contributors can validate and submit price details with optional shelf-tag evidence, then immediately see the pending record. Administrators receive a focused local moderation queue. In local mode, metadata is stored in browser `localStorage`, image references use temporary object URLs, and no data is sent to AWS.
+
+Set `VITE_PRICE_SUBMISSION_MODE=local` for this demonstration flow. `api` is reserved for the future production adapter and currently shows an explicit unavailable-integration error instead of fake success. Smart Basket and Search & Filter remain untouched placeholders.
 
 ## Quality checks
 

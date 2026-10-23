@@ -46,9 +46,12 @@ export function AuthProvider({ children, serviceOverride }: { children: ReactNod
       const next = await service.signIn(input)
       if (next.type === "DONE") {
         const nextUser = await refreshUser()
-        if (intendedRole === "admin" && nextUser?.role !== "admin") {
+        if (nextUser?.role !== intendedRole) {
           await service.signOut(); setUser(null)
-          throw Object.assign(new Error("This account does not have administrator access."), { name: "UnauthorizedRoleError" })
+          const message = intendedRole === "admin"
+            ? "This account does not have administrator access."
+            : "Administrator accounts must log in through the Admin tab."
+          throw Object.assign(new Error(message), { name: "UnauthorizedRoleError" })
         }
         return { ...next, authenticatedRole: nextUser?.role }
       }
