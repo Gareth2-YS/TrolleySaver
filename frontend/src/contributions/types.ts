@@ -1,6 +1,18 @@
 import type { AuthRole } from "../auth/types"
 
-export type SubmissionStatus = "pending" | "approved" | "rejected"
+export type SubmissionStatus = "accepted" | "flagged" | "rejected"
+
+export interface CatalogProduct {
+  id: string
+  name: string
+  minCents?: number
+  maxCents?: number
+}
+
+export interface CatalogRetailer {
+  id: string
+  name: string
+}
 
 export interface SubmissionPhoto {
   fileName: string
@@ -47,6 +59,7 @@ export interface CreateSubmissionInput {
 
 export interface UploadTarget {
   uploadUrl: string
+  fields: Record<string, string>
   photoKey: string
   expiresAt: string
 }
@@ -57,11 +70,13 @@ export interface SubmissionActor {
 }
 
 export interface SubmissionService {
-  readonly mode: "local" | "api-unavailable"
+  readonly mode: "local" | "api"
+  listProducts(): Promise<CatalogProduct[]>
+  listRetailers(): Promise<CatalogRetailer[]>
   requestImageUpload(file: File, accessToken: string): Promise<UploadTarget>
   uploadImage(target: UploadTarget, file: File, onProgress?: (percent: number) => void): Promise<SubmissionPhoto>
   createSubmission(input: CreateSubmissionInput, accessToken: string): Promise<PriceSubmission>
   listMySubmissions(userId: string, accessToken: string): Promise<PriceSubmission[]>
   listPendingSubmissions(actor: SubmissionActor, accessToken: string): Promise<PriceSubmission[]>
-  moderateSubmission(id: string, decision: "approved" | "rejected", reason: string | undefined, actor: SubmissionActor, accessToken: string): Promise<PriceSubmission>
+  moderateSubmission(id: string, decision: "accepted" | "rejected", reason: string | undefined, actor: SubmissionActor, accessToken: string): Promise<PriceSubmission>
 }

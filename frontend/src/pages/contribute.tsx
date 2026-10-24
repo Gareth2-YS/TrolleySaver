@@ -14,7 +14,7 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
@@ -23,16 +23,16 @@ import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
-import { products, stores } from "../contributions/catalog"
 import {
   contributionSchema,
-  localDateString,
+  earliestObservedDate,
+  singaporeDateString,
   validateImage,
   type ContributionInput,
   type ContributionValues,
 } from "../contributions/schema"
-import { createSubmissionService } from "../contributions/service"
-import type { PriceSubmission, SubmissionService, SubmissionStatus } from "../contributions/types"
+import { createSubmissionService, SubmissionServiceError } from "../contributions/service"
+import type { CatalogProduct, CatalogRetailer, PriceSubmission, SubmissionService, SubmissionStatus } from "../contributions/types"
 import { cn } from "../lib/utils"
 
 const selectClass = "flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
@@ -51,20 +51,20 @@ function FieldError({ children }: { children?: ReactNode }) {
 }
 
 function StatusBadge({ status }: { status: SubmissionStatus }) {
-  const Icon = status === "approved" ? CheckCircle2 : status === "rejected" ? XCircle : Clock3
+  const Icon = status === "accepted" ? CheckCircle2 : status === "rejected" ? XCircle : Clock3
   return (
     <span className={cn(
       "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold capitalize",
-      status === "approved" && "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      status === "accepted" && "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
       status === "rejected" && "border-destructive/25 bg-destructive/10 text-destructive",
-      status === "pending" && "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      status === "flagged" && "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     )}>
       <Icon className="size-3.5" />{status}
     </span>
   )
 }
 
-function PhotoView({ submission, large = false }: { submission: PriceSubmission; large?: boolean }) {
+function PhotoView({ submission, large = false, onExpired }: { submission: PriceSubmission; large?: boolean; onExpired?: () => void }) {
   if (!submission.photo) {
     return (
       <div className={cn("grid place-items-center rounded-xl border border-dashed bg-secondary/50 text-center text-muted-foreground", large ? "min-h-52" : "size-20 shrink-0")}>
@@ -84,6 +84,7 @@ function PhotoView({ submission, large = false }: { submission: PriceSubmission;
       src={submission.photo.previewUrl}
       alt={`Shelf-tag evidence for ${submission.productName}`}
       className={cn("rounded-xl border object-cover", large ? "max-h-80 w-full bg-secondary/40" : "size-20 shrink-0")}
+      onError={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }}
     />
   )
 }
@@ -133,41 +134,57 @@ function ReviewPathCard() {
 function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const { user, getAccessToken } = useAuth()
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
+  const [products, setProducts] = useState<CatalogProduct[]>([])
+  const [stores, setStores] = useState<CatalogRetailer[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
-  const today = localDateString()
+  const today = singaporeDateString()
+  const earliestDate = earliestObservedDate()
   const {
     register,
     handleSubmit,
     reset,
+    clearErrors,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ContributionInput, unknown, ContributionValues>({
     resolver: zodResolver(contributionSchema),
     defaultValues: { productId: "", storeId: "", price: 0, observedDate: today },
   })
 
+  const loadMine = useCallback(async () => {
+    if (!user) return
+    const token = await getAccessToken()
+    if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
+    setSubmissions(await service.listMySubmissions(user.id, token))
+  }, [getAccessToken, service, user])
+
   useEffect(() => {
     let active = true
     async function load() {
-      if (!user) return
       try {
-        const token = await getAccessToken()
-        if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
-        const result = await service.listMySubmissions(user.id, token)
-        if (active) setSubmissions(result)
+        const [nextProducts, nextStores] = await Promise.all([service.listProducts(), service.listRetailers()])
+        if (active) { setProducts(nextProducts); setStores(nextStores) }
+        await loadMine()
       } catch (error) {
-        if (active) setLoadError(error instanceof Error ? error.message : "Could not load your submissions.")
+        if (active) setLoadError(error instanceof Error ? error.message : "Could not load contribution data.")
       } finally {
         if (active) setLoading(false)
       }
     }
     void load()
     return () => { active = false }
-  }, [getAccessToken, service, user])
+  }, [loadMine, service])
+
+  useEffect(() => {
+    if (!submissions.some((item) => item.photo?.storage === "private-s3")) return
+    const timer = window.setTimeout(() => void loadMine().catch(() => undefined), 4 * 60_000)
+    return () => window.clearTimeout(timer)
+  }, [loadMine, submissions])
 
   function clearImage() {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -202,6 +219,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   async function submit(values: ContributionValues) {
     if (!user || imageError) return
     setLoadError(null)
+    clearErrors()
     setProgress(file ? 0 : null)
     try {
       const token = await getAccessToken()
@@ -227,8 +245,17 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       }, token)
       setSubmissions((current) => [created, ...current])
       clearForm()
-      toast.success("Price submitted for administrator review")
+      toast.success(created.status === "accepted" ? "Price accepted and published" : "Unusual price sent for review")
     } catch (error) {
+      if (error instanceof SubmissionServiceError && error.fieldErrors) {
+        const fieldMap = { productId: "productId", retailerId: "storeId", priceCents: "price", observedAt: "observedDate" } as const
+        Object.entries(fieldMap).forEach(([apiField, formField]) => {
+          const message = error.fieldErrors?.[apiField]
+          if (message) setError(formField, { message })
+        })
+        const photoMessage = error.fieldErrors.photo ?? error.fieldErrors.photoKey
+        if (photoMessage) setImageError(photoMessage)
+      }
       setLoadError(error instanceof Error ? error.message : "The submission could not be saved.")
     } finally {
       setProgress(null)
@@ -242,7 +269,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Contributor workspace</span>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Share a price you spotted</h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Add the essential price details and optional shelf-label evidence. Every contribution stays pending until an administrator reviews it.
+            Add the essential price details and optional shelf-label evidence. Prices in the usual range are published straight away; unusual prices are checked by an administrator.
           </p>
         </div>
         <ReviewPathCard />
@@ -259,16 +286,16 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="product">Product</Label>
-              <select id="product" className={selectClass} aria-invalid={Boolean(errors.productId)} {...register("productId")}>
-                <option value="">Select a product</option>
+              <select id="product" className={selectClass} disabled={loading} aria-invalid={Boolean(errors.productId)} {...register("productId")}>
+                <option value="">{loading ? "Loading products…" : "Select a product"}</option>
                 {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
               </select>
               <FieldError>{errors.productId?.message}</FieldError>
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="store">Store</Label>
-              <select id="store" className={selectClass} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
-                <option value="">Select a store</option>
+              <select id="store" className={selectClass} disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
+                <option value="">{loading ? "Loading stores…" : "Select a store"}</option>
                 {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
               </select>
               <FieldError>{errors.storeId?.message}</FieldError>
@@ -277,13 +304,13 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
               <Label htmlFor="price">Price (SGD)</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                <Input id="price" type="number" min="0.01" max="10000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...register("price")} />
+                <Input id="price" type="number" min="0.01" max="1000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...register("price")} />
               </div>
               <FieldError>{errors.price?.message}</FieldError>
             </div>
             <div className="space-y-2">
               <Label htmlFor="observedDate">Observed date</Label>
-              <Input id="observedDate" type="date" max={today} aria-invalid={Boolean(errors.observedDate)} {...register("observedDate")} />
+              <Input id="observedDate" type="date" min={earliestDate} max={today} aria-invalid={Boolean(errors.observedDate)} {...register("observedDate")} />
               <FieldError>{errors.observedDate?.message}</FieldError>
             </div>
           </div>
@@ -327,14 +354,14 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 
         <div className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-12">
           <div className="flex items-center gap-3 text-sm">
-            <span className="grid size-9 place-items-center rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300"><Clock3 className="size-4" /></span>
-            <span><strong className="block">Pending until reviewed</strong><span className="text-xs text-muted-foreground">Your contribution will not appear publicly straight away.</span></span>
+            <span className="grid size-9 place-items-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="size-4" /></span>
+            <span><strong className="block">Reactive moderation</strong><span className="text-xs text-muted-foreground">Usual prices publish immediately; unusual prices are flagged for review.</span></span>
           </div>
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="outline" onClick={clearForm}>Clear</Button>
             <Button type="submit" disabled={isSubmitting || Boolean(imageError)}>
               {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <ImageUp className="size-4" />}
-              {isSubmitting ? "Saving…" : "Submit for review"}
+              {isSubmitting ? "Saving…" : "Submit price"}
             </Button>
           </div>
         </div>
@@ -355,11 +382,11 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
             <div className="rounded-xl border border-dashed p-10 text-center md:col-span-2 xl:col-span-3">
               <Camera className="mx-auto size-7 text-muted-foreground" />
               <h3 className="mt-3 font-semibold">Nothing submitted yet</h3>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Your pending price contributions will appear here immediately after submission.</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Your price contributions will appear here immediately after submission.</p>
             </div>
           ) : submissions.map((submission) => (
             <article key={submission.id} className="rounded-xl border bg-card/45 p-4">
-              <div className="flex gap-4"><PhotoView submission={submission} /><SubmissionDetails submission={submission} /></div>
+              <div className="flex gap-4"><PhotoView submission={submission} onExpired={() => void loadMine().catch(() => setLoadError("The photo link expired and could not be refreshed."))} /><SubmissionDetails submission={submission} /></div>
               <p className="mt-3 border-t pt-3 text-[11px] text-muted-foreground">Submitted {formatTimestamp(submission.submittedAt)}</p>
             </article>
           ))}
@@ -378,26 +405,31 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [reason, setReason] = useState("")
 
+  const loadFlagged = useCallback(async () => {
+    if (!user) return
+    const token = await getAccessToken()
+    if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
+    setSubmissions(await service.listPendingSubmissions({ id: user.id, role: user.role }, token))
+  }, [getAccessToken, service, user])
+
   useEffect(() => {
     let active = true
     async function load() {
-      if (!user) return
-      try {
-        const token = await getAccessToken()
-        if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
-        const result = await service.listPendingSubmissions({ id: user.id, role: user.role }, token)
-        if (active) setSubmissions(result)
-      } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : "Could not load pending submissions.")
-      } finally {
-        if (active) setLoading(false)
-      }
+      try { await loadFlagged() }
+      catch (loadError) { if (active) setError(loadError instanceof Error ? loadError.message : "Could not load flagged submissions.") }
+      finally { if (active) setLoading(false) }
     }
     void load()
     return () => { active = false }
-  }, [getAccessToken, service, user])
+  }, [loadFlagged])
 
-  async function decide(submission: PriceSubmission, decision: "approved" | "rejected") {
+  useEffect(() => {
+    if (!submissions.some((item) => item.photo?.storage === "private-s3")) return
+    const timer = window.setTimeout(() => void loadFlagged().catch(() => undefined), 4 * 60_000)
+    return () => window.clearTimeout(timer)
+  }, [loadFlagged, submissions])
+
+  async function decide(submission: PriceSubmission, decision: "accepted" | "rejected") {
     if (!user) return
     if (decision === "rejected" && !reason.trim()) {
       setError("Enter a reason before rejecting this submission.")
@@ -418,8 +450,11 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
       setSubmissions((current) => current.filter((item) => item.id !== submission.id))
       setRejectingId(null)
       setReason("")
-      toast.success(decision === "approved" ? "Submission approved" : "Submission rejected")
+      toast.success(decision === "accepted" ? "Flagged price accepted" : "Flagged price rejected")
     } catch (decisionError) {
+      if (decisionError instanceof SubmissionServiceError && decisionError.code === "ALREADY_MODERATED") {
+        await loadFlagged().catch(() => undefined)
+      }
       setError(decisionError instanceof Error ? decisionError.message : "The moderation decision could not be saved.")
     } finally {
       setWorkingId(null)
@@ -433,7 +468,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
           <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Administrator workspace</span>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Review price evidence</h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Verify each price and shelf-label image before approving it. This workspace contains moderation tools only.
+            Review only unusual prices that the backend has flagged, then accept or reject them using the shelf evidence.
           </p>
         </div>
         <aside className="glass-panel flex items-center justify-between p-5">
@@ -446,7 +481,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
 
       <section className="glass-panel p-5 sm:p-7">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h2 className="text-xl font-semibold">Pending submissions</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
+          <div><h2 className="text-xl font-semibold">Flagged prices</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
           <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">Administrator only</span>
         </div>
         <div className="mt-6 space-y-5" aria-live="polite">
@@ -460,7 +495,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
             </div>
           ) : submissions.map((submission) => (
             <article key={submission.id} className="grid gap-5 rounded-xl border bg-card/45 p-4 lg:grid-cols-[minmax(220px,.75fr)_minmax(0,1.25fr)] lg:p-5">
-              <PhotoView submission={submission} large />
+              <PhotoView submission={submission} large onExpired={() => void loadFlagged().catch(() => setError("The photo link expired and could not be refreshed."))} />
               <div className="min-w-0">
                 <SubmissionDetails submission={submission} />
                 <dl className="mt-4 grid gap-3 rounded-xl bg-secondary/55 p-4 text-xs sm:grid-cols-2">
@@ -492,8 +527,8 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
                   ) : (
                     <>
                       <Button variant="outline" disabled={Boolean(workingId)} onClick={() => { setRejectingId(submission.id); setReason("") }}><X className="size-4" />Reject</Button>
-                      <Button disabled={Boolean(workingId)} onClick={() => void decide(submission, "approved")}>
-                        {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}Approve
+                      <Button disabled={Boolean(workingId)} onClick={() => void decide(submission, "accepted")}>
+                        {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}Accept
                       </Button>
                     </>
                   )}
@@ -508,7 +543,10 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
 }
 
 export function ContributePage({ serviceOverride }: { serviceOverride?: SubmissionService }) {
-  const { user } = useAuth()
-  const [service] = useState(() => serviceOverride ?? createSubmissionService())
+  const { user, getAccessToken, signOut } = useAuth()
+  const service = useMemo(() => serviceOverride ?? createSubmissionService({
+    refreshAccessToken: () => getAccessToken(true),
+    onSessionEnded: signOut,
+  }), [getAccessToken, serviceOverride, signOut])
   return <AppShell>{user?.role === "admin" ? <AdminWorkspace service={service} /> : <ContributorWorkspace service={service} />}</AppShell>
 }

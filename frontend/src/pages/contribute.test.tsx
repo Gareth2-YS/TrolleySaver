@@ -10,7 +10,7 @@ import { ContributePage } from "./contribute"
 
 afterEach(cleanup)
 
-const pendingSubmission: PriceSubmission = {
+const flaggedSubmission: PriceSubmission = {
   id: "submission-1",
   productId: "gardenia-white-600g",
   productName: "Gardenia Original Classic White Bread · 600 g",
@@ -19,7 +19,7 @@ const pendingSubmission: PriceSubmission = {
   price: 2.8,
   currency: "SGD",
   observedDate: "2026-10-19",
-  status: "pending",
+  status: "flagged",
   submitterId: "user-1",
   submitterName: "Alex Tan",
   submitterEmail: "alex@example.com",
@@ -40,12 +40,14 @@ function authService(role: AuthRole | null): AuthService {
 function submissionService(overrides: Partial<SubmissionService> = {}): SubmissionService {
   return {
     mode: "local",
-    requestImageUpload: vi.fn().mockResolvedValue({ uploadUrl: "browser-object-url://test", photoKey: "local-evidence/test.png", expiresAt: "2026-10-21T00:00:00.000Z" }),
+    listProducts: vi.fn().mockResolvedValue([{ id: "gardenia-white-600g", name: "Gardenia Original Classic White Bread · 600 g" }]),
+    listRetailers: vi.fn().mockResolvedValue([{ id: "fairprice", name: "FairPrice" }]),
+    requestImageUpload: vi.fn().mockResolvedValue({ uploadUrl: "browser-object-url://test", fields: {}, photoKey: "local-evidence/test.png", expiresAt: "2026-10-21T00:00:00.000Z" }),
     uploadImage: vi.fn().mockImplementation(async (_target, file, onProgress) => { onProgress?.(100); return { fileName: file.name, contentType: file.type, sizeBytes: file.size, photoKey: "local-evidence/test.png", previewUrl: "blob:uploaded", storage: "browser-object-url" } }),
-    createSubmission: vi.fn().mockImplementation(async (input) => ({ ...pendingSubmission, ...input })),
+    createSubmission: vi.fn().mockImplementation(async (input) => ({ ...flaggedSubmission, ...input })),
     listMySubmissions: vi.fn().mockResolvedValue([]),
-    listPendingSubmissions: vi.fn().mockResolvedValue([pendingSubmission]),
-    moderateSubmission: vi.fn().mockImplementation(async (_id, decision, reason) => ({ ...pendingSubmission, status: decision, rejectionReason: reason })),
+    listPendingSubmissions: vi.fn().mockResolvedValue([flaggedSubmission]),
+    moderateSubmission: vi.fn().mockImplementation(async (_id, decision, reason) => ({ ...flaggedSubmission, status: decision, rejectionReason: reason })),
     ...overrides,
   }
 }
@@ -72,7 +74,7 @@ describe("price and image contribution workflow", () => {
   it("renders contributor controls without administrator actions", async () => {
     renderContribution("user")
     expect(await screen.findByRole("heading", { name: "Share a price you spotted" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Submit for review" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Submit price" })).toBeInTheDocument()
     expect(screen.queryByLabelText("Branch")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument()
     expect(screen.queryByText("Local mock mode")).not.toBeInTheDocument()
@@ -81,8 +83,8 @@ describe("price and image contribution workflow", () => {
   it("renders only the focused administrator review experience", async () => {
     renderContribution("admin")
     expect(await screen.findByRole("heading", { name: "Review price evidence" })).toBeInTheDocument()
-    expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Accept" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Submit price" })).not.toBeInTheDocument()
     expect(screen.queryByText("Smart basket")).not.toBeInTheDocument()
     expect(screen.queryByText("Search & filter")).not.toBeInTheDocument()
   })
@@ -91,7 +93,7 @@ describe("price and image contribution workflow", () => {
     const user = userEvent.setup()
     renderContribution("user")
     await screen.findByRole("heading", { name: "Share a price you spotted" })
-    await user.click(screen.getByRole("button", { name: "Submit for review" }))
+    await user.click(screen.getByRole("button", { name: "Submit price" }))
     expect(await screen.findByText("Choose a product")).toBeInTheDocument()
     expect(screen.getByText("Choose a store")).toBeInTheDocument()
     expect(screen.getByText("Price must be greater than $0")).toBeInTheDocument()
@@ -107,15 +109,15 @@ describe("price and image contribution workflow", () => {
     expect(await screen.findByText("Choose a JPG or PNG image")).toBeInTheDocument()
   })
 
-  it("submits locally and immediately renders the pending contribution", async () => {
+  it("submits and immediately renders the backend status", async () => {
     const user = userEvent.setup()
     const service = submissionService()
     renderContribution("user", service)
     await screen.findByRole("heading", { name: "Share a price you spotted" })
     await completeRequiredFields(user)
-    await user.click(screen.getByRole("button", { name: "Submit for review" }))
+    await user.click(screen.getByRole("button", { name: "Submit price" }))
     expect(await screen.findByText("$2.80")).toBeInTheDocument()
-    expect(screen.getByText("pending")).toBeInTheDocument()
+    expect(screen.getByText("flagged")).toBeInTheDocument()
     expect(service.createSubmission).toHaveBeenCalledWith(expect.objectContaining({ storeName: "FairPrice" }), "test-token")
   })
 
@@ -125,7 +127,7 @@ describe("price and image contribution workflow", () => {
     renderContribution("user", service)
     await screen.findByRole("heading", { name: "Share a price you spotted" })
     await completeRequiredFields(user)
-    await user.click(screen.getByRole("button", { name: "Submit for review" }))
+    await user.click(screen.getByRole("button", { name: "Submit price" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Production submission is unavailable")
   })
 
@@ -142,11 +144,11 @@ describe("price and image contribution workflow", () => {
     expect(await screen.findByText("Review queue is clear")).toBeInTheDocument()
   })
 
-  it("allows administrators to approve pending submissions", async () => {
+  it("allows administrators to accept flagged submissions", async () => {
     const user = userEvent.setup()
     const service = submissionService()
     renderContribution("admin", service)
-    await user.click(await screen.findByRole("button", { name: "Approve" }))
-    await waitFor(() => expect(service.moderateSubmission).toHaveBeenCalledWith("submission-1", "approved", undefined, { id: "admin-1", role: "admin" }, "test-token"))
+    await user.click(await screen.findByRole("button", { name: "Accept" }))
+    await waitFor(() => expect(service.moderateSubmission).toHaveBeenCalledWith("submission-1", "accepted", undefined, { id: "admin-1", role: "admin" }, "test-token"))
   })
 })

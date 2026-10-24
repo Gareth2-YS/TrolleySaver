@@ -16,11 +16,12 @@ export class CognitoAuthService implements AuthService {
   async getCurrentUser(): Promise<AuthUser | null> {
     try {
       const [user, session] = await Promise.all([getCurrentUser(), fetchAuthSession()])
-      const payload = session.tokens?.accessToken.payload
-      const groups = Array.isArray(payload?.["cognito:groups"]) ? payload["cognito:groups"] as string[] : []
+      const accessPayload = session.tokens?.accessToken.payload
+      const idPayload = session.tokens?.idToken?.payload
+      const groups = Array.isArray(accessPayload?.["cognito:groups"]) ? accessPayload["cognito:groups"] as string[] : []
       const role = groups.includes("admin") ? "admin" : "user"
-      return { id: user.userId, email: user.signInDetails?.loginId ?? user.username, name: typeof payload?.name === "string" ? payload.name : undefined, role, groups }
+      return { id: user.userId, email: user.signInDetails?.loginId ?? user.username, name: typeof idPayload?.name === "string" ? idPayload.name : undefined, role, groups }
     } catch { return null }
   }
-  async getAccessToken() { const session = await fetchAuthSession(); return session.tokens?.accessToken.toString() ?? null }
+  async getAccessToken(forceRefresh = false) { const session = await fetchAuthSession({ forceRefresh }); return session.tokens?.accessToken.toString() ?? null }
 }
