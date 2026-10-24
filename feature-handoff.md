@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Authentication and the shared application shell are ready. The three product routes intentionally render only the shared header so feature owners can take over without deleting placeholder implementation. This document explains where to resume.
+Authentication and the shared application shell are ready. Price & Image Upload now has a local frontend workflow; Smart Basket and Search & Filter still render only the shared header. This document explains where to resume.
 
 ## Routes and access
 
@@ -10,7 +10,7 @@ Authentication and the shared application shell are ready. The three product rou
 | --- | --- | --- | --- |
 | Smart Basket | `/basket` | Public | Header only |
 | Search & Filter | `/search` | Public | Header only |
-| Price & Image Upload | `/contribute` | Signed-in user or admin | Header only |
+| Price & Image Upload | `/contribute` | Signed-in user or admin | Local frontend workflow implemented |
 
 Smart Basket and Search must remain usable without an account. Price/Image Upload remains protected by `ProtectedRoute`; unauthenticated visitors are sent to login and returned to `/contribute` afterward.
 
@@ -54,11 +54,12 @@ Preserve the wireframe's typography, dark-green/off-white palette, fine borders,
 
 ### 3. Price & Image Upload
 
-- Require an authenticated session.
-- User view: select product/store/branch, enter price details, and optionally upload shelf-tag evidence.
-- Admin view: show the approval queue and moderation actions based on the authenticated `admin` group claim.
+- Requires an authenticated session.
+- User view now selects product and store, enters price and observed date, optionally previews/uploads shelf-tag evidence, and tracks local submissions.
+- Admin view now shows a role-focused local approval queue with approve and reasoned-reject actions based on the authenticated `admin` group claim.
 - Never infer admin rights from a UI control; use the role exposed by the auth context and rely on backend authorization.
 - Validate image type/size before upload and preserve accessible form labels and errors.
+- The current adapter is explicitly local/mock-only. See `handoff.md` for the production API, DynamoDB, private S3, authentication, and ownership contract.
 
 ## Backend/API coordination
 
