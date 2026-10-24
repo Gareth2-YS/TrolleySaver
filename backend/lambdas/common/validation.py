@@ -13,6 +13,8 @@ IMAGE_EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png"}
 MAX_PRICE_CENTS = 100_000
 MAX_OBSERVED_AGE_DAYS = 30
 CLOCK_SKEW = timedelta(minutes=5)
+MAX_BASKET_LINES = 50
+MAX_QUANTITY = 99
 
 
 def max_upload_bytes():
@@ -94,3 +96,45 @@ def validate_submission(body, now):
     if errors:
         _fail(errors)
     return product_id.strip(), retailer_id.strip(), price_cents, observed, photo_key
+
+
+def validate_basket(body, product_ids, retailer_ids):
+    """Return ([{productId, quantity}] with repeated products merged, [retailerId in catalog order])."""
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        _fail({"items": "Add at least one product"})
+    if len(items) > MAX_BASKET_LINES:
+        _fail({"items": f"A basket can hold at most {MAX_BASKET_LINES} products"})
+
+    errors = {}
+    merged = {}
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            errors[f"items[{i}]"] = "Must be an object with productId and quantity"
+            continue
+        product_id, quantity = item.get("productId"), item.get("quantity")
+        valid = True
+        if not isinstance(product_id, str) or product_id not in product_ids:
+            errors[f"items[{i}].productId"] = "Unknown product"
+            valid = False
+        if not _is_int(quantity) or not 1 <= quantity <= MAX_QUANTITY:
+            errors[f"items[{i}].quantity"] = f"Must be a whole number from 1 to {MAX_QUANTITY}"
+            valid = False
+        if valid:
+            merged[product_id] = merged.get(product_id, 0) + quantity
+            if merged[product_id] > MAX_QUANTITY:
+                errors[f"items[{i}].quantity"] = f"Total quantity of one product can be at most {MAX_QUANTITY}"
+
+    requested = body.get("retailerIds")
+    chosen = list(retailer_ids)
+    if requested is not None:
+        if not isinstance(requested, list) or not requested:
+            errors["retailerIds"] = "Choose at least one store, or leave this out to compare every store"
+        else:
+            unknown = [r for r in requested if r not in retailer_ids]
+            if unknown:
+                errors["retailerIds"] = "Unknown store: " + ", ".join(str(r) for r in unknown)
+            chosen = [r for r in retailer_ids if r in requested]
+    if errors:
+        _fail(errors)
+    return [{"productId": pid, "quantity": quantity} for pid, quantity in merged.items()], chosen

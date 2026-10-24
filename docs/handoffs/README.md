@@ -7,10 +7,11 @@ Notes passed between team members when one person's work becomes someone else's 
 | Date | Feature | From → to | Document | Status |
 |---|---|---|---|---|
 | 21 Oct 2026 | Auth (login, roles) | frontend → backend | [2026-10-21-auth-frontend-to-backend.md](2026-10-21-auth-frontend-to-backend.md) | Implemented |
-| 23 Oct 2026 | Feature pages (Smart Basket, Search, Price Upload) | frontend shell → feature developers | [2026-10-23-frontend-feature-pages.md](2026-10-23-frontend-feature-pages.md) | Price Upload integrated; Smart Basket and Search remain separate features |
+| 23 Oct 2026 | Feature pages (Smart Basket, Search, Price Upload) | frontend shell → feature developers | [2026-10-23-frontend-feature-pages.md](2026-10-23-frontend-feature-pages.md) | Price Upload integrated; Smart Basket backend done; Search remains separate |
 | 23 Oct 2026 | Price & image upload | frontend → backend | [2026-10-23-price-upload-frontend-to-backend.md](2026-10-23-price-upload-frontend-to-backend.md) | Implemented, with changes |
 | 24 Oct 2026 | Auth (login, roles) | backend → frontend | [2026-10-24-auth-backend-to-frontend.md](2026-10-24-auth-backend-to-frontend.md) | Integrated and verified on `dev` |
 | 24 Oct 2026 | Price & image upload | backend → frontend | [2026-10-24-price-upload-backend-to-frontend.md](2026-10-24-price-upload-backend-to-frontend.md) | Integrated and verified on `dev` |
-| 25 Oct 2026 | Auth, API and price upload integration | frontend → team | [2026-10-24-frontend-integration-findings.md](2026-10-25-frontend-integration-findings.md) | **Complete** |
+| 24 Oct 2026 | Smart Basket | backend → frontend | [2026-10-24-smart-basket-backend-to-frontend.md](2026-10-24-smart-basket-backend-to-frontend.md) | **Open**: frontend to build the page |
+| 25 Oct 2026 | Auth, API and price upload integration | frontend → team | [2026-10-25-frontend-integration-findings.md](2026-10-25-frontend-integration-findings.md) | **Complete** |
 
-The API contract that both backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).
+The API contract that the backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).
