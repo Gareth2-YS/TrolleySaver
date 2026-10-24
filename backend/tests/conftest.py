@@ -1,9 +1,6 @@
 import json
 import os
 import sys
-import uuid
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from pathlib import Path
 
 import boto3
@@ -114,49 +111,3 @@ def call(handler, event):
 
 def put_photo(key, content_type="image/png", size=1024):
     boto3.client("s3", region_name=REGION).put_object(Bucket=BUCKET, Key=key, Body=b"x" * size, ContentType=content_type)
-
-
-def iso(dt):
-    return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def put_price(product_id, retailer_id, cents, observed_at=None, status="accepted", submitted_at=None, user_id="seed-team"):
-    """Write a price row directly (create_submission refuses prices observed over 30 days ago)."""
-    observed = iso(observed_at or datetime.now(timezone.utc) - timedelta(days=1))
-    submission_id = str(uuid.uuid4())
-    boto3.resource("dynamodb", region_name=REGION).Table(ENV["SUBMISSION_TABLE"]).put_item(Item={
-        "productId": product_id,
-        "sk": f"{retailer_id}#{observed}#{submission_id}",
-        "submissionId": submission_id,
-        "retailerId": retailer_id,
-        "userId": user_id,
-        "priceCents": cents,
-        "observedAt": observed,
-        "submittedAt": iso(submitted_at) if submitted_at else observed,
-        "status": status,
-    })
-
-
-WHITE_ID = "b0000000-0000-4000-8000-000000000001"
-WHOLEMEAL_ID = "b0000000-0000-4000-8000-000000000002"
-DETERGENT_ID = "b0000000-0000-4000-8000-000000000003"
-
-
-@pytest.fixture
-def basket_catalog(aws):
-    """Bread with an HCS alternative and a detergent with none, priced at all three stores."""
-    table = aws.Table("unit-product")
-    for item in (
-        {"id": WHITE_ID, "name": "Sunshine White Bread", "brand": "Sunshine", "packQty": 400, "packUnit": "g", "category": "bread", "hcs": False},
-        {"id": WHOLEMEAL_ID, "name": "Sunshine Wholemeal Bread", "brand": "Sunshine", "packQty": 400, "packUnit": "g", "category": "bread", "hcs": True},
-        {"id": DETERGENT_ID, "name": "Top Detergent", "brand": "Top", "packQty": Decimal("2.6"), "packUnit": "kg", "category": "detergent", "hcs": False},
-    ):
-        table.put_item(Item=item)
-    for product_id, prices in (
-        (WHITE_ID, {"fairprice": 250, "shengsiong": 240, "coldstorage": 260}),
-        (WHOLEMEAL_ID, {"fairprice": 330, "shengsiong": 320, "coldstorage": 340}),
-        (DETERGENT_ID, {"fairprice": 848, "shengsiong": 847, "coldstorage": 860}),
-    ):
-        for retailer_id, cents in prices.items():
-            put_price(product_id, retailer_id, cents)
-    return aws

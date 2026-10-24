@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: TrolleySaver backend - Cognito auth, catalog, community price submissions and Smart Basket
+Description: TrolleySaver backend - Cognito auth, catalog and community price submissions
 
 Parameters:
   Env:
@@ -343,31 +343,6 @@ Resources:
             RestApiId: !Ref Api
             Path: /retailers
             Method: GET
-            Auth:
-              Authorizer: NONE
-
-  BasketFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub trolleysaver-${Env}-basket
-      Handler: handlers.basket.handler
-      Environment:
-        Variables:
-          PRICE_MAX_AGE_DAYS: "30"
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Sub trolleysaver-${Env}-product
-        - DynamoDBReadPolicy:
-            TableName: !Sub trolleysaver-${Env}-retailer
-        - DynamoDBReadPolicy:
-            TableName: !Sub trolleysaver-${Env}-price-submission
-      Events:
-        CompareBasket:
-          Type: Api
-          Properties:
-            RestApiId: !Ref Api
-            Path: /basket/compare
-            Method: POST
             Auth:
               Authorizer: NONE
 

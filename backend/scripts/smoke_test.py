@@ -4,8 +4,7 @@ Usage (from backend/):
     .venv/Scripts/python scripts/smoke_test.py --env dev
 
 Creates a throwaway contributor (through public sign-up) and a throwaway admin, exercises auth,
-photo upload, submissions, moderation and the Smart Basket over real HTTP, then deletes everything
-it created.
+photo upload, submissions and moderation over real HTTP, then deletes everything it created.
 """
 
 import argparse
@@ -101,27 +100,6 @@ def main():
         if not products or "fairprice" not in retailers:
             raise SystemExit("Catalog is empty; run scripts/seed_catalog.py first.")
         product = next(p for p in products if p.get("minCents") and p.get("maxCents"))
-
-        # --- Smart Basket (public) ---
-        hcs_categories = {p["category"] for p in products if p.get("hcs")}
-        swappable = next((p for p in products if not p.get("hcs") and p["category"] in hcs_categories), None)
-        basket_product = swappable or product
-        r = call("POST", "/basket/compare", json={"items": [{"productId": basket_product["id"], "quantity": 2}]})
-        result = r.json() if r.ok else {}
-        stores = result.get("basket", {}).get("stores", [])
-        t.check("POST /basket/compare is public and ranks every store",
-                r.status_code == 200 and sorted(s["retailerId"] for s in stores) == sorted(retailers), r.text[:300])
-        t.check("basket has a recommendation", bool(result.get("basket", {}).get("recommendation")), r.text[:300])
-        if swappable:
-            healthier = result.get("healthierBasket") or {}
-            t.check("healthier basket swaps to an HCS product",
-                    any(s["status"] == "swapped" for s in healthier.get("swaps", [])), r.text[:300])
-        r = call("POST", "/basket/compare", json={"items": [{"productId": basket_product["id"], "quantity": 0}]})
-        t.check("invalid basket -> 400 with fieldErrors",
-                r.status_code == 400 and "items[0].quantity" in r.json().get("fieldErrors", {}), r.text[:300])
-        r = requests.options(f"{api}/basket/compare", timeout=TIMEOUT,
-                             headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
-        t.check("basket CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173", r.headers)
 
         # --- Authorizer ---
         upload_body = {"fileName": "shelf.png", "contentType": "image/png", "sizeBytes": len(PNG)}
