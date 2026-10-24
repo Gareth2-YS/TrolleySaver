@@ -53,7 +53,7 @@ flowchart TB
 | Frontend hosting | S3 + CloudFront | Serves the built React app via CDN | Decided (the frontend runs locally for now) |
 | Auth | Cognito User Pool + 2 trigger Lambdas | Sign-up (confirmed automatically), sign-in, `user`/`admin` groups. The user id (`sub`) is attached to every submission. | Built |
 | API | API Gateway (REST) | Routing, CORS, and a Cognito authorizer that accepts access tokens only | Built |
-| Backend | Lambda | Catalog, photo upload URLs, price submissions, admin moderation | Built (search and basket not yet) |
+| Backend | Lambda | Catalog, photo upload URLs, price submissions, admin moderation, Smart Basket comparison | Built (search not yet) |
 | Backend language | Python 3.12 on arm64 | Lambda runtime. Uses only the standard library and boto3. | Built |
 | Database | DynamoDB, on-demand | 4 tables + 3 GSIs. See [database-design.md](database-design.md). | Built |
 | Photo storage | S3, private | Shelf-tag photos, uploaded and viewed only through 5-minute presigned URLs | Built |
@@ -68,6 +68,7 @@ Functions are named `trolleysaver-<env>-<name>`. All the code is in `backend/lam
 | Function | Triggered by | What it does |
 |---|---|---|
 | `catalog` | `GET /products`, `GET /retailers` (public) | Lists products and retailers |
+| `basket` | `POST /basket/compare` (public) | Prices a basket and its healthier version at every store, ranks the stores and works out savings |
 | `upload-url` | `POST /price-submissions/image-upload-url` | Issues a presigned POST for one photo under `price-evidence/<userId>/` |
 | `create-submission` | `POST /price-submissions` | Validates, rate-limits, rejects duplicates, checks the photo, and saves the price as `accepted` or `flagged` |
 | `my-submissions` | `GET /price-submissions/mine` | Lists the caller's own submissions |
@@ -151,22 +152,25 @@ sequenceDiagram
 
 Moderation is **reactive**: admins only see prices that fall outside the believable range. Users flagging other users' prices is a possible future feature.
 
-### 3.4 Shopper plans a basket (Proposed)
+### 3.4 Shopper plans a basket
 
-```
-  Browser --> API Gateway --> Basket Lambda
-                                  |
-                                  | getEligiblePrices(items, retailers, now)
-                                  |   = 1 DynamoDB Query per product (parallel)
-                                  v
-                         total per retailer, list unpriced items,
-                         rank retailers
-                                  |
-  Browser <-----------------------+  recommended retailer + per-item breakdown
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as API Gateway
+    participant L as basket Lambda
+    participant D as DynamoDB
+    B->>A: POST /basket/compare {items: [{productId, quantity}]} (no token)
+    A->>L: request
+    L->>D: scan product + retailer (small catalog)
+    L->>D: 1 Query per basket product and per Healthier Choice alternative
+    L-->>B: basket + healthierBasket: ranked stores, lines, unpriced items, savings, extra cost
 ```
 
-- Price selection (freshness and sibling fallback) is owned by the data layer (Yong Hsien). Totalling and ranking are owned by Backend Dev 2 (Gareth).
-- The two meet at `getEligiblePrices`. It returns one entry per product and retailer, with the latest **accepted regular** price and a source label (`exact`, `sibling` or `none`).
+- **Prices:** `latest_prices` (`common/pricing.py`) picks, for each product and retailer, the latest **accepted** price observed in the last 30 days (`PRICE_MAX_AGE_DAYS`). Flagged, rejected and older prices are ignored.
+- **Comparison:** `common/basket.py` totals the basket at every store and lists unpriced items. It ranks stores that price everything first, cheapest first, and compares the cheapest with each other store, over the full basket or only the items both price.
+- **Healthier basket:** `common/healthier.py` swaps each product for the cheapest Healthier Choice product in its category at each store, where one exists. The same comparison then runs on the swapped basket, and the extra cost against the original is reported.
+- The Lambda is stateless and public. The frontend keeps the basket.
 - Promotions, member prices and multi-buy deals are not tracked. Prices are per retailer, not per branch.
 
 ---
@@ -216,7 +220,7 @@ Moderation is **reactive**: admins only see prices that fall outside the believa
 | Price submission | 2 GetItem, 2 Query (rate limit, duplicate), 1 S3 HeadObject (with a photo), 1 PutItem, 1 UpdateItem |
 | "My submissions" page | 1 Query + 2 BatchGetItem |
 | Photo upload | 1 Lambda call to sign, then 1 direct S3 upload |
-| Basket (proposed) | At most 1 Query per product in the basket |
+| Basket comparison | 2 Scans (product and retailer tables, about 30 small items) + 1 Query per basket product and per Healthier Choice alternative |
 
 - **Lambda functions use 256 MB on arm64** (cheaper per millisecond than x86), and typical calls take well under a second.
 - **Before stress testing**, set an AWS Budgets alarm on the account.
