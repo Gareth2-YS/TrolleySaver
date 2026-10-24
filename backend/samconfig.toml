@@ -1,0 +1,23 @@
+version = 0.1
+
+[default.global.parameters]
+region = "ap-southeast-1"
+
+[default.validate.parameters]
+lint = true
+
+# dev uses the hand-made trolleysaver-dev-* tables, so the stack must not create them.
+# A new environment (e.g. staging) would copy this section with its own stack name and
+# CreateTables=true so the stack creates its tables.
+[dev.validate.parameters]
+lint = true
+
+[dev.deploy.parameters]
+stack_name = "trolleysaver-dev"
+region = "ap-southeast-1"
+resolve_s3 = true
+s3_prefix = "trolleysaver-dev"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = "Env=dev CreateTables=false AllowedOrigin=http://localhost:5173"

@@ -1,82 +1,10 @@
-# Authentication frontend → backend/Cognito handoff
+# Price & image upload: frontend → backend handoff
 
-## Scope and flow
+**Date:** 23 Oct 2026 · **From:** frontend · **To:** backend
 
-The React frontend implements a deliberately simple authentication flow: public user registration, direct user/admin sign-in, sign-out, session restoration, public Smart Basket/Search routes, and a protected contribution route. The feature routes intentionally contain only the shared header until their owners implement them. Password recovery, email verification, MFA/2FA, temporary-password changes, and other sign-in challenges are intentionally out of scope.
+> **Status (24 Oct 2026):** implemented, with some decisions changed (reactive moderation, status names, `priceCents`, presigned POST). The backend's reply is in [2026-10-24-price-upload-backend-to-frontend.md](2026-10-24-price-upload-backend-to-frontend.md).
 
-Public registration always sends only `fullName`, `email`, and `password`. It contains no role field and always represents a regular user. Choosing **Admin** on the login form only expresses the destination the user is trying to reach; authorization still comes from signed Cognito claims. If the session lacks the `admin` group, the frontend signs out that attempted admin session and denies access.
-
-## Cognito configuration expected
-
-Please provide a Cognito User Pool and a public app client suitable for a browser application:
-
-- Sign-in alias: email.
-- Required standard attribute: email. The frontend also sends the standard `name` attribute.
-- Self-service sign-up enabled for regular users, with accounts automatically confirmed by an approved Cognito trigger. The product flow must not ask users for an email verification code.
-- Password policy coordinated with the UI: at least 8 characters with uppercase, lowercase, number, and symbol.
-- App client with no client secret (a browser cannot protect one).
-- Authentication flows compatible with Amplify `signIn` (SRP/user password as agreed by the team) and able to complete without a follow-up challenge.
-- Token revocation enabled and access/ID token lifetimes agreed with the backend.
-- MFA/2FA disabled for this iteration. Do not require SMS, email, or TOTP sign-in challenges.
-- Self-service password recovery is not expected by the frontend for this iteration.
-- Two Cognito groups named exactly `admin` and `user`.
-
-After sign-up, an AWS-controlled workflow must auto-confirm the account and assign it to the `user` group if the group is needed as an explicit claim. This can be a secure pre-sign-up/post-confirmation Lambda or backend administrative workflow. Do not accept any client-supplied role/group value.
-
-## Initial administrators
-
-The backend/infrastructure owner must securely provision **2–3 initial administrator accounts** and assign them to the `admin` Cognito group. Use infrastructure automation or Cognito admin APIs. Set a permanent password before handoff so the frontend does not receive a forced-password-change challenge, and deliver credentials through an approved secure channel. MFA is omitted for this iteration.
-
-Administrator accounts must never be created or promoted through public registration. Client requests and UI controls are attacker-controlled; accepting a public role value would allow privilege escalation. The backend remains the authority even if the frontend hides admin-only controls.
-
-## Values the frontend needs
-
-Provide these non-secret build-time values:
-
-```env
-VITE_AUTH_MODE=cognito
-VITE_AWS_REGION=ap-southeast-1
-VITE_COGNITO_USER_POOL_ID=<user-pool-id>
-VITE_COGNITO_CLIENT_ID=<public-app-client-id>
-VITE_API_BASE_URL=<backend-base-url>
-```
-
-Do not provide a client secret or commit deployed environment values. The bundled dummy user and administrator exist only inside the development mock adapter and are never part of a Cognito build.
-
-## Tokens and backend authorization
-
-The frontend obtains the access token through Amplify `fetchAuthSession()` and exposes it via `authService.getAccessToken()`. API requests should send:
-
-```http
-Authorization: Bearer <Cognito access token>
-```
-
-The backend must independently validate the JWT signature against the User Pool JWKS, issuer, expiry, token use, and expected app-client/audience fields. It must enforce authorization on every protected endpoint, including checking the `cognito:groups` claim for `admin`. Never rely on the selected login tab, route, UI visibility, or unverified decoded claims.
-
-The frontend currently derives display/navigation role from the access token's `cognito:groups`: `admin` wins when present; otherwise it falls back to `user`. Confirm with the backend whether accounts should belong to exactly one group.
-
-## Integration test checklist
-
-1. Create a public user through `/register`; verify that the account is immediately usable and has no admin membership.
-2. Sign in through User mode and verify navigation to `/contribute`.
-3. Select Admin mode with the regular account; verify access is denied and the protected contribution workspace does not open.
-4. Sign in with each provisioned administrator; verify the access token contains `cognito:groups: ["admin"]` and the protected `/contribute` route opens.
-5. Exercise sign-out, browser refresh/session restoration, invalid credentials, duplicate registration, and rate-limit errors.
-6. Confirm registration and login complete without verification, MFA/2FA, password-reset, or new-password challenge screens.
-7. Call user and admin API endpoints with a valid user token, valid admin token, expired token, ID token in place of access token, malformed token, and no token. Confirm server-side enforcement in every case.
-8. Build with `VITE_AUTH_MODE=cognito`; a production app intentionally refuses to start when mock mode is selected.
-
-## Decisions to coordinate
-
-- Exact access/ID token lifetimes and refresh-session policy.
-- Whether the `user` group is explicitly attached or implied by absence of `admin`.
-- The Cognito trigger/workflow that auto-confirms ordinary users and assigns them to the `user` group.
-- API CORS origins and final `VITE_API_BASE_URL` values per environment.
-- Standard error contract for authenticated API requests and the desired UX for revoked/expired sessions.
-
-## Price and Image Upload Backend Handoff
-
-### Scope and current frontend behavior
+## Scope and current frontend behavior
 
 The protected `/contribute` route now has two role-specific experiences selected from the authenticated Cognito/mock role:
 
@@ -87,7 +15,7 @@ The protected `/contribute` route now has two role-specific experiences selected
 
 No AWS integration or production backend has been implemented. The frontend service contract is in `frontend/src/contributions/types.ts`; the replaceable adapter is selected in `frontend/src/contributions/service.ts`.
 
-### Local/mock-only behavior
+## Local/mock-only behavior
 
 When `VITE_PRICE_SUBMISSION_MODE=local`, the following development-only behavior applies. The mode is selected through local environment configuration and documented here; the contribution workspace does not display a persistent environment banner.
 
@@ -99,7 +27,7 @@ When `VITE_PRICE_SUBMISSION_MODE=local`, the following development-only behavior
 
 When `VITE_PRICE_SUBMISSION_MODE=api`, the current adapter deliberately returns an explicit “production API not connected” error. It never reports fake production success.
 
-### Expected production operations
+## Expected production operations
 
 The backend team can replace the adapter without changing the page components by implementing the existing `SubmissionService` operations:
 
@@ -165,7 +93,7 @@ The backend team can replace the adapter without changing the page components by
 
 For API errors, use a stable shape such as `{ "code": "IMAGE_TOO_LARGE", "message": "...", "fieldErrors": { "photo": "..." }, "requestId": "..." }` with appropriate HTTP status codes. The frontend needs distinguishable authentication/authorization, validation, conflict, upload, and transient server errors.
 
-### DynamoDB ownership and suggested record
+## DynamoDB ownership and suggested record
 
 Price submission metadata belongs in DynamoDB. A suggested record is:
 
@@ -197,7 +125,7 @@ Expected statuses are exactly `pending`, `approved`, and `rejected` for this ite
 
 The DynamoDB record references evidence only by the stable S3 `photoKey` plus safe metadata. Do not store image bytes, a presigned URL, a browser object URL, or a public URL in DynamoDB.
 
-### Private S3 ownership and image constraints
+## Private S3 ownership and image constraints
 
 Shelf-tag image bytes belong in a private S3 bucket. They must not be publicly readable. The backend should generate short-lived, user-scoped presigned PUT URLs after validating the requested content type and size, and short-lived read URLs (or an authenticated image proxy) for authorized contributor/admin display.
 
@@ -210,9 +138,9 @@ The current frontend accepts:
 
 The backend must repeat these checks; client validation can be bypassed. Also verify the actual uploaded object/content, restrict object keys to a server-generated prefix, reject unexpected metadata, consider malware/content scanning, configure lifecycle cleanup for abandoned presigned uploads, and decide evidence retention after moderation. CORS should permit only required upload/read methods and deployed frontend origins.
 
-### Authentication and authorization
+## Authentication and authorization
 
-Every API request above should receive `Authorization: Bearer <Cognito access token>` using the existing frontend token accessor. Apply the JWT validation requirements in the earlier Cognito section.
+Every API request above should receive `Authorization: Bearer <Cognito access token>` using the existing frontend token accessor. Apply the JWT validation requirements in [2026-10-21-auth-frontend-to-backend.md](2026-10-21-auth-frontend-to-backend.md#tokens-and-backend-authorization).
 
 - Contributors: request an upload target, create submissions, and list only their own submissions.
 - Administrators (`cognito:groups` contains `admin`): list the review queue and approve/reject submissions.
@@ -220,13 +148,13 @@ Every API request above should receive `Authorization: Bearer <Cognito access to
 - An administrator UI role is not authorization. Enforce all object-level access and status transitions in the API/Lambda layer.
 - Presigned S3 access should be narrowly scoped to one generated object key, expected content type/size policy, and a short expiry.
 
-### Ownership split
+## Ownership split
 
 Frontend owns forms, client-side validation, image preview, local adapter and mock progress, loading/error/empty/success states, authenticated token retrieval, and role-specific presentation.
 
 The backend/AWS team owns API Gateway/routes, Lambda/business logic, DynamoDB tables/indexes and persistence, the private S3 bucket, presigned upload/read URLs, JWT and role authorization enforcement, moderation concurrency/persistence, image validation/scanning/retention, CORS, monitoring, and deployment configuration.
 
-### Future configuration
+## Future configuration
 
 The frontend currently recognizes:
 
@@ -237,7 +165,7 @@ VITE_API_BASE_URL=<backend-base-url>
 
 Use `local` only for browser-local development/testing. The production adapter still needs to be implemented and should use `VITE_API_BASE_URL` plus `getAccessToken()`. If the backend chooses non-default endpoint paths, upload methods, or required S3 headers, either add explicit non-secret configuration or normalize them behind the service adapter—do not leak infrastructure details through presentational components.
 
-### Assumptions and unresolved decisions
+## Assumptions and unresolved decisions
 
 - The current frontend supports store-level pricing only and sends `storeId`; there is no branch selector or `branchId`. If branch-level pricing is added later, define the scope and branch contract explicitly instead of inferring it from store data.
 - Product and store options are temporary frontend catalogue constants. Confirm the source and API for canonical IDs/names before production integration.

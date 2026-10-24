@@ -38,4 +38,4 @@ npm run lint
 npm run build
 ```
 
-For real Cognito, change `VITE_AUTH_MODE` to `cognito` and fill in the non-secret AWS values. See the repository root `handoff.md` for the integration contract.
+For real Cognito, change `VITE_AUTH_MODE` to `cognito` and fill in the non-secret AWS values. See [docs/handoffs/2026-10-24-auth-backend-to-frontend.md](../docs/handoffs/2026-10-24-auth-backend-to-frontend.md) for setup and [docs/api/README.md](../docs/api/README.md) for the API contract.
