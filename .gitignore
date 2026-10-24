@@ -1,3 +1,7 @@
+.claude
+.impeccable
+openspec
+.venv
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
