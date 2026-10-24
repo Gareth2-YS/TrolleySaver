@@ -1,10 +1,10 @@
 # TrolleySaver API reference
 
-**Owner:** Gareth (backend) · **Last updated:** 24 Oct 2026 · **Covers:** login, catalog, price & photo submissions, admin moderation
+**Owner:** Gareth (backend) · **Last updated:** 24 Oct 2026 · **Covers:** login, catalog, price & photo submissions, admin moderation, Smart Basket
 
-This is the contract between the frontend and the backend. It covers login, the product catalog, price and photo submissions, and admin moderation. Smart Basket and Search endpoints don't exist yet.
+This is the contract between the frontend and the backend. It covers login, the product catalog, price and photo submissions, admin moderation and the Smart Basket comparison. Search endpoints don't exist yet: filter `GET /products` in the browser.
 
-How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md) and [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md).
+How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md), [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md) and [Smart Basket](../handoffs/2026-10-24-smart-basket-backend-to-frontend.md).
 
 - [1. Basics](#1-basics)
 - [2. Authentication](#2-authentication)
@@ -24,7 +24,7 @@ How the frontend should adopt it is described in the feature handoffs: [auth](..
 | **Base URL** | The stack output `ApiUrl`, e.g. `https://<api-id>.execute-api.ap-southeast-1.amazonaws.com/dev`. Use it as `VITE_API_BASE_URL`. |
 | **Environment** | `dev` is the only deployed environment. Build the frontend against it. |
 | **Format** | JSON request and response bodies (`Content-Type: application/json`) |
-| **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog |
+| **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog and the basket comparison |
 | **CORS** | Allowed origin is `http://localhost:5173` (the Vite dev server). Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH`. Other origins can be added on request. |
 | **Money** | Integer cents: `363` means $3.63 |
 | **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
@@ -68,6 +68,7 @@ The server always takes the caller's identity from the verified token. Fields li
 | [`GET /price-submissions/mine`](#get-price-submissionsmine) | user | The caller's own submissions |
 | [`GET /admin/price-submissions`](#get-adminprice-submissions) | admin | Review queue (flagged prices) |
 | [`PATCH /admin/price-submissions/{id}`](#patch-adminprice-submissionsid) | admin | Accept or reject a flagged price |
+| [`POST /basket/compare`](#post-basketcompare) | public | Price a basket at every store, plus a healthier version of it |
 
 "user" means any signed-in account, including admins.
 
@@ -271,6 +272,86 @@ PATCH /admin/price-submissions/ZTBiYmIyNTEtODZm…
 
 Errors: `400 VALIDATION_ERROR` (`decision`, `reason`), `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 ALREADY_MODERATED`. A 409 means the submission isn't flagged: either another admin got there first, or it was accepted automatically.
 
+### `POST /basket/compare`
+
+Public, no token needed. Prices the shopper's basket at every store and returns two comparisons side by side:
+- `basket`: exactly the products the shopper picked.
+- `healthierBasket`: the same basket with each product swapped for a Healthier Choice product in its category, where one exists.
+
+Nothing is stored. The frontend keeps the basket (e.g. in `localStorage`) and sends all of it each time.
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `items` | array | yes | 1–50 lines of `{ productId, quantity }` |
+| `items[].productId` | string | yes | An `id` from `GET /products` |
+| `items[].quantity` | integer | yes | Number of packs, 1–99. Repeated products are merged by adding their quantities, up to 99 in total. |
+| `retailerIds` | string[] | no | Only compare these stores. Leave it out to compare every store. |
+
+```json
+POST /basket/compare
+{ "items": [ { "productId": "<white bread id>", "quantity": 2 }, { "productId": "<Dynamo id>", "quantity": 1 },
+             { "productId": "<Thai rice id>", "quantity": 1 } ] }
+```
+
+```jsonc
+200 OK
+{
+  "priceMaxAgeDays": 30,
+  "basket": {
+    "stores": [
+      { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "rank": 1, "complete": true,
+        "pricedCount": 3, "missingCount": 0, "coveragePercent": 100.0, "totalCents": 3750,
+        "lines": [ { "productId": "…", "productName": "Gardenia Enriched White Bread", "brand": "Gardenia",
+                     "packQty": 400, "packUnit": "g", "packCount": 1, "hcs": false, "category": "bread",
+                     "quantity": 2, "unitPriceCents": 250, "subtotalCents": 500, "observedAt": "2026-10-23T16:00:00.000Z" },
+                   … ],
+        "unpriced": [] },
+      { "retailerId": "fairprice", "rank": 2, "totalCents": 3970, … },
+      { "retailerId": "coldstorage", "rank": 3, "totalCents": 4370, … }
+    ],
+    "recommendation": { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "totalCents": 3750, "complete": true },
+    "savings": [
+      { "retailerId": "fairprice", "retailerName": "FairPrice", "basis": "full-basket", "comparedLines": 3,
+        "otherTotalCents": 3970, "recommendedTotalCents": 3750, "savingsCents": 220, "savingsPercent": 5.5 },
+      { "retailerId": "coldstorage", …, "savingsCents": 620, "savingsPercent": 14.2 }
+    ],
+    "maxSavingsCents": 620
+  },
+  "healthierBasket": {
+    "stores": [ { "retailerId": "shengsiong", "totalCents": 3934,
+                  "lines": [ { "productName": "Gardenia 100% Wholemeal Extra Soft & Fine Bread", "hcs": true,
+                               "replacesProductId": "<white bread id>", "quantity": 2, "subtotalCents": 660, … }, … ], … }, … ],
+    "recommendation": { "retailerId": "shengsiong", "totalCents": 3934, "complete": true, … },
+    "savings": [ … ], "maxSavingsCents": 696,
+    "swaps": [
+      { "originalProductId": "<white bread id>", "originalName": "Gardenia Enriched White Bread", "category": "bread", "status": "swapped" },
+      { "originalProductId": "<Dynamo id>", "originalName": "Dynamo Laundry Detergent - Anti-Bacterial", "category": "detergent", "status": "no-hcs-option" },
+      { "originalProductId": "<Thai rice id>", "originalName": "SongHe AAA Thai Hom Mali Rice", "category": "rice", "status": "swapped" }
+    ]
+  },
+  "healthierExtra": { "basketTotalCents": 3750, "healthierTotalCents": 3934, "extraCents": 184, "extraPercent": 4.9 }
+}
+```
+
+How it decides:
+- **Which price a store uses:** the latest **accepted** price observed in the last `priceMaxAgeDays` (30) days. Flagged and rejected prices are never used. A product with no such price at a store is listed in that store's `unpriced`, not left out.
+- **Ranking:** stores that price every line (`complete`) come first, cheapest first. Incomplete stores follow, by how many lines they price and then by total. Equal totals are ordered by store name. `totalCents` only adds up the priced lines.
+- **Recommendation:** the top-ranked store, or `null` if no store has a price for anything. When `complete` is `false`, no store sells the whole basket. Say so in the UI.
+- **Savings:** the recommended store compared with each other store.
+  - `basis: "full-basket"`: both stores price everything, so this is the true saving on the whole basket.
+  - `basis: "common-items"`: one of them is missing something, so only the `comparedLines` lines both stores price are compared. The saving can be negative.
+  - `savingsCents` is `null` when the two stores share no priced lines.
+  - `maxSavingsCents` is the largest full-basket saving: the "you save up to …" figure.
+- **Healthier basket:** each line's `swaps[].status` says what happened to it.
+  - `swapped`: replaced with a Healthier Choice product from the same category. Each store uses its cheapest one, and the line carries `replacesProductId`.
+  - `already-hcs`: kept, because it is already a Healthier Choice product.
+  - `no-hcs-option`: kept, because the category has no Healthier Choice product.
+
+  If a swapped line has no Healthier Choice price at some store, it is unpriced there rather than falling back to the original. `healthierBasket` is `null` when nothing can be swapped.
+- **`healthierExtra`:** how much more the healthier basket's best store costs than the basket's best store. It can be negative when the healthier basket is cheaper. It is `null` unless both recommendations are complete.
+
+Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[i].productId`, `items[i].quantity`, `retailerIds`).
+
 ## 4. Data types
 
 ### Product
@@ -339,6 +420,69 @@ export interface ApiSubmission {
 }
 ```
 
+### Basket comparison
+
+The response of [`POST /basket/compare`](#post-basketcompare):
+
+```ts
+export interface ApiBasketLine {
+  productId: string
+  productName: string | null
+  brand: string | null
+  packQty: number | null
+  packUnit: string | null
+  packCount: number
+  hcs: boolean
+  category: string | null
+  quantity: number
+  unitPriceCents: number
+  subtotalCents: number
+  observedAt: string
+  replacesProductId?: string          // healthier basket only, on swapped lines
+}
+
+export interface ApiBasketStore {
+  retailerId: string
+  retailerName: string | null
+  rank: number                        // 1 = best
+  complete: boolean                   // prices every line
+  pricedCount: number
+  missingCount: number
+  coveragePercent: number
+  totalCents: number                  // priced lines only
+  lines: ApiBasketLine[]
+  unpriced: { productId: string; productName: string | null; category: string | null }[]
+}
+
+export interface ApiBasketSaving {
+  retailerId: string
+  retailerName: string | null
+  basis: "full-basket" | "common-items"
+  comparedLines: number
+  otherTotalCents: number | null
+  recommendedTotalCents: number | null
+  savingsCents: number | null         // other store minus recommended store
+  savingsPercent: number | null       // of otherTotalCents
+}
+
+export interface ApiBasketComparison {
+  stores: ApiBasketStore[]
+  recommendation: { retailerId: string; retailerName: string | null; totalCents: number; complete: boolean } | null
+  savings: ApiBasketSaving[]
+  maxSavingsCents: number | null
+}
+
+export interface ApiBasketResult {
+  priceMaxAgeDays: number
+  basket: ApiBasketComparison
+  healthierBasket: (ApiBasketComparison & {
+    swaps: { originalProductId: string; originalName: string | null; category: string | null
+             status: "swapped" | "already-hcs" | "no-hcs-option" }[]
+  }) | null
+  healthierExtra: { basketTotalCents: number; healthierTotalCents: number; extraCents: number; extraPercent: number } | null
+}
+```
+
 ## 5. Errors
 
 Errors from the backend always have this shape:
@@ -388,6 +532,8 @@ Errors from the backend always have this shape:
 | Duplicate rule | One submission per user, product, store, price and Singapore day |
 | Rejection reason | 500 characters |
 | Page size | Default 50, max 100 |
+| Basket | 1–50 products, 1–99 of each |
+| Price age used by the basket | 30 days |
 
 Not supported yet: promotions and member prices, branch-level prices, editing or withdrawing a submission, and users flagging other users' prices.
 
