@@ -12,5 +12,3 @@ frontend/.env.*.local
 __pycache__/
 .pytest_cache/
 backend/.aws-sam/
-backend/baskets/
-backend/basket_eval_report.md

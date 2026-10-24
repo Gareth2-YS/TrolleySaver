@@ -13,12 +13,10 @@ Usage (from backend/; see TESTING.md for a full walkthrough):
     .venv/Scripts/python scripts/invoke.py mine
     .venv/Scripts/python scripts/invoke.py review-queue --as admin
     .venv/Scripts/python scripts/invoke.py moderate --as admin --id <id> --set decision=rejected --set reason="Unreadable label"
-    .venv/Scripts/python scripts/invoke.py basket --body-file baskets/weekly-staples.json
     .venv/Scripts/python scripts/invoke.py cleanup        # delete everything the fake users created
 
 --set KEY=VALUE builds the JSON body for you (whole numbers become numbers, true/false booleans,
-everything else text), which avoids shell quoting problems. --body '<json>' sends raw JSON instead,
-and --body-file reads it from a file (easiest for nested bodies such as a basket).
+everything else text), which avoids shell quoting problems. --body '<json>' sends raw JSON instead.
 Add --local to run the handler in-process (set breakpoints, add prints, no deploy needed).
 """
 
@@ -50,7 +48,6 @@ ROUTES = {
     "mine": ("my-submissions", "my_submissions", "GET", "/price-submissions/mine", True),
     "review-queue": ("admin-submissions", "admin_submissions", "GET", "/admin/price-submissions", True),
     "moderate": ("admin-submissions", "admin_submissions", "PATCH", "/admin/price-submissions/{id}", True),
-    "basket": ("basket", "basket", "POST", "/basket/compare", False),
 }
 
 
@@ -178,7 +175,6 @@ def main():
     parser.add_argument("--user-id", help=f"Fake Cognito sub (default {DEFAULT_USER_ID} / {DEFAULT_ADMIN_ID})")
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="Body field (repeatable); builds the JSON for you")
     parser.add_argument("--body", help="Raw JSON request body (fields from --set are added on top)")
-    parser.add_argument("--body-file", help="Read the raw JSON request body from this file instead of --body")
     parser.add_argument("--query", action="append", default=[], metavar="KEY=VALUE", help="Query string parameter (repeatable)")
     parser.add_argument("--id", help="Submission id for the moderate route")
     parser.add_argument("--file", help="Image to upload (upload-photo route)")
@@ -193,17 +189,10 @@ def main():
         parser.error("moderate needs --id")
     if args.route == "upload-photo" and not args.file:
         parser.error("upload-photo needs --file")
-    if args.body_file:
-        if args.body:
-            parser.error("use --body or --body-file, not both")
-        try:
-            args.body = Path(args.body_file).read_text(encoding="utf-8-sig")
-        except OSError as error:
-            raise SystemExit(f"Can't read --body-file: {error}")
     try:
         body = request_body(args.body, args.set)
     except json.JSONDecodeError as error:
-        raise SystemExit(f"The request body is not valid JSON ({error}). Tip: use --set KEY=VALUE or --body-file instead.")
+        raise SystemExit(f"--body is not valid JSON ({error}). Tip: use --set KEY=VALUE instead.")
 
     user_id = None if args.role == "anonymous" else args.user_id or (DEFAULT_ADMIN_ID if args.role == "admin" else DEFAULT_USER_ID)
     groups = "admin" if args.role == "admin" else ("user" if user_id else None)

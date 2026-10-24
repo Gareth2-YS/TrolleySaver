@@ -21,7 +21,6 @@ A step-by-step guide to checking that the backend works: before a handoff, after
 | [5. Create an admin account](#5-create-an-admin-account) | Only when someone needs one |
 | [6. When something fails](#6-when-something-fails) | Logs, data, local debugging |
 | [7. Pre-handoff checklist](#7-pre-handoff-checklist) | Everything above in one list |
-| [8. Smart Basket](#8-smart-basket) | What the basket comparison covers and which test checks each part, then unit tests, direct calls, a hand-worked example, the spreadsheet evaluation and real HTTP |
 
 ---
 
@@ -133,8 +132,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 89 tests of the Lambda code (including the Smart Basket) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `89 passed in …s`.
+**What it checks:** 48 tests of the Lambda code and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `48 passed in …s`.
 
 ### 1.2 Template check
 
@@ -150,8 +149,8 @@ sam validate --lint
 .venv\Scripts\python scripts\smoke_test.py
 ```
 
-**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in, compares a basket, uploads a photo, submits prices and moderates as a throwaway admin, then deletes everything it created. Takes about a minute.
-**You should see:** 32 lines starting with `PASS`, then:
+**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in, uploads a photo, submits prices and moderates as a throwaway admin, then deletes everything it created. Takes about a minute.
+**You should see:** 27 lines starting with `PASS`, then:
 
 ```
 PASS  CORS preflight allowed
@@ -626,7 +625,7 @@ Check [Common problems](#common-problems) first. Then:
    aws logs tail /aws/lambda/trolleysaver-dev-create-submission --follow
    ```
 
-   - **Other functions:** `-catalog`, `-basket`, `-upload-url`, `-my-submissions`, `-admin-submissions`, `-cognito-pre-signup`, `-cognito-post-confirmation`.
+   - **Other functions:** `-catalog`, `-upload-url`, `-my-submissions`, `-admin-submissions`, `-cognito-pre-signup`, `-cognito-post-confirmation`.
    - **What appears:** refused requests are logged as `Client error <CODE>: …`, and crashes (`HTTP 500`) with a full Python traceback.
 3. **Reproduce it locally.** Add `--local` to the same `invoke.py` command. It then runs the code in your `lambdas/` folder against the real dev tables, so you can add `print()` calls or breakpoints without deploying.
 4. **Look at the data.** AWS console → DynamoDB → Tables → `trolleysaver-dev-price-submission` → *Explore table items*. Photos are in S3 → `trolleysaver-dev-photos-…` → `price-evidence/`.
@@ -637,13 +636,12 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `89 passed`
+- [ ] 1.1: `pytest` shows `48 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products
 - [ ] 3: Lambda walkthrough done, with results matching the expectations
 - [ ] 4: real-login walkthrough done (4.3 is optional)
-- [ ] 8.4: `basket_eval.py` says `0 failed`
 - [ ] Cleanup done:
   - `invoke.py mine` shows `"items": []`
   - no `tester-…@example.com` accounts remain: `aws cognito-idp list-users --user-pool-id $poolId --query "Users[].Username"`
@@ -651,267 +649,3 @@ Check [Common problems](#common-problems) first. Then:
   - has the dev values (`ApiUrl`, `UserPoolId`, `UserPoolClientId`)
   - has the links to [docs/handoffs](../docs/handoffs/README.md) and [docs/api](../docs/api/README.md)
   - knows **no admin accounts exist yet** and how to create one ([auth handoff §5](../docs/handoffs/2026-10-24-auth-backend-to-frontend.md#5-admin-accounts-none-exist-yet))
-
-## 8. Smart Basket
-
-**Before you start:** part 0 done in this terminal, and the catalog loaded (part 2). The evaluation compares the backend with the spreadsheet, so dev needs the spreadsheet's products and prices.
-
-`POST /basket/compare` is public and only reads data, so 8.1–8.6 create nothing and need no cleanup. What it returns, and the rules it follows, are in [docs/api → `POST /basket/compare`](../docs/api/README.md#post-basketcompare).
-
-### What Smart Basket covers
-
-The shopper picks products and quantities. The backend answers with two baskets side by side:
-- **Basket:** exactly what the shopper picked, priced at every store.
-- **Healthier basket:** the same list with each product swapped for a Healthier Choice (HCS) product in the same category, where one exists.
-
-For each basket it returns:
-- the cheapest store,
-- every store's total and per-item shopping list,
-- the items a store has no price for,
-- how much the cheapest store saves compared with each other store.
-
-Finally, it says how much more (or less) the healthier basket costs.
-
-This is the Preliminary Report's "Plan the basket" feature, its Basket Optimisation rules, and the Smart Basket part of its system evaluation. The table shows each behaviour and the test that checks it. Test names are in `tests/test_basket_compare.py` (pure calculation) and `tests/test_basket_handler.py` (the whole Lambda against fake DynamoDB).
-
-**Prices it uses**
-
-| Behaviour | Checked by |
-|---|---|
-| Each store uses its **latest accepted** price for a product | `test_latest_accepted_price_wins` (8.1), 8.7 |
-| Two prices observed at the same time: the later submission wins | `test_latest_accepted_price_wins` |
-| **Flagged and rejected** prices are never used | `test_flagged_and_rejected_prices_are_ignored`, 8.7 |
-| Prices older than **30 days** are stale and ignored; the limit is configurable (`PRICE_MAX_AGE_DAYS`) | `test_stale_price_is_ignored`, `test_price_max_age_is_configurable` |
-| A newer community price replaces the spreadsheet price | 8.4 (`OVERRIDDEN`), 8.7 |
-
-**The basket comparison**
-
-| Behaviour | Checked by |
-|---|---|
-| Totals each store: quantity × price per line, added up | `test_hand_worked_basket`, `test_lines_carry_quantity_unit_price_and_subtotal`, 8.4, 8.5 |
-| Recommends the **cheapest single store** | `test_hand_worked_basket`, 8.4, 8.5, 8.6 |
-| Ranks every store; equal totals are ordered by store name | `test_equal_totals_break_ties_by_store_name`, 8.4 ("breakfast" tie) |
-| A product with no price at a store is listed as **unpriced**, not dropped; the store is marked incomplete and its coverage shown | `test_missing_price_is_unpriced_and_ranks_store_below_complete_ones`, `test_unpriced_product_is_listed_not_dropped` |
-| Stores that price everything rank above stores that don't; incomplete stores rank by coverage, then total | `test_missing_price_is_unpriced_and_ranks_store_below_complete_ones`, `test_incomplete_stores_rank_by_coverage_then_total` |
-| No prices anywhere → no recommendation | `test_no_prices_anywhere` |
-| Only compares the stores the shopper chose (`retailerIds`) | `test_retailer_subset`, `test_retailer_filter`, 8.4 ("two-stores") |
-
-**Savings (the report's evaluation metric)**
-
-| Behaviour | Checked by |
-|---|---|
-| Saving of the cheapest store against **each other store**, in cents and percent | `test_hand_worked_basket`, 8.4, 8.5, 8.6 |
-| Both stores price everything → compared over the **full basket** | `test_hand_worked_basket`, 8.4 |
-| One store is missing items → compared over **only the items both price**, labelled as such; can be negative | `test_missing_price_is_unpriced_and_ranks_store_below_complete_ones` |
-| No items in common → no saving given | `test_no_common_items_gives_null_saving` |
-| "You save up to …": the biggest full-basket saving | `test_hand_worked_basket`, 8.4 |
-
-**The healthier basket**
-
-| Behaviour | Checked by |
-|---|---|
-| A non-HCS product is **swapped** for an HCS product in the same category | `test_hand_worked_healthier_basket`, 8.4, 8.5 |
-| An HCS product is **kept** as it is | `test_already_hcs_product_is_kept` |
-| No HCS product in the category (e.g. detergent, eggs, toilet rolls) → the original is **kept** | `test_hand_worked_healthier_basket`, 8.4 ("household") |
-| Several HCS options → each store uses its **cheapest** one | `test_each_store_uses_its_cheapest_hcs_option` |
-| A store without the HCS product shows the line as unpriced, rather than falling back to the original | `test_hcs_priced_at_one_store_leaves_others_unpriced` |
-| HCS product has no price anywhere → treated as no option | `test_unpriced_hcs_everywhere_counts_as_no_option` |
-| Nothing to swap → no healthier basket | `test_nothing_to_swap_gives_no_healthier_basket`, `test_no_healthier_basket_when_nothing_can_be_swapped`, 8.4 ("already-healthy") |
-| Extra cost of the healthier basket, which can be negative | `test_hand_worked_healthier_basket`, `test_healthier_basket_can_be_cheaper`, 8.4, 8.5 |
-| Extra cost only given when both best stores price everything | `test_extra_cost_needs_complete_recommendations` |
-
-**The request**
-
-| Behaviour | Checked by |
-|---|---|
-| Public: works with no login, and gives the same answer when signed in | `test_signed_in_callers_get_the_same_answer`, 1.3 (smoke test) |
-| 1–50 products, 1–99 of each; the same product twice is merged | `test_validation_errors`, `test_too_many_lines`, `test_repeated_products_are_merged` |
-| Unknown product or store, bad quantity, bad JSON → `400` with the field named | `test_validation_errors`, `test_invalid_json`, 8.3 |
-| Deployed Lambda, API route, permissions and CORS work | 1.3 (smoke test), 8.4 with `--http`, 8.6 |
-
-**Not covered, by design**
-
-These are outside the current Smart Basket, so nothing tests them:
-- **Store pairs** (splitting the basket between two stores). The requirements ask for the cheapest single store.
-- **Promotions, member prices and multi-buy deals.** Only regular prices are stored.
-- **Branch-level prices.** Prices are per retailer.
-- **Stock availability.** The spreadsheet's `sold_out` column isn't loaded.
-- **Comparing by unit price.** Swaps and totals use the price per pack, so a swap may change the pack size (shown in the response).
-- **Saving baskets on the server.** The frontend keeps the basket.
-- **Load and response-time testing.** That's part of the QA stress testing.
-
-### 8.1 Unit tests
-
-```powershell
-.venv\Scripts\python -m pytest tests\test_basket_compare.py tests\test_basket_handler.py -v
-```
-
-**What it checks:** 41 tests, using an in-memory fake of AWS.
-- **Calculation:** totals, ranking, unpriced items, savings over the full basket and over common items only, tie-breaks.
-- **Healthier basket:** swaps, "already Healthier Choice", "no Healthier Choice option", the cheapest option per store, and no fallback to the original when a store lacks the healthier product.
-- **Prices:** the latest accepted price wins, and flagged, rejected and over-30-day-old prices are ignored.
-- **Requests:** every validation error.
-
-**You should see:** `41 passed`.
-
-### 8.2 Write the test baskets
-
-The test baskets are in `scripts/basket_cases.json`, written with product names. This turns them into request bodies with dev's real product ids:
-
-```powershell
-.venv\Scripts\python scripts\basket_eval.py --env dev --dump-requests baskets
-```
-
-**You should see:** `wrote baskets\weekly-staples.json` and five more files. The `baskets` folder is git-ignored.
-
-### 8.3 Call the basket Lambda
-
-```powershell
-.venv\Scripts\python scripts\invoke.py basket --body-file baskets\weekly-staples.json
-```
-
-Add `--local` to run the code in your `lambdas/` folder instead of the deployed function (no deploy needed).
-
-**You should see:** `HTTP 200`, then the comparison, starting:
-
-```
-HTTP 200
-{
-  "priceMaxAgeDays": 30,
-  "basket": {
-    "stores": [
-      {
-        "rank": 1,
-        "retailerId": "shengsiong",
-        "retailerName": "Sheng Siong",
-        "complete": true,
-        "pricedCount": 3,
-        "missingCount": 0,
-        "coveragePercent": 100.0,
-        "totalCents": 3750,
-        "lines": [
-          {
-            "productId": "0385e1d8-86d6-5524-ad5f-7eab57702767",
-            "productName": "Gardenia Enriched White Bread",
-            …
-            "quantity": 2,
-            "unitPriceCents": 250,
-            "subtotalCents": 500,
-```
-
-Scroll down for `recommendation`, `savings`, `healthierBasket` (with `swaps`) and `healthierExtra`. Check them against 8.5.
-
-An invalid basket shows the error shape:
-
-```powershell
-.venv\Scripts\python scripts\invoke.py basket --body '{\"items\": [{\"productId\": \"nope\", \"quantity\": 0}]}'
-```
-
-**You should see:** `HTTP 400`, `"code": "VALIDATION_ERROR"`, with `items[0].productId` and `items[0].quantity` in `fieldErrors`.
-
-### 8.4 Evaluation against the spreadsheet
-
-This is the system evaluation from the Preliminary Report: it checks the recommended store and every store's total against figures calculated by hand, and measures the savings against buying the whole basket at each supermarket. The script does the hand calculation itself, from the regular prices in `data/products 241026.xlsx`, not from DynamoDB and not with the backend's code. It then sends each test basket to the backend.
-
-```powershell
-.venv\Scripts\python scripts\basket_eval.py --env dev
-```
-
-By default it calls the deployed Lambda. Use `--local` for your local code, `--http` for the real API (exactly as the frontend calls it), `--case weekly-staples` for one basket, and `--verbose` to list every check.
-
-**You should see:**
-
-```
-Smart Basket evaluation against dev (deployed Lambda)
-
-PASS       weekly-staples     20 checks  cheapest: Sheng Siong $37.50  max saving: $6.20
-PASS       breakfast          20 checks  cheapest: FairPrice $30.41  max saving: $0.44
-PASS       drinks-and-snacks  20 checks  cheapest: FairPrice $28.40  max saving: $1.05
-PASS       already-healthy    10 checks  cheapest: Sheng Siong $30.49  max saving: $1.06
-PASS       household          10 checks  cheapest: Sheng Siong $29.56  max saving: $0.49
-PASS       two-stores         16 checks  cheapest: FairPrice $39.70  max saving: $4.00
-
-96 of 96 checks passed or explained by newer prices; 0 failed. Report: basket_eval_report.md
-```
-
-- **The report.** `basket_eval_report.md` has a table per basket (expected and backend totals, savings in dollars and percent, the healthier basket's extra cost) for the final report.
-- **OVERRIDDEN.** If someone has submitted a newer accepted price for a product since the seed, the backend rightly uses it and the spreadsheet is out of date for that line. The script then says `OVERRIDDEN` and names the submission, for example `note: Chew's Fresh Eggs with Vitamin E at Cold Storage: $5.00 from a submission observed 24 Oct 2026 (sheet: $3.75)`, instead of reporting `FAIL`. Dev is shared, so expect this whenever others are testing. The run still counts it as passed.
-- **FAIL.** A real mismatch. The line shows the expected and actual values.
-- **Ties.** In "breakfast", FairPrice and Sheng Siong tie at $30.41. Equal totals are ordered by store name, so FairPrice is recommended.
-
-### 8.5 Check the numbers by hand
-
-The first test basket, `weekly-staples`: Gardenia Enriched White Bread ×2, Dynamo Laundry Detergent ×1, SongHe AAA Thai Hom Mali Rice ×1. Prices in cents come from the spreadsheet.
-
-| Store | White bread ×2 | Dynamo | Thai rice | Total |
-|---|---|---|---|---|
-| FairPrice | 2 × 250 = 500 | 1590 | 1880 | $39.70 |
-| Sheng Siong | 2 × 250 = 500 | 1390 | 1860 | **$37.50** |
-| Cold Storage | 2 × 250 = 500 | 1990 | 1880 | $43.70 |
-
-- `basket.recommendation` is Sheng Siong at `3750`.
-- `basket.savings` shows FairPrice `220` (5.5%) and Cold Storage `620` (14.2%), both with `basis: "full-basket"`.
-- `maxSavingsCents` is `620`.
-
-The healthier basket:
-- The bread becomes Gardenia 100% Wholemeal (330), with `swapped`.
-- Dynamo stays, with `no-hcs-option`, because detergent has no Healthier Choice product.
-- The rice becomes Songhe Noble Brown Rice, with `swapped`.
-
-| Store | Wholemeal ×2 | Dynamo | Brown rice | Total |
-|---|---|---|---|---|
-| FairPrice | 660 | 1590 | 1885 | $41.35 |
-| Sheng Siong | 660 | 1390 | 1884 | **$39.34** |
-| Cold Storage | 660 | 1990 | 1980 | $46.30 |
-
-- `healthierBasket.recommendation` is Sheng Siong at `3934`.
-- Its savings are `201` (4.9%) and `696` (15.0%).
-- `healthierExtra.extraCents` = 3934 − 3750 = `184` (4.9%), so the healthier basket costs $1.84 more.
-
-### 8.6 Real HTTP, as the frontend calls it
-
-No login is needed:
-
-```powershell
-$api = aws cloudformation describe-stacks --stack-name trolleysaver-dev --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text;
-$r = Invoke-RestMethod -Method Post -Uri "$api/basket/compare" -ContentType application/json -Body (Get-Content baskets\weekly-staples.json -Raw);
-$r.basket.stores | Select-Object rank, retailerName, totalCents, complete;
-$r.basket.savings | Select-Object retailerName, basis, savingsCents, savingsPercent;
-$r.healthierExtra
-```
-
-**You should see:** the stores ranked Sheng Siong 3750, FairPrice 3970, Cold Storage 4370; savings of 220 and 620; and `extraCents` 184.
-
-### 8.7 Watch it react to new prices (optional)
-
-This submits two Dynamo detergent prices as a fake user, so finish with cleanup. Dynamo's believable price range is 695–2985 cents. A separate user id keeps your test data apart from 3.x.
-
-```powershell
-$u = "basket-test-user"; $dynamo = (Get-Content baskets\weekly-staples.json -Raw | ConvertFrom-Json).items[1].productId;
-.venv\Scripts\python scripts\invoke.py submit --user-id $u --set productId=$dynamo --set retailerId=fairprice --set priceCents=1000 --set observedAt=$today;
-.venv\Scripts\python scripts\invoke.py submit --user-id $u --set productId=$dynamo --set retailerId=coldstorage --set priceCents=9999 --set observedAt=$today;
-$j = ((.venv\Scripts\python scripts\invoke.py basket --body-file baskets\weekly-staples.json) | Select-Object -Skip 1) -join "`n" | ConvertFrom-Json;
-$j.basket.stores | Select-Object rank, retailerName, totalCents
-```
-
-**You should see:**
-1. Both submissions return `HTTP 201`: the 1000 at FairPrice is `"status": "accepted"`, and the 9999 at Cold Storage is `"status": "flagged"`.
-2. FairPrice is now cheapest. Cold Storage is unchanged, because flagged prices are ignored:
-
-   ```
-   rank retailerName totalCents
-   ---- ------------ ----------
-      1 FairPrice          3380
-      2 Sheng Siong        3750
-      3 Cold Storage       4370
-   ```
-
-Then clean up and check it's back to normal:
-
-```powershell
-.venv\Scripts\python scripts\invoke.py cleanup --user-id $u;
-$j = ((.venv\Scripts\python scripts\invoke.py basket --body-file baskets\weekly-staples.json) | Select-Object -Skip 1) -join "`n" | ConvertFrom-Json;
-$j.basket.stores | Select-Object rank, retailerName, totalCents
-```
-
-**You should see:** `basket-test-user: deleted 2 submission(s), 0 photo(s) and the profile row`, then Sheng Siong 3750, FairPrice 3970 and Cold Storage 4370 again.
