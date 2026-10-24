@@ -1,0 +1,475 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: TrolleySaver backend - Cognito auth, catalog and community price submissions
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [test, dev, staging, prod]
+    Default: dev
+    Description: Environment name; every resource is named trolleysaver-<Env>-*
+  CreateTables:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: true creates the trolleysaver-<Env>-* tables in this stack (for a brand-new environment); false uses existing ones (dev)
+  AllowedOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Frontend origin allowed by API and photo-bucket CORS
+
+Conditions:
+  ShouldCreateTables: !Equals [!Ref CreateTables, "true"]
+
+Globals:
+  Api:
+    OpenApiVersion: "3.0.1"
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    CodeUri: lambdas/
+    MemorySize: 256
+    Timeout: 10
+    Environment:
+      Variables:
+        PRODUCT_TABLE: !Sub trolleysaver-${Env}-product
+        RETAILER_TABLE: !Sub trolleysaver-${Env}-retailer
+        SUBMISSION_TABLE: !Sub trolleysaver-${Env}-price-submission
+        USER_TABLE: !Sub trolleysaver-${Env}-user
+        ALLOWED_ORIGIN: !Ref AllowedOrigin
+        MAX_UPLOAD_BYTES: "5242880"
+        RATE_LIMIT_PER_HOUR: "30"
+        LOG_LEVEL: INFO
+
+Resources:
+  # ---------- Cognito ----------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub trolleysaver-${Env}-users
+      UsernameAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      MfaConfiguration: "OFF"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn
+        PostConfirmation: !GetAtt PostConfirmationFunction.Arn
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub trolleysaver-${Env}-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      ReadAttributes: [email, email_verified, name]
+      WriteAttributes: [email, name]
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: admin
+      Description: Moderators who accept or reject flagged price submissions
+      Precedence: 0
+
+  UserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: user
+      Description: Self-registered contributors
+      Precedence: 10
+
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-cognito-pre-signup
+      Handler: handlers.cognito_pre_signup.handler
+
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-cognito-post-confirmation
+      Handler: handlers.cognito_post_confirmation.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-user
+        - Statement:
+            - Effect: Allow
+              Action: cognito-idp:AdminAddUserToGroup
+              # userpool/* rather than !GetAtt UserPool.Arn to avoid a circular dependency.
+              Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+
+  PreSignUpInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PreSignUpFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  PostConfirmationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PostConfirmationFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  # ---------- Photo storage ----------
+  PhotoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub trolleysaver-${Env}-photos-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [POST, GET]
+            AllowedOrigins: [!Ref AllowedOrigin]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
+  PhotoBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PhotoBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt PhotoBucket.Arn
+              - !Sub ${PhotoBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ---------- DynamoDB (mirrors docs/architecture/database-design.md, plus ByStatus) ----------
+  ProductTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldCreateTables
+    Properties:
+      TableName: !Sub trolleysaver-${Env}-product
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  RetailerTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldCreateTables
+    Properties:
+      TableName: !Sub trolleysaver-${Env}-retailer
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  UserTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldCreateTables
+    Properties:
+      TableName: !Sub trolleysaver-${Env}-user
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+
+  PriceSubmissionTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldCreateTables
+    Properties:
+      TableName: !Sub trolleysaver-${Env}-price-submission
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: retailerId
+          AttributeType: S
+        - AttributeName: observedAt
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: submittedAt
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ByRetailer
+          KeySchema:
+            - AttributeName: retailerId
+              KeyType: HASH
+            - AttributeName: observedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ByUser
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: submittedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ByStatus
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: submittedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ---------- API ----------
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub trolleysaver-${Env}-api
+      StageName: !Ref Env
+      Cors:
+        AllowOrigin: !Sub "'${AllowedOrigin}'"
+        AllowHeaders: "'Authorization,Content-Type'"
+        AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+        MaxAge: "'600'"
+      Auth:
+        DefaultAuthorizer: CognitoAuth
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn: !GetAtt UserPool.Arn
+            # Requiring this scope makes the authorizer accept access tokens (what the frontend sends)
+            # and reject ID tokens.
+            AuthorizationScopes:
+              - aws.cognito.signin.user.admin
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${AllowedOrigin}'"
+              Access-Control-Allow-Headers: "'Authorization,Content-Type'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${AllowedOrigin}'"
+              Access-Control-Allow-Headers: "'Authorization,Content-Type'"
+
+  CatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-catalog
+      Handler: handlers.catalog.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+      Events:
+        ListProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        ListRetailers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /retailers
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  UploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-upload-url
+      Handler: handlers.upload_url.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        RequestUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /price-submissions/image-upload-url
+            Method: POST
+
+  CreateSubmissionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-create-submission
+      Handler: handlers.create_submission.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-price-submission
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-user
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        CreateSubmission:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /price-submissions
+            Method: POST
+
+  MySubmissionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-my-submissions
+      Handler: handlers.my_submissions.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-price-submission
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        ListMine:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /price-submissions/mine
+            Method: GET
+
+  AdminSubmissionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-admin-submissions
+      Handler: handlers.admin_submissions.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-price-submission
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-user
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        ListForReview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /admin/price-submissions
+            Method: GET
+        Moderate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /admin/price-submissions/{id}
+            Method: PATCH
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for VITE_API_BASE_URL
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Env}
+  UserPoolId:
+    Description: VITE_COGNITO_USER_POOL_ID
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: VITE_COGNITO_CLIENT_ID
+    Value: !Ref UserPoolClient
+  PhotoBucketName:
+    Value: !Ref PhotoBucket
+  Region:
+    Description: VITE_AWS_REGION
+    Value: !Ref AWS::Region

@@ -1,0 +1,465 @@
+# TrolleySaver API reference
+
+**Owner:** Gareth (backend) · **Last updated:** 24 Oct 2026 · **Covers:** login, catalog, price & photo submissions, admin moderation
+
+This is the contract between the frontend and the backend. It covers login, the product catalog, price and photo submissions, and admin moderation. Smart Basket and Search endpoints don't exist yet.
+
+How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md) and [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md).
+
+- [1. Basics](#1-basics)
+- [2. Authentication](#2-authentication)
+- [3. Endpoints](#3-endpoints)
+- [4. Data types](#4-data-types)
+- [5. Errors](#5-errors)
+- [6. Limits](#6-limits)
+- [7. Example client code](#7-example-client-code)
+- [8. Trying the API by hand](#8-trying-the-api-by-hand)
+
+---
+
+## 1. Basics
+
+| | |
+|---|---|
+| **Base URL** | The stack output `ApiUrl`, e.g. `https://<api-id>.execute-api.ap-southeast-1.amazonaws.com/dev`. Use it as `VITE_API_BASE_URL`. |
+| **Environment** | `dev` is the only deployed environment. Build the frontend against it. |
+| **Format** | JSON request and response bodies (`Content-Type: application/json`) |
+| **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog |
+| **CORS** | Allowed origin is `http://localhost:5173` (the Vite dev server). Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH`. Other origins can be added on request. |
+| **Money** | Integer cents: `363` means $3.63 |
+| **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
+| **Ids** | Product ids are UUIDs. Retailer ids are `fairprice`, `shengsiong` and `coldstorage`. A submission `id` is an opaque string: store it and pass it back, never build or parse it. |
+| **Pagination** | List endpoints take `limit` (default 50, max 100) and return `nextToken`. Pass it back as `?nextToken=…` to get the next page. `null` means there are no more pages. |
+
+Get the environment values (`ApiUrl`, `UserPoolId`, `UserPoolClientId`) from Gareth, or run:
+
+```powershell
+aws cloudformation describe-stacks --stack-name trolleysaver-dev --query "Stacks[0].Outputs" --output table
+```
+
+They aren't secret, but don't commit them. Keep them in `frontend/.env.local`.
+
+## 2. Authentication
+
+Login is handled by **Amazon Cognito** through Amplify in the frontend (`frontend/src/auth/cognito-auth-service.ts`). There are no login endpoints in this API.
+
+| Topic | Behaviour |
+|---|---|
+| Sign-up | Email + password + optional `name`. Accounts are **confirmed automatically**, with no verification code. |
+| Password policy | At least 8 characters, with upper case, lower case, a number and a symbol |
+| Sign-in | SRP (Amplify's default) or `USER_PASSWORD_AUTH`. No MFA and no forced password change. |
+| Roles | Cognito groups. Self-registered accounts are put in `user` by the server; admins are in `admin`. The group is in the access token's `cognito:groups` claim. |
+| Admin accounts | Created with `backend/scripts/create_admin.py` by anyone with access to the team's AWS account, never through sign-up |
+| Token lifetimes | Access and ID tokens last 60 minutes, refresh tokens 30 days. Amplify refreshes automatically. |
+| Which token | **Send the access token.** ID tokens are rejected with `401`. |
+| Display name | The `name` claim is **only in the ID token**, not the access token |
+
+The server always takes the caller's identity from the verified token. Fields like `userId` or `status` in a request body are ignored.
+
+## 3. Endpoints
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| [`GET /products`](#get-products) | public | Product catalog |
+| [`GET /retailers`](#get-retailers) | public | Store list |
+| [`POST /price-submissions/image-upload-url`](#post-price-submissionsimage-upload-url) | user | Get a one-time URL to upload a shelf-tag photo |
+| [`POST {uploadUrl}`](#uploading-the-photo-to-s3) | none (signed URL) | Upload the photo directly to S3 |
+| [`POST /price-submissions`](#post-price-submissions) | user | Submit a price |
+| [`GET /price-submissions/mine`](#get-price-submissionsmine) | user | The caller's own submissions |
+| [`GET /admin/price-submissions`](#get-adminprice-submissions) | admin | Review queue (flagged prices) |
+| [`PATCH /admin/price-submissions/{id}`](#patch-adminprice-submissionsid) | admin | Accept or reject a flagged price |
+
+"user" means any signed-in account, including admins.
+
+### `GET /products`
+
+Returns every product, sorted by name.
+
+```json
+200 OK
+{
+  "items": [
+    {
+      "id": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f",
+      "name": "Magnolia Fresh Milk",
+      "brand": "Magnolia",
+      "packQty": 946,
+      "packUnit": "ml",
+      "packCount": 1,
+      "category": "milk",
+      "hcs": false,
+      "dietary": ["halal"],
+      "searchTerms": [],
+      "minCents": 181,
+      "maxCents": 548
+    }
+  ]
+}
+```
+
+See [Product](#product) for field details.
+
+### `GET /retailers`
+
+```json
+200 OK
+{ "items": [ { "id": "coldstorage", "name": "Cold Storage" }, { "id": "fairprice", "name": "FairPrice" }, { "id": "shengsiong", "name": "Sheng Siong" } ] }
+```
+
+### `POST /price-submissions/image-upload-url`
+
+Step 1 of 3 for a submission with a photo. It returns a one-time, 5-minute upload form for **one** JPEG or PNG of up to 5 MiB.
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `contentType` | string | yes | `image/jpeg` or `image/png` |
+| `sizeBytes` | integer | yes | 1 – 5,242,880 |
+| `fileName` | string | no | Ignored (the server generates the object name) |
+
+```json
+200 OK
+{
+  "method": "POST",
+  "uploadUrl": "https://trolleysaver-dev-photos-<account>.s3.ap-southeast-1.amazonaws.com/",
+  "fields": {
+    "Content-Type": "image/png",
+    "key": "price-evidence/<your-user-id>/2b0f….png",
+    "x-amz-algorithm": "AWS4-HMAC-SHA256",
+    "x-amz-credential": "…",
+    "x-amz-date": "…",
+    "x-amz-security-token": "…",
+    "policy": "…",
+    "x-amz-signature": "…"
+  },
+  "photoKey": "price-evidence/<your-user-id>/2b0f….png",
+  "expiresAt": "2026-10-24T08:20:02.120Z",
+  "maxSizeBytes": 5242880
+}
+```
+
+Treat `fields` as opaque and send all of them. Keep `photoKey` for step 3.
+
+Errors: `400 VALIDATION_ERROR` (`contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`.
+
+### Uploading the photo to S3
+
+Step 2 of 3. Send a `multipart/form-data` POST to `uploadUrl`, containing every entry from `fields` and then the file as a field called **`file`**, which must be **last**. Don't send an `Authorization` header.
+
+```ts
+const form = new FormData()
+Object.entries(target.fields).forEach(([key, value]) => form.append(key, value))
+form.append("file", file)
+const res = await fetch(target.uploadUrl, { method: "POST", body: form })
+if (res.status !== 204) throw new Error("Upload failed")
+```
+
+For a progress bar, use `XMLHttpRequest` and `xhr.upload.onprogress`, because `fetch` can't report upload progress.
+
+| Result | Meaning |
+|---|---|
+| `204 No Content` | Uploaded |
+| `400` with `<Code>EntityTooLarge</Code>` | File is over 5 MiB |
+| `403` with `<Code>AccessDenied</Code>` | URL expired (over 5 minutes), or the fields were changed. Request a new URL. |
+
+S3 errors are **XML, not JSON**.
+
+### `POST /price-submissions`
+
+Step 3 of 3, and the only step when there's no photo.
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `productId` | string | yes | Must be an id from `GET /products` |
+| `retailerId` | string | yes | Must be an id from `GET /retailers` |
+| `priceCents` | integer | yes | 1 – 100000 ($0.01 – $1,000). Price of **one pack** at regular shelf price. |
+| `observedAt` | string | yes | `YYYY-MM-DD` (read as midnight Singapore time) or an ISO 8601 datetime. Not in the future, at most 30 days ago. |
+| `photoKey` | string | no | The `photoKey` from step 1, after a successful upload in step 2 |
+
+```json
+POST /price-submissions
+{ "productId": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f", "retailerId": "fairprice", "priceCents": 363,
+  "observedAt": "2026-10-24", "photoKey": "price-evidence/<your-user-id>/2b0f….png" }
+```
+
+```json
+201 Created
+{
+  "id": "ZTBiYmIyNTEtODZm…",
+  "submissionId": "c1413f67-3c11-449f-8b55-20893e82c6b8",
+  "productId": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f",
+  "productName": "Magnolia Fresh Milk",
+  "retailerId": "fairprice",
+  "retailerName": "FairPrice",
+  "userId": "196ae5bc-20c1-70ca-1b13-15f961e72cb0",
+  "priceCents": 363,
+  "observedAt": "2026-10-23T16:00:00.000Z",
+  "submittedAt": "2026-10-24T08:15:02.120Z",
+  "status": "accepted",
+  "photoKey": "price-evidence/196ae5bc-…/2b0f….png",
+  "photoContentType": "image/png",
+  "photoSizeBytes": 183004,
+  "photoUrl": "https://…"
+}
+```
+
+**`status` is decided by the server:**
+
+| Condition | `status` | What happens |
+|---|---|---|
+| `minCents ≤ priceCents ≤ maxCents` for the product | `accepted` | Counts as a real price straight away |
+| Outside that range | `flagged` | Hidden from shoppers until an admin accepts or rejects it |
+
+Errors, in the order they're checked:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `INVALID_BODY` | Body isn't a JSON object |
+| 400 | `VALIDATION_ERROR` | `fieldErrors` names the bad fields (`productId`, `retailerId`, `priceCents`, `observedAt`, `photoKey`), including unknown product or store ids |
+| 429 | `RATE_LIMITED` | Over 30 submissions in the past hour |
+| 409 | `DUPLICATE_SUBMISSION` | This user already submitted the same product, store and price for the same Singapore day |
+| 400 | `VALIDATION_ERROR` | `photoKey` isn't one of the caller's own uploads |
+| 400 | `PHOTO_NOT_FOUND` | Nothing was uploaded for that `photoKey` |
+| 400 | `INVALID_PHOTO` | The uploaded object isn't a JPEG/PNG of 5 MiB or less |
+
+### `GET /price-submissions/mine`
+
+The caller's own submissions in every status, newest first.
+
+| Query | Default | Notes |
+|---|---|---|
+| `limit` | 50 | 1–100 |
+| `nextToken` | — | From the previous page |
+
+```json
+200 OK
+{ "items": [ { …Submission… } ], "nextToken": null }
+```
+
+Errors: `400 VALIDATION_ERROR` (`limit`), `400 INVALID_PAGE_TOKEN`, `401`.
+
+### `GET /admin/price-submissions`
+
+Admin only. Lists submissions by status, newest first. Records also include `submitterName` and `submitterEmail`.
+
+| Query | Default | Notes |
+|---|---|---|
+| `status` | `flagged` | `flagged`, `accepted` or `rejected` |
+| `limit` | 50 | 1–100 |
+| `nextToken` | — | From the previous page |
+
+Errors: `400 VALIDATION_ERROR` (`status`, `limit`), `400 INVALID_PAGE_TOKEN`, `401`, `403 FORBIDDEN`.
+
+### `PATCH /admin/price-submissions/{id}`
+
+Admin only. Decides a **flagged** submission. Each one can be decided once.
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `decision` | string | yes | `accepted` or `rejected` |
+| `reason` | string | when rejecting | 1–500 characters, shown to the contributor |
+
+```json
+PATCH /admin/price-submissions/ZTBiYmIyNTEtODZm…
+{ "decision": "rejected", "reason": "Shelf label is unreadable" }
+```
+
+```json
+200 OK
+{ …Submission…, "status": "rejected", "reviewedAt": "2026-10-24T09:01:44.810Z", "reviewedBy": "<admin user id>",
+  "rejectionReason": "Shelf label is unreadable", "submitterName": "Alex Tan", "submitterEmail": "alex@example.com" }
+```
+
+Errors: `400 VALIDATION_ERROR` (`decision`, `reason`), `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 ALREADY_MODERATED`. A 409 means the submission isn't flagged: either another admin got there first, or it was accepted automatically.
+
+## 4. Data types
+
+### Product
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (UUID) | |
+| `name`, `brand`, `category` | string | |
+| `packQty` | number | Size of one unit, e.g. `946` |
+| `packUnit` | string | `ml`, `L`, `g`, `kg`, `pcs`, `rolls` |
+| `packCount` | integer, optional | Units per pack, e.g. `6` for 6 × 180 ml cans. Treat missing as `1`. |
+| `hcs` | boolean | Has the Healthier Choice Symbol |
+| `dietary` | string[], optional | e.g. `["halal", "vegetarian"]` |
+| `searchTerms` | string[], optional | Extra words to match in search |
+| `minCents`, `maxCents` | integer | Believable price range. Prices outside it are flagged. |
+
+### Retailer
+
+| Field | Type |
+|---|---|
+| `id` | `fairprice` \| `shengsiong` \| `coldstorage` |
+| `name` | string |
+
+### Submission
+
+| Field | Type | Present |
+|---|---|---|
+| `id` | string | Always. Opaque; use it in `PATCH`. |
+| `submissionId` | string (UUID) | On submissions made through the API (older seed data may not have it) |
+| `productId`, `productName` | string, string \| null | Always |
+| `retailerId`, `retailerName` | string, string \| null | Always |
+| `userId` | string | Always. The contributor's Cognito user id; `seed-team` for prices loaded by the team. |
+| `priceCents` | integer | Always |
+| `observedAt`, `submittedAt` | string (ISO 8601 UTC) | Always |
+| `status` | `accepted` \| `flagged` \| `rejected` | Always |
+| `photoKey`, `photoContentType`, `photoSizeBytes` | string, string, integer | When a photo was attached |
+| `photoUrl` | string | When a photo was attached. A signed link that **expires 5 minutes** after the response; if the image fails to load, fetch the list again. |
+| `reviewedAt`, `reviewedBy` | string | After an admin decision |
+| `rejectionReason` | string | When rejected |
+| `submitterName`, `submitterEmail` | string \| null | Admin endpoints only |
+
+```ts
+export type ApiSubmissionStatus = "accepted" | "flagged" | "rejected"
+
+export interface ApiSubmission {
+  id: string
+  submissionId?: string
+  productId: string
+  productName: string | null
+  retailerId: string
+  retailerName: string | null
+  userId: string
+  priceCents: number
+  observedAt: string
+  submittedAt: string
+  status: ApiSubmissionStatus
+  photoKey?: string
+  photoContentType?: "image/jpeg" | "image/png"
+  photoSizeBytes?: number
+  photoUrl?: string
+  reviewedAt?: string
+  reviewedBy?: string
+  rejectionReason?: string
+  submitterName?: string | null
+  submitterEmail?: string | null
+}
+```
+
+## 5. Errors
+
+Errors from the backend always have this shape:
+
+```json
+{ "code": "VALIDATION_ERROR", "message": "Some fields are invalid.",
+  "fieldErrors": { "priceCents": "Price must be a whole number of cents greater than 0" }, "requestId": "3f1c…" }
+```
+
+`message` and the `fieldErrors` values are user-readable. `fieldErrors` only appears on validation errors.
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 400 | `INVALID_BODY` | Body missing, not JSON, or not an object |
+| 400 | `VALIDATION_ERROR` | See `fieldErrors` |
+| 400 | `IMAGE_TOO_LARGE` | Upload request over 5 MiB |
+| 400 | `PHOTO_NOT_FOUND` | `photoKey` has no uploaded file |
+| 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `INVALID_PAGE_TOKEN` | `nextToken` was altered |
+| 401 | `UNAUTHENTICATED` | Token missing its user (rare, see below) |
+| 403 | `FORBIDDEN` | Admin route called by a non-admin |
+| 404 | `NOT_FOUND` | Submission doesn't exist |
+| 409 | `DUPLICATE_SUBMISSION` | Same product, store and price already submitted today |
+| 409 | `ALREADY_MODERATED` | Submission isn't flagged any more |
+| 429 | `RATE_LIMITED` | Too many submissions this hour |
+| 500 | `INTERNAL_ERROR` | Backend bug. Report the `requestId` to Gareth. |
+
+**API Gateway errors don't use that shape.** They come before the backend runs and contain only `{"message": "…"}`:
+
+| Status | `message` | Cause |
+|---|---|---|
+| 401 | `Unauthorized` (or `The incoming token has expired`) | No token, an expired or invalid token, or an ID token instead of an access token. Refresh the session or send the user to log in. |
+| 403 | `Missing Authentication Token`, or `Invalid key=value pair … in Authorization header` when a token was sent | **Wrong path or method.** API Gateway reports unknown routes this way; it isn't a login problem. |
+| 502 / 504 | `Internal server error` / timeout | Backend crashed or timed out |
+
+## 6. Limits
+
+| Limit | Value |
+|---|---|
+| Image types | `image/jpeg`, `image/png` |
+| Image size | 5 MiB (5,242,880 bytes), one image per submission |
+| Upload URL lifetime | 5 minutes |
+| `photoUrl` lifetime | 5 minutes |
+| Price | 1 – 100000 cents |
+| `observedAt` | Not in the future (5-minute clock tolerance), at most 30 days old |
+| Submissions per user | 30 per rolling hour (counts every status) |
+| Duplicate rule | One submission per user, product, store, price and Singapore day |
+| Rejection reason | 500 characters |
+| Page size | Default 50, max 100 |
+
+Not supported yet: promotions and member prices, branch-level prices, editing or withdrawing a submission, and users flagging other users' prices.
+
+## 7. Example client code
+
+```ts
+const API = import.meta.env.VITE_API_BASE_URL
+
+export class ApiError extends Error {
+  constructor(public status: number, public code: string, message: string, public fieldErrors?: Record<string, string>) {
+    super(message)
+  }
+}
+
+export async function api<T>(path: string, options: { method?: string; body?: unknown; token?: string | null } = {}): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    method: options.method ?? "GET",
+    headers: {
+      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+    },
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const code = data.code ?? (res.status === 401 ? "UNAUTHENTICATED" : `HTTP_${res.status}`)
+    throw new ApiError(res.status, code, data.message ?? "Request failed", data.fieldErrors)
+  }
+  return data as T
+}
+
+// A contributor submitting a price with a photo
+const token = await getAccessToken()
+const target = await api<{ uploadUrl: string; fields: Record<string, string>; photoKey: string }>(
+  "/price-submissions/image-upload-url", { method: "POST", token, body: { contentType: file.type, sizeBytes: file.size } })
+const form = new FormData()
+Object.entries(target.fields).forEach(([k, v]) => form.append(k, v))
+form.append("file", file)
+const upload = await fetch(target.uploadUrl, { method: "POST", body: form })
+if (upload.status !== 204) throw new Error("Photo upload failed. Please try again.")
+const created = await api<ApiSubmission>("/price-submissions", {
+  method: "POST", token,
+  body: { productId, retailerId, priceCents: Math.round(price * 100), observedAt: "2026-10-24", photoKey: target.photoKey },
+})
+```
+
+## 8. Trying the API by hand
+
+You don't need an AWS account: Cognito's sign-in endpoint is public. Sign up through the app first (or ask Gareth for an account), then:
+
+**PowerShell**
+```powershell
+$clientId = "<UserPoolClientId>"; $api = "<ApiUrl>";
+$body = @{ AuthFlow = "USER_PASSWORD_AUTH"; ClientId = $clientId; AuthParameters = @{ USERNAME = "you@example.com"; PASSWORD = "<password>" } } | ConvertTo-Json;
+$auth = Invoke-RestMethod -Method Post -Uri "https://cognito-idp.ap-southeast-1.amazonaws.com/" -ContentType "application/x-amz-json-1.1" -Headers @{ "X-Amz-Target" = "AWSCognitoIdentityProviderService.InitiateAuth" } -Body $body;
+$token = $auth.AuthenticationResult.AccessToken;
+Invoke-RestMethod "$api/products";
+Invoke-RestMethod "$api/price-submissions/mine" -Headers @{ Authorization = "Bearer $token" }
+```
+
+Each line ends with `;`, so this still works if your terminal joins pasted lines into one.
+
+**bash / curl**
+```bash
+TOKEN=$(curl -s https://cognito-idp.ap-southeast-1.amazonaws.com/ \
+  -H "Content-Type: application/x-amz-json-1.1" \
+  -H "X-Amz-Target: AWSCognitoIdentityProviderService.InitiateAuth" \
+  -d '{"AuthFlow":"USER_PASSWORD_AUTH","ClientId":"<UserPoolClientId>","AuthParameters":{"USERNAME":"you@example.com","PASSWORD":"<password>"}}' \
+  | python -c "import json,sys; print(json.load(sys.stdin)['AuthenticationResult']['AccessToken'])")
+curl -H "Authorization: Bearer $TOKEN" "<ApiUrl>/price-submissions/mine"
+```
+
+You can also copy the token from a signed-in browser session. Amplify keeps it in `localStorage` under a key ending in `.accessToken`. Tokens expire after 60 minutes.
+
+In Postman or Insomnia, set the auth type to *Bearer Token* and paste the access token. CORS doesn't apply outside the browser.

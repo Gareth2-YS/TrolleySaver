@@ -1,4 +1,6 @@
-# Feature implementation handoff
+# Frontend feature pages handoff (Smart Basket, Search, Price Upload)
+
+**Date:** 23 Oct 2026 (first written 21 Oct) · **From:** frontend (app shell) · **To:** feature developers
 
 ## Purpose
 
@@ -59,7 +61,7 @@ Preserve the wireframe's typography, dark-green/off-white palette, fine borders,
 - Admin view now shows a role-focused local approval queue with approve and reasoned-reject actions based on the authenticated `admin` group claim.
 - Never infer admin rights from a UI control; use the role exposed by the auth context and rely on backend authorization.
 - Validate image type/size before upload and preserve accessible form labels and errors.
-- The current adapter is explicitly local/mock-only. See `handoff.md` for the production API, DynamoDB, private S3, authentication, and ownership contract.
+- The current adapter is explicitly local/mock-only. See [2026-10-23-price-upload-frontend-to-backend.md](2026-10-23-price-upload-frontend-to-backend.md) for the original contract and [2026-10-24-price-upload-backend-to-frontend.md](2026-10-24-price-upload-backend-to-frontend.md) for what the backend implemented.
 
 ## Backend/API coordination
 
