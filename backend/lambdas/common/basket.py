@@ -1,7 +1,7 @@
 """Basket totals per store, ranking, the recommended store and savings. Pure functions, no AWS calls.
 
-A "choice" is what one store would sell for one basket line: {product, priceCents, observedAt,
-replaces}, or None when the store has no usable price for it. `choices` maps each retailer id to a
+A "choice" is what one store would sell for one basket line: {product, priceCents, priceDate,
+submissionCount, replaces}, or None when the store has no usable price for it. `choices` maps each retailer id to a
 list of choices in the same order as the basket lines.
 """
 
@@ -14,7 +14,8 @@ def price_choice(product, prices, retailer_id, replaces=None):
     price = prices.get(product["id"], {}).get(retailer_id)
     if not price:
         return None
-    return {"product": product, "priceCents": price["priceCents"], "observedAt": price["observedAt"], "replaces": replaces}
+    return {"product": product, "priceCents": price["priceCents"], "priceDate": price["priceDate"],
+            "submissionCount": price["submissionCount"], "replaces": replaces}
 
 
 def exact_choices(lines, products, prices, retailer_ids):
@@ -36,7 +37,8 @@ def _line(line, choice):
         "quantity": line["quantity"],
         "unitPriceCents": choice["priceCents"],
         "subtotalCents": choice["priceCents"] * line["quantity"],
-        "observedAt": choice["observedAt"],
+        "priceDate": choice["priceDate"],
+        "submissionCount": choice["submissionCount"],
     }
     if choice["replaces"]:
         record["replacesProductId"] = choice["replaces"]

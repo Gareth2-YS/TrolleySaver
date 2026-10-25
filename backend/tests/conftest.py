@@ -31,6 +31,7 @@ ENV = {
     "RETAILER_TABLE": "unit-retailer",
     "SUBMISSION_TABLE": "unit-price-submission",
     "USER_TABLE": "unit-user",
+    "RETAILER_PRICE_TABLE": "unit-retailer-price",
     "PHOTO_BUCKET": BUCKET,
     "ALLOWED_ORIGIN": "http://localhost:5173",
     "RATE_LIMIT_PER_HOUR": "30",
@@ -60,6 +61,12 @@ def create_tables(dynamodb, prefix="unit"):
             }
             for name, (pk, sk) in gsis.items()
         ],
+    )
+    dynamodb.create_table(
+        TableName=f"{prefix}-retailer-price",
+        BillingMode="PAY_PER_REQUEST",
+        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("productId", "retailerId")],
+        KeySchema=[{"AttributeName": "productId", "KeyType": "HASH"}, {"AttributeName": "retailerId", "KeyType": "RANGE"}],
     )
 
 
@@ -120,11 +127,12 @@ def iso(dt):
     return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def put_price(product_id, retailer_id, cents, observed_at=None, status="accepted", submitted_at=None, user_id="seed-team"):
-    """Write a price row directly (create_submission refuses prices observed over 30 days ago)."""
+def put_price(product_id, retailer_id, cents, observed_at=None, status="accepted", submitted_at=None, user_id="seed-team",
+              reviewed_at=None):
+    """Write a price submission directly (create_submission refuses prices observed over 30 days ago)."""
     observed = iso(observed_at or datetime.now(timezone.utc) - timedelta(days=1))
     submission_id = str(uuid.uuid4())
-    boto3.resource("dynamodb", region_name=REGION).Table(ENV["SUBMISSION_TABLE"]).put_item(Item={
+    item = {
         "productId": product_id,
         "sk": f"{retailer_id}#{observed}#{submission_id}",
         "submissionId": submission_id,
@@ -134,6 +142,28 @@ def put_price(product_id, retailer_id, cents, observed_at=None, status="accepted
         "observedAt": observed,
         "submittedAt": iso(submitted_at) if submitted_at else observed,
         "status": status,
+    }
+    if reviewed_at:
+        item.update(reviewedAt=iso(reviewed_at), reviewedBy="admin")
+    boto3.resource("dynamodb", region_name=REGION).Table(ENV["SUBMISSION_TABLE"]).put_item(Item=item)
+
+
+SGT = timezone(timedelta(hours=8))
+
+
+def sgt_today():
+    return datetime.now(SGT).date()
+
+
+def put_stored_price(product_id, retailer_id, cents, price_date=None, submission_count=1, computed_at="2026-10-25T16:05:00.000Z"):
+    """Write a retailer-price row directly, as if the nightly job had stored it."""
+    boto3.resource("dynamodb", region_name=REGION).Table(ENV["RETAILER_PRICE_TABLE"]).put_item(Item={
+        "productId": product_id,
+        "retailerId": retailer_id,
+        "priceCents": cents,
+        "submissionCount": submission_count,
+        "priceDate": (price_date or sgt_today() - timedelta(days=1)).isoformat(),
+        "computedAt": computed_at,
     })
 
 
@@ -144,7 +174,7 @@ DETERGENT_ID = "b0000000-0000-4000-8000-000000000003"
 
 @pytest.fixture
 def basket_catalog(aws):
-    """Bread with an HCS alternative and a detergent with none, priced at all three stores."""
+    """Bread with an HCS alternative and a detergent with none, with stored prices at all three stores."""
     table = aws.Table("unit-product")
     for item in (
         {"id": WHITE_ID, "name": "Sunshine White Bread", "brand": "Sunshine", "packQty": 400, "packUnit": "g", "category": "bread", "hcs": False},
@@ -158,5 +188,5 @@ def basket_catalog(aws):
         (DETERGENT_ID, {"fairprice": 848, "shengsiong": 847, "coldstorage": 860}),
     ):
         for retailer_id, cents in prices.items():
-            put_price(product_id, retailer_id, cents)
+            put_stored_price(product_id, retailer_id, cents)
     return aws

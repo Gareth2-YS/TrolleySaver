@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pytest
 
-from conftest import DETERGENT_ID, MILK_ID, WHITE_ID, WHOLEMEAL_ID, api_event, call, put_price
+from conftest import DETERGENT_ID, MILK_ID, WHITE_ID, WHOLEMEAL_ID, api_event, call, put_price, put_stored_price, sgt_today
 from handlers import basket
 
 
@@ -34,32 +34,28 @@ def test_signed_in_callers_get_the_same_answer(basket_catalog):
     assert compare(body) == compare(body, user_id="someone")
 
 
-def test_latest_accepted_price_wins(basket_catalog):
-    now = datetime.now(timezone.utc)
-    put_price(MILK_ID, "fairprice", 400, observed_at=now - timedelta(days=5))
-    put_price(MILK_ID, "fairprice", 300, observed_at=now - timedelta(days=2))
-    put_price(MILK_ID, "fairprice", 350, observed_at=now - timedelta(days=3))
-    # Same observedAt as the newest: the later submission wins.
-    put_price(MILK_ID, "fairprice", 310, observed_at=now - timedelta(days=2), submitted_at=now - timedelta(hours=1))
-    status, result = compare({"items": [{"productId": MILK_ID, "quantity": 1}]})
+def test_uses_the_stored_daily_average(basket_catalog):
+    put_stored_price(MILK_ID, "fairprice", 312, submission_count=3, price_date=sgt_today() - timedelta(days=2))
+    status, result = compare({"items": [{"productId": MILK_ID, "quantity": 2}]})
     assert status == 200
-    assert store(result, "fairprice")["lines"][0]["unitPriceCents"] == 310
+    line = store(result, "fairprice")["lines"][0]
+    assert (line["unitPriceCents"], line["subtotalCents"], line["submissionCount"]) == (312, 624, 3)
+    assert line["priceDate"] == (sgt_today() - timedelta(days=2)).isoformat()
+    assert "observedAt" not in line
 
 
-def test_flagged_and_rejected_prices_are_ignored(basket_catalog):
-    now = datetime.now(timezone.utc)
-    put_price(MILK_ID, "fairprice", 363, observed_at=now - timedelta(days=3))
-    put_price(MILK_ID, "fairprice", 9999, observed_at=now - timedelta(days=1), status="flagged")
-    put_price(MILK_ID, "fairprice", 1, observed_at=now - timedelta(hours=2), status="rejected")
+def test_raw_submissions_wait_for_the_nightly_job(basket_catalog):
+    """A new submission only reaches the basket once the job has averaged it into a stored row."""
+    put_price(MILK_ID, "fairprice", 363)
     status, result = compare({"items": [{"productId": MILK_ID, "quantity": 1}]})
-    assert store(result, "fairprice")["lines"][0]["unitPriceCents"] == 363
+    assert store(result, "fairprice")["unpriced"][0]["productId"] == MILK_ID
 
 
-def test_stale_price_is_ignored(basket_catalog):
-    now = datetime.now(timezone.utc)
-    put_price(MILK_ID, "fairprice", 363, observed_at=now - timedelta(days=2))
-    put_price(MILK_ID, "coldstorage", 365, observed_at=now - timedelta(days=31))
+def test_stored_price_older_than_30_days_is_stale(basket_catalog):
+    put_stored_price(MILK_ID, "fairprice", 363, price_date=sgt_today() - timedelta(days=30))
+    put_stored_price(MILK_ID, "coldstorage", 365, price_date=sgt_today() - timedelta(days=31))
     status, result = compare({"items": [{"productId": MILK_ID, "quantity": 1}]})
+    assert store(result, "fairprice")["complete"]
     cold_storage = store(result, "coldstorage")
     assert not cold_storage["complete"] and cold_storage["unpriced"][0]["productId"] == MILK_ID
     assert result["basket"]["recommendation"]["retailerId"] == "fairprice"
@@ -67,10 +63,21 @@ def test_stale_price_is_ignored(basket_catalog):
 
 def test_price_max_age_is_configurable(basket_catalog, monkeypatch):
     monkeypatch.setenv("PRICE_MAX_AGE_DAYS", "60")
-    put_price(MILK_ID, "coldstorage", 365, observed_at=datetime.now(timezone.utc) - timedelta(days=31))
+    put_stored_price(MILK_ID, "coldstorage", 365, price_date=sgt_today() - timedelta(days=31))
     status, result = compare({"items": [{"productId": MILK_ID, "quantity": 1}]})
     assert result["priceMaxAgeDays"] == 60
     assert store(result, "coldstorage")["complete"]
+
+
+def test_prices_updated_is_the_latest_job_run(basket_catalog):
+    put_stored_price(MILK_ID, "fairprice", 363, computed_at="2026-10-26T16:05:00.000Z")
+    status, result = compare({"items": [{"productId": WHITE_ID, "quantity": 1}]})
+    assert result["pricesUpdated"] == "2026-10-26T16:05:00.000Z"
+
+
+def test_prices_updated_is_null_before_the_first_run(aws):
+    status, result = compare({"items": [{"productId": MILK_ID, "quantity": 1}]})
+    assert status == 200 and result["pricesUpdated"] is None and result["basket"]["recommendation"] is None
 
 
 def test_repeated_products_are_merged(basket_catalog):

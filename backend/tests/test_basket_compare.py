@@ -27,7 +27,7 @@ BASKET = [{"productId": "white", "quantity": 2}, {"productId": "dynamo", "quanti
 
 
 def prices_from(table):
-    return {pid: {rid: {"priceCents": c, "observedAt": "2026-10-24T00:00:00.000Z", "submittedAt": "2026-10-24T00:00:00.000Z"}
+    return {pid: {rid: {"priceCents": c, "priceDate": "2026-10-24", "submissionCount": 1}
                   for rid, c in by_store.items()} for pid, by_store in table.items()}
 
 

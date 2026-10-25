@@ -14,6 +14,8 @@ Usage (from backend/; see TESTING.md for a full walkthrough):
     .venv/Scripts/python scripts/invoke.py review-queue --as admin
     .venv/Scripts/python scripts/invoke.py moderate --as admin --id <id> --set decision=rejected --set reason="Unreadable label"
     .venv/Scripts/python scripts/invoke.py basket --body-file baskets/weekly-staples.json
+    .venv/Scripts/python scripts/invoke.py aggregate                          # nightly price job, for yesterday
+    .venv/Scripts/python scripts/invoke.py aggregate --set date=2026-10-24    # ... or one day, or --set backfillDays=30
     .venv/Scripts/python scripts/invoke.py cleanup        # delete everything the fake users created
 
 --set KEY=VALUE builds the JSON body for you (whole numbers become numbers, true/false booleans,
@@ -52,6 +54,10 @@ ROUTES = {
     "moderate": ("admin-submissions", "admin_submissions", "PATCH", "/admin/price-submissions/{id}", True),
     "basket": ("basket", "basket", "POST", "/basket/compare", False),
 }
+# Lambdas that aren't behind API Gateway: the --set fields are sent as the raw event.
+JOBS = {
+    "aggregate": ("price-aggregator", "aggregate_prices"),
+}
 
 
 def build_event(route, user_id, groups, body, query, submission_id):
@@ -75,7 +81,7 @@ def build_event(route, user_id, groups, body, query, submission_id):
 
 
 def invoke_deployed(env, region, route, event):
-    function_name = f"trolleysaver-{env}-{ROUTES[route][0]}"
+    function_name = f"trolleysaver-{env}-{(ROUTES.get(route) or JOBS[route])[0]}"
     result = boto3.client("lambda", region_name=region).invoke(FunctionName=function_name, Payload=json.dumps(event))
     payload = json.loads(result["Payload"].read())
     if result.get("FunctionError"):
@@ -91,13 +97,14 @@ def invoke_local(env, region, route, event):
         "RETAILER_TABLE": f"trolleysaver-{env}-retailer",
         "SUBMISSION_TABLE": f"trolleysaver-{env}-price-submission",
         "USER_TABLE": f"trolleysaver-{env}-user",
+        "RETAILER_PRICE_TABLE": f"trolleysaver-{env}-retailer-price",
         "PHOTO_BUCKET": outputs["PhotoBucketName"],
     })
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lambdas"))
-    module = __import__(f"handlers.{ROUTES[route][1]}", fromlist=["handler"])
+    module = __import__(f"handlers.{(ROUTES.get(route) or JOBS[route])[1]}", fromlist=["handler"])
 
     class Context:
-        aws_request_id = event["requestContext"]["requestId"]
+        aws_request_id = (event.get("requestContext") or {}).get("requestId", "local")
 
     return module.handler(event, Context())
 
@@ -171,7 +178,7 @@ def cleanup(env, region, user_ids):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("route", choices=[*ROUTES, "upload-photo", "cleanup"])
+    parser.add_argument("route", choices=[*ROUTES, *JOBS, "upload-photo", "cleanup"])
     parser.add_argument("--env", default=DEFAULT_ENV)
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--as", dest="role", choices=["user", "admin", "anonymous"], default="user")
@@ -214,6 +221,9 @@ def main():
 
     if args.route == "upload-photo":
         upload_photo(call, args.file, user_id, groups)
+        return
+    if args.route in JOBS:
+        print(json.dumps(call(args.route, json.loads(body) if body else {}), indent=2))
         return
     query = dict(pair.split("=", 1) for pair in args.query)
     print_result(call(args.route, build_event(args.route, user_id, groups, body, query, args.id)))

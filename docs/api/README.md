@@ -280,6 +280,8 @@ Public, no token needed. Prices the shopper's basket at every store and returns 
 
 Nothing is stored. The frontend keeps the basket (e.g. in `localStorage`) and sends all of it each time.
 
+**Prices update once a day.** Each store's price for a product is that day's **average** of the accepted prices contributors submitted for that store, worked out at 00:05 Singapore time. A price submitted today shows in the basket from tomorrow. Show `pricesUpdated` on the page, e.g. "Prices updated 26 Oct, 00:05".
+
 | Body field | Type | Required | Rules |
 |---|---|---|---|
 | `items` | array | yes | 1–50 lines of `{ productId, quantity }` |
@@ -297,13 +299,15 @@ POST /basket/compare
 200 OK
 {
   "priceMaxAgeDays": 30,
+  "pricesUpdated": "2026-10-25T16:05:01.230Z",
   "basket": {
     "stores": [
       { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "rank": 1, "complete": true,
         "pricedCount": 3, "missingCount": 0, "coveragePercent": 100.0, "totalCents": 3750,
         "lines": [ { "productId": "…", "productName": "Gardenia Enriched White Bread", "brand": "Gardenia",
                      "packQty": 400, "packUnit": "g", "packCount": 1, "hcs": false, "category": "bread",
-                     "quantity": 2, "unitPriceCents": 250, "subtotalCents": 500, "observedAt": "2026-10-23T16:00:00.000Z" },
+                     "quantity": 2, "unitPriceCents": 250, "subtotalCents": 500,
+                     "priceDate": "2026-10-24", "submissionCount": 1 },
                    … ],
         "unpriced": [] },
       { "retailerId": "fairprice", "rank": 2, "totalCents": 3970, … },
@@ -334,7 +338,12 @@ POST /basket/compare
 ```
 
 How it decides:
-- **Which price a store uses:** the latest **accepted** price observed in the last `priceMaxAgeDays` (30) days. Flagged and rejected prices are never used. A product with no such price at a store is listed in that store's `unpriced`, not left out.
+- **Which price a store uses:** the store's **daily average** for that product.
+  - **What goes in:** the accepted prices submitted for that product at that store during the previous Singapore day, rounded to the nearest cent. Flagged and rejected prices are never used.
+  - **On each line:** `priceDate` is the day the average comes from, and `submissionCount` is how many prices went into it.
+  - **Days with no new prices:** the last average is kept, up to `priceMaxAgeDays` (30) days old.
+  - **No usable price:** a product with no price at a store is listed in that store's `unpriced`, not left out.
+  - **`pricesUpdated`:** when the averages were last worked out. It's `null` if they have never been computed.
 - **Ranking:** stores that price every line (`complete`) come first, cheapest first. Incomplete stores follow, by how many lines they price and then by total. Equal totals are ordered by store name. `totalCents` only adds up the priced lines.
 - **Recommendation:** the top-ranked store, or `null` if no store has a price for anything. When `complete` is `false`, no store sells the whole basket. Say so in the UI.
 - **Savings:** the recommended store compared with each other store.
@@ -437,7 +446,8 @@ export interface ApiBasketLine {
   quantity: number
   unitPriceCents: number
   subtotalCents: number
-  observedAt: string
+  priceDate: string                   // "2026-10-24": the Singapore day this daily average comes from
+  submissionCount: number             // prices averaged into unitPriceCents
   replacesProductId?: string          // healthier basket only, on swapped lines
 }
 
@@ -474,6 +484,7 @@ export interface ApiBasketComparison {
 
 export interface ApiBasketResult {
   priceMaxAgeDays: number
+  pricesUpdated: string | null        // when the daily averages were last computed (UTC ISO 8601)
   basket: ApiBasketComparison
   healthierBasket: (ApiBasketComparison & {
     swaps: { originalProductId: string; originalName: string | null; category: string | null
@@ -533,7 +544,7 @@ Errors from the backend always have this shape:
 | Rejection reason | 500 characters |
 | Page size | Default 50, max 100 |
 | Basket | 1–50 products, 1–99 of each |
-| Price age used by the basket | 30 days |
+| Basket prices | Daily averages, recomputed at 00:05 SGT; kept for up to 30 days without new submissions |
 
 Not supported yet: promotions and member prices, branch-level prices, editing or withdrawing a submission, and users flagging other users' prices.
 

@@ -41,6 +41,10 @@ Debounce calls while the shopper is pressing + and −. Each call takes a few hu
 
 ## 3. Things to show, not hide
 
+- **Prices update once a day.** Each store's price is that day's average of contributors' accepted prices, recomputed at 00:05 Singapore time.
+  - A price someone submits today appears in the basket tomorrow, so don't promise instant updates after a contribution.
+  - Show `pricesUpdated`, e.g. "Prices updated 26 Oct, 00:05".
+  - Each line's `submissionCount` can back a hint like "average of 3 prices".
 - **Unpriced items.** If a store has no recent price for a product, the product appears in that store's `unpriced[]` and the store is `complete: false`. Show "2 priced · 1 missing" rather than dropping the item. The report requires this.
 - **No store has everything.** If `recommendation.complete` is `false`, the "best store" doesn't sell the whole basket. Say so.
 - **Partial savings.** A saving with `basis: "common-items"` only compares the `comparedLines` items both stores price. Label it, e.g. "on the 2 items both stores price". `savingsCents` can then be negative, and it can be `null` when the stores share no items.

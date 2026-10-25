@@ -12,8 +12,9 @@ Usage (from backend/):
     .venv/Scripts/python scripts/basket_eval.py --env dev --http           # the real API over HTTP
     .venv/Scripts/python scripts/basket_eval.py --env dev --dump-requests baskets   # only write the request bodies
 
-dev must hold the spreadsheet's seed prices (scripts/seed_catalog.py). If a contributor has since
-submitted a newer accepted price, the backend rightly uses it, and checks it affects are reported as
+dev must hold the spreadsheet's seed prices (scripts/seed_catalog.py), averaged into the daily prices
+(invoke.py aggregate --set backfillDays=30). If contributors have also submitted accepted prices for a
+product at a store, the backend rightly averages them in, and checks they affect are reported as
 OVERRIDDEN instead of FAIL. A Markdown report for the final write-up goes to basket_eval_report.md.
 """
 
@@ -28,7 +29,7 @@ import requests
 from boto3.dynamodb.conditions import Key
 
 from invoke import build_event, invoke_deployed, invoke_local
-from seed_catalog import DEFAULT_XLSX, RETAILER_ALIASES, RETAILERS, SEED_USER, SGT, normalise_name, read_rows
+from seed_catalog import DEFAULT_XLSX, RETAILER_ALIASES, RETAILERS, SEED_USER, normalise_name, read_rows
 from stack import DEFAULT_REGION, stack_outputs
 
 DEFAULT_CASES = Path(__file__).with_name("basket_cases.json")
@@ -160,7 +161,11 @@ def request_for(case, ids):
 
 
 def find_overrides(response, sheet, env, region):
-    """Lines whose price came from a contributor's newer submission rather than the seed data."""
+    """Lines whose stored daily price includes contributors' submissions, not just the seed data.
+
+    The basket uses each store's daily average, so once contributors have submitted accepted prices
+    for a product at a store, its price can rightly differ from the spreadsheet.
+    """
     table = boto3.resource("dynamodb", region_name=region).Table(f"trolleysaver-{env}-price-submission")
     overrides = []
     for key in ("basket", "healthierBasket"):
@@ -170,14 +175,12 @@ def find_overrides(response, sheet, env, region):
                 if expected == line["unitPriceCents"]:
                     continue
                 rows = table.query(KeyConditionExpression=Key("productId").eq(line["productId"])
-                                   & Key("sk").begins_with(f"{store['retailerId']}#{line['observedAt']}#"))["Items"]
-                # The row the backend used: same observed time, accepted, same price. A seed row can
-                # share the observed time, so match on the price too.
-                used = [r for r in rows if r["status"] == "accepted" and int(r["priceCents"]) == line["unitPriceCents"]]
-                if used and all(r["userId"] != SEED_USER for r in used):
-                    observed = datetime.fromisoformat(line["observedAt"].replace("Z", "+00:00")).astimezone(SGT)
-                    overrides.append(f"{line['productName']} at {store['retailerName']}: {money(line['unitPriceCents'])} "
-                                     f"from a submission observed {observed:%d %b %Y} (sheet: {money(expected)})")
+                                   & Key("sk").begins_with(f"{store['retailerId']}#"))["Items"]
+                if any(r["status"] == "accepted" and r["userId"] != SEED_USER for r in rows):
+                    day = datetime.fromisoformat(line["priceDate"]).strftime("%d %b %Y")
+                    count = line["submissionCount"]
+                    overrides.append(f"{line['productName']} at {store['retailerName']}: {money(line['unitPriceCents'])}, "
+                                     f"the average of {count} submission{'s' if count != 1 else ''} on {day} (sheet: {money(expected)})")
     return sorted(set(overrides))
 
 
