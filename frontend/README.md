@@ -39,3 +39,10 @@ npm run build
 ```
 
 For real Cognito, change `VITE_AUTH_MODE` to `cognito` and fill in the non-secret AWS values. See [docs/handoffs/2026-10-24-auth-backend-to-frontend.md](../docs/handoffs/2026-10-24-auth-backend-to-frontend.md) for setup and [docs/api/README.md](../docs/api/README.md) for the API contract.
+
+
+## Search and Filter
+
+The Search and Filter page loads products from the AWS catalog API and lets visitors browse products by name, brand, and category. Set `VITE_API_BASE_URL` in `frontend/.env.local` to the `ApiUrl` output from the `trolleysaver-dev` CloudFormation stack.
+
+Search & Filter loads products and current retailer prices from the API. Users can search by product or brand, filter by type, brand, dietary option, Healthier Choice, and price, and click a product card to see retailer prices. Category icons are in `frontend/assets/product-icons`.
