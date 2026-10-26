@@ -15,6 +15,7 @@ MAX_OBSERVED_AGE_DAYS = 30
 CLOCK_SKEW = timedelta(minutes=5)
 MAX_BASKET_LINES = 50
 MAX_QUANTITY = 99
+MAX_SEARCH_LENGTH = 100
 
 
 def max_upload_bytes():
@@ -138,3 +139,46 @@ def validate_basket(body, product_ids, retailer_ids):
     if errors:
         _fail(errors)
     return [{"productId": pid, "quantity": quantity} for pid, quantity in merged.items()], chosen
+
+
+def _optional_text(params, name):
+    value = (params.get(name) or "").strip()
+    return value.casefold() or None
+
+
+def _optional_cents(params, name, errors):
+    raw = (params.get(name) or "").strip()
+    if not raw:
+        return None
+    if not raw.isdigit():
+        errors[name] = "Must be a whole number of cents, 0 or more"
+        return None
+    return int(raw)
+
+
+def validate_search(params):
+    """Return the search criteria from GET /products/search query parameters (all optional)."""
+    errors = {}
+    q = (params.get("q") or "").strip()
+    if len(q) > MAX_SEARCH_LENGTH:
+        errors["q"] = f"Keep the search under {MAX_SEARCH_LENGTH} characters"
+
+    hcs = (params.get("hcs") or "").strip().lower()
+    if hcs not in ("", "true", "false"):
+        errors["hcs"] = "Must be true or false"
+
+    low = _optional_cents(params, "minPriceCents", errors)
+    high = _optional_cents(params, "maxPriceCents", errors)
+    if low is not None and high is not None and low > high:
+        errors["maxPriceCents"] = "Maximum price must not be less than the minimum price"
+    if errors:
+        _fail(errors)
+    return {
+        "words": q.casefold().split(),
+        "category": _optional_text(params, "category"),
+        "brand": _optional_text(params, "brand"),
+        "dietary": _optional_text(params, "dietary"),
+        "hcs": {"true": True, "false": False}.get(hcs),
+        "minPriceCents": low,
+        "maxPriceCents": high,
+    }

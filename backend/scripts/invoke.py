@@ -14,6 +14,7 @@ Usage (from backend/; see TESTING.md for a full walkthrough):
     .venv/Scripts/python scripts/invoke.py review-queue --as admin
     .venv/Scripts/python scripts/invoke.py moderate --as admin --id <id> --set decision=rejected --set reason="Unreadable label"
     .venv/Scripts/python scripts/invoke.py basket --body-file baskets/weekly-staples.json
+    .venv/Scripts/python scripts/invoke.py search --query q=milk --query maxPriceCents=500
     .venv/Scripts/python scripts/invoke.py aggregate                          # nightly price job, for yesterday
     .venv/Scripts/python scripts/invoke.py aggregate --set date=2026-10-24    # ... or one day, or --set backfillDays=30
     .venv/Scripts/python scripts/invoke.py cleanup        # delete everything the fake users created
@@ -53,6 +54,7 @@ ROUTES = {
     "review-queue": ("admin-submissions", "admin_submissions", "GET", "/admin/price-submissions", True),
     "moderate": ("admin-submissions", "admin_submissions", "PATCH", "/admin/price-submissions/{id}", True),
     "basket": ("basket", "basket", "POST", "/basket/compare", False),
+    "search": ("search", "search", "GET", "/products/search", False),
 }
 # Lambdas that aren't behind API Gateway: the --set fields are sent as the raw event.
 JOBS = {

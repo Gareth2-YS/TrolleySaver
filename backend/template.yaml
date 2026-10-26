@@ -390,6 +390,31 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  SearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-search
+      Handler: handlers.search.handler
+      Environment:
+        Variables:
+          PRICE_MAX_AGE_DAYS: "30"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer-price
+      Events:
+        SearchProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products/search
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
   PriceAggregatorFunction:
     Type: AWS::Serverless::Function
     Properties:
