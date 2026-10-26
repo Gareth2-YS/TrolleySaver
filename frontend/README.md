@@ -45,4 +45,4 @@ For real Cognito, change `VITE_AUTH_MODE` to `cognito` and fill in the non-secre
 
 The Search and Filter page loads products from the AWS catalog API and lets visitors browse products by name, brand, and category. Set `VITE_API_BASE_URL` in `frontend/.env.local` to the `ApiUrl` output from the `trolleysaver-dev` CloudFormation stack.
 
-Search & Filter loads products and current retailer prices from the API. Users can search by product or brand, filter by type, brand, dietary option, Healthier Choice, and price, and click a product card to see retailer prices. Category icons are in `frontend/assets/product-icons`.
+Search & Filter loads products and current retailer prices from `GET /products/search`, which does the searching and filtering in the backend. Users can search by product or brand, filter by type, brand, dietary option, Healthier Choice, and price, and click a product card to see retailer prices. Category icons are in `frontend/assets/product-icons`.

@@ -22,6 +22,7 @@ A step-by-step guide to checking that the backend works: before a handoff, after
 | [6. When something fails](#6-when-something-fails) | Logs, data, local debugging |
 | [7. Pre-handoff checklist](#7-pre-handoff-checklist) | Everything above in one list |
 | [8. Smart Basket](#8-smart-basket) | What the basket comparison covers and which test checks each part, then unit tests, direct calls, a hand-worked example, the spreadsheet evaluation and real HTTP |
+| [9. Search](#9-search) | What product search and filters cover and which test checks each part, then unit tests, direct calls, field errors and real HTTP |
 
 ---
 
@@ -133,8 +134,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 110 tests of the Lambda code (including the Smart Basket and its daily prices) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `110 passed in …s`.
+**What it checks:** 132 tests of the Lambda code (including the Smart Basket, its daily prices and Search) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `132 passed in …s`.
 
 ### 1.2 Template check
 
@@ -637,13 +638,14 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `110 passed`
+- [ ] 1.1: `pytest` shows `132 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products
 - [ ] 3: Lambda walkthrough done, with results matching the expectations
 - [ ] 4: real-login walkthrough done (4.3 is optional)
 - [ ] 8.4: `basket_eval.py` says `0 failed`
+- [ ] 9.2–9.4: search returns the two milks for `q=milk&maxPriceCents=500`, and bad parameters give `400` with the field named
 - [ ] Cleanup done:
   - `invoke.py mine` shows `"items": []`
   - no `tester-…@example.com` accounts remain: `aws cognito-idp list-users --user-pool-id $poolId --query "Users[].Username"`
@@ -971,3 +973,263 @@ $j.basket.stores | Select-Object rank, retailerName, totalCents
 ```
 
 **You should see:** `basket-test-user: deleted 3 submission(s), 0 photo(s) and the profile row`, then Sheng Siong 3750, FairPrice 3970 and Cold Storage 4370 again.
+
+## 9. Search
+
+**Before you start:** Daily prices worked out at least once ([8, Daily prices](#daily-prices-run-the-nightly-job-by-hand)). The commands and outputs in this part come from runs against dev on 27 Oct 2026.
+
+### What Search covers
+
+The shopper types words and picks filters. The backend answers with the products that match **every** filter given, sorted by name, each with its current price at each store and its lowest price. With no filters it returns the whole catalog. It also returns the filter options (`facets`), the number of results and the catalog size.
+
+Test names are in `tests/test_search.py`, which runs the whole search Lambda against fake DynamoDB.
+
+**Text search (`q`)**
+
+| Behaviour | Checked by |
+|---|---|
+| Every word must match, ignoring case | `test_text_search` ("WHOLEMEAL", "bread white"), 9.2 |
+| Matches the name, brand, category, `searchTerms`, `dietary` tags and pack size | `test_text_search` ("sunshine", "porridge", "vegetarian", "946", "kg") |
+| A blank or all-spaces `q` matches everything; no match gives an empty list | `test_text_search` ("  ", "caviar") |
+
+**Filters**
+
+| Behaviour | Checked by |
+|---|---|
+| `category`, `brand` and `dietary` match exactly, ignoring case | `test_filters_ignore_case_and_combine` |
+| `hcs=true` gives Healthier Choice products only, `hcs=false` the others | `test_filters_ignore_case_and_combine`, 9.4 |
+| Filters combine: a product must match all of them | `test_filters_ignore_case_and_combine`, 9.2 |
+| The price filter uses the product's **lowest current price** at any store, and both bounds are inclusive | `test_price_filter_uses_the_lowest_price`, 9.2 |
+| A product with no current price is left out whenever a price bound is given | `test_price_filter_uses_the_lowest_price` (`minPriceCents=0`), `test_stale_and_unaggregated_prices_are_ignored` |
+
+**Prices**
+
+| Behaviour | Checked by |
+|---|---|
+| Each item has its store prices (`priceCents`, `priceDate`, `submissionCount`); stores with no price are missing | `test_items_carry_store_prices_and_the_lowest_one`, 9.2 |
+| `lowestPrice` is the cheapest store, with ties going to the alphabetically first retailer id; `null` when no store prices it | `test_items_carry_store_prices_and_the_lowest_one`, 9.2 (Marigold: FairPrice and Sheng Siong both 356) |
+| Uses the stored daily averages, like the basket: averages over 30 days old and submissions the nightly job hasn't averaged yet are ignored | `test_stale_and_unaggregated_prices_are_ignored` |
+| `pricesUpdated` says when the job last ran (`null` before its first run) | `test_no_filters_returns_the_whole_catalog_by_name`, `test_empty_catalog` |
+
+**The response**
+
+| Behaviour | Checked by |
+|---|---|
+| Sorted by name; with no filters, the whole catalog | `test_no_filters_returns_the_whole_catalog_by_name` |
+| `facets` (categories, brands, dietary tags) come from the **whole catalog**, not just the results | `test_facets_come_from_the_whole_catalog`, 9.2 |
+| `total` is the number of results and `catalogSize` the number of products | `test_no_filters_returns_the_whole_catalog_by_name`, 9.2, 9.4 |
+| An empty catalog gives an empty list, not an error | `test_empty_catalog` |
+
+**The request**
+
+| Behaviour | Checked by |
+|---|---|
+| Public: works with no login | 9.4 |
+| `q` over 100 characters, `hcs` not `true`/`false`, a price that isn't a whole number of cents 0 or more, or `maxPriceCents` below `minPriceCents` → `400` with the field named | `test_invalid_parameters`, 9.3 |
+| Deployed Lambda, API route and permissions work | 9.2, 9.4 |
+
+
+### 9.1 Unit tests
+
+```powershell
+.venv\Scripts\python -m pytest tests\test_search.py -v
+```
+
+**What it checks:** 22 tests, using an in-memory fake of AWS: text search, each filter alone and combined, the price filter against the lowest price, store prices and `lowestPrice`, stale prices, facets, an empty catalog, and every validation error.
+
+**You should see:** `22 passed`.
+
+### 9.2 Call the search Lambda
+
+```powershell
+.venv\Scripts\python scripts\invoke.py search --query q=milk --query maxPriceCents=500
+```
+
+Each `--query name=value` adds one query parameter. Add `--local` to run the code in your `lambdas/` folder instead of the deployed function.
+
+**You should see:** `HTTP 200` and the two milks, each with its store prices and `lowestPrice`:
+
+```
+HTTP 200
+{
+  "items": [
+    {
+      "hcs": false,
+      "category": "milk",
+      "brand": "Magnolia",
+      "packQty": 946,
+      "id": "a2210900-d837-5e6d-bbbc-73dea4f80ea1",
+      "name": "Magnolia Fresh Milk",
+      "minCents": 181,
+      "packUnit": "ml",
+      "maxCents": 548,
+      "prices": {
+        "coldstorage": {
+          "priceCents": 365,
+          "priceDate": "2026-10-22",
+          "submissionCount": 1
+        },
+        "fairprice": {
+          "priceCents": 363,
+          "priceDate": "2026-10-24",
+          "submissionCount": 1
+        },
+        "shengsiong": {
+          "priceCents": 363,
+          "priceDate": "2026-10-22",
+          "submissionCount": 1
+        }
+      },
+      "lowestPrice": {
+        "retailerId": "fairprice",
+        "retailerName": "FairPrice",
+        "priceCents": 363,
+        "priceDate": "2026-10-24"
+      }
+    },
+    {
+      "hcs": true,
+      "category": "milk",
+      "brand": "Marigold",
+      "packQty": 956,
+      "id": "1220bf01-0ec4-5200-9f83-90792fc6b0b3",
+      "name": "Marigold HL Milk - Plain",
+      "minCents": 178,
+      "maxCents": 540,
+      "packUnit": "ml",
+      "prices": {
+        "coldstorage": {
+          "priceCents": 360,
+          "priceDate": "2026-10-22",
+          "submissionCount": 1
+        },
+        "fairprice": {
+          "priceCents": 356,
+          "priceDate": "2026-10-22",
+          "submissionCount": 1
+        },
+        "shengsiong": {
+          "priceCents": 356,
+          "priceDate": "2026-10-22",
+          "submissionCount": 1
+        }
+      },
+      "lowestPrice": {
+        "retailerId": "fairprice",
+        "retailerName": "FairPrice",
+        "priceCents": 356,
+        "priceDate": "2026-10-22"
+      }
+    }
+  ],
+  "total": 2,
+  "catalogSize": 24,
+  "facets": {
+    "categories": [
+      "bread",
+      "cereal",
+      "coffee",
+      "cookies",
+      "detergent",
+      "eggs",
+      "milk",
+      "rice",
+      "soft drinks",
+      "tea",
+      "toilet rolls",
+      "yoghurt"
+    ],
+    "brands": [
+      "Chew'S",
+      "Coca-Cola",
+      "Dynamo",
+      "Farmers Union",
+      "Gardenia",
+      "Kellog's",
+      "Kleenex",
+      "Lipton",
+      "Magnolia",
+      "Marigold",
+      "Mondelēz International",
+      "Munchy's",
+      "NUYOLK",
+      "Nestlé",
+      "Old Town",
+      "Owl",
+      "Pursoft",
+      "Songhe",
+      "Top"
+    ],
+    "dietary": [
+      "halal",
+      "vegetarian"
+    ]
+  },
+  "priceMaxAgeDays": 30,
+  "pricesUpdated": "2026-10-25T06:53:24.734Z"
+}
+```
+
+What to check:
+- Only the two milks are returned (`"total": 2`), out of `"catalogSize": 24`.
+- `facets` lists every category and brand in the catalog, not just milk.
+- Both milks are tied for cheapest between FairPrice and Sheng Siong (363 and 356), and `lowestPrice` goes to `fairprice`, the alphabetically first retailer id.
+
+Exact prices, dates and `pricesUpdated` change as people submit prices and the nightly job runs, so yours may differ. The shape should match.
+
+Try other filters the same way, for example `--query category=bread --query hcs=true` (1 product: Gardenia 100% Wholemeal) or no `--query` at all (all 24 products).
+
+### 9.3 Invalid input → field errors
+
+Run each line and compare:
+
+| Command | `fieldErrors` |
+|---|---|
+| `.venv\Scripts\python scripts\invoke.py search --query hcs=yes` | `"hcs": "Must be true or false"` |
+| `.venv\Scripts\python scripts\invoke.py search --query minPriceCents=1.50` | `"minPriceCents": "Must be a whole number of cents, 0 or more"` |
+| `.venv\Scripts\python scripts\invoke.py search --query minPriceCents=500 --query maxPriceCents=100` | `"maxPriceCents": "Maximum price must not be less than the minimum price"` |
+| `.venv\Scripts\python scripts\invoke.py search --query q=$("x" * 101)` | `"q": "Keep the search under 100 characters"` |
+
+**You should see:** `HTTP 400` and `"code": "VALIDATION_ERROR"` each time, for example:
+
+```
+HTTP 400
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Some fields are invalid.",
+  "requestId": "…",
+  "fieldErrors": {
+    "hcs": "Must be true or false"
+  }
+}
+```
+
+### 9.4 Real HTTP, as the frontend calls it
+
+No login is needed:
+
+```powershell
+$api = aws cloudformation describe-stacks --stack-name trolleysaver-dev --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text;
+$r = Invoke-RestMethod -Uri "$api/products/search?q=milk&maxPriceCents=500";
+"$($r.total) of $($r.catalogSize) products, prices updated $($r.pricesUpdated)";
+$r.items | Select-Object name, hcs, @{ n = "lowest"; e = { "$($_.lowestPrice.retailerName) $($_.lowestPrice.priceCents)" } } | Format-Table
+```
+
+**You should see:**
+
+```
+2 of 24 products, prices updated 2026-10-25T06:53:24.734Z
+
+name                       hcs lowest
+----                       --- ------
+Magnolia Fresh Milk      False FairPrice 363
+Marigold HL Milk - Plain  True FairPrice 356
+```
+
+An invalid parameter over HTTP:
+
+```powershell
+try { Invoke-RestMethod -Uri "$api/products/search?hcs=yes" } catch { "HTTP $([int]$_.Exception.Response.StatusCode)"; $_.ErrorDetails.Message }
+```
+
+**You should see:** `HTTP 400`, then `{"code": "VALIDATION_ERROR", … "fieldErrors": {"hcs": "Must be true or false"}}`.

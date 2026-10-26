@@ -1,8 +1,8 @@
 # TrolleySaver API reference
 
-**Owner:** Gareth (backend) · **Last updated:** 24 Oct 2026 · **Covers:** login, catalog, price & photo submissions, admin moderation, Smart Basket
+**Owner:** Gareth (backend) · **Last updated:** 26 Oct 2026 · **Covers:** login, catalog, product search, price & photo submissions, admin moderation, Smart Basket
 
-This is the contract between the frontend and the backend. It covers login, the product catalog, price and photo submissions, admin moderation and the Smart Basket comparison. Search endpoints don't exist yet: filter `GET /products` in the browser.
+This is the contract between the frontend and the backend. It covers login, the product catalog and search, price and photo submissions, admin moderation and the Smart Basket comparison.
 
 How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md), [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md) and [Smart Basket](../handoffs/2026-10-24-smart-basket-backend-to-frontend.md).
 
@@ -62,6 +62,7 @@ The server always takes the caller's identity from the verified token. Fields li
 |---|---|---|
 | [`GET /products`](#get-products) | public | Product catalog |
 | [`GET /retailers`](#get-retailers) | public | Store list |
+| [`GET /products/search`](#get-productssearch) | public | Search and filter products, with each one's current store prices |
 | [`POST /price-submissions/image-upload-url`](#post-price-submissionsimage-upload-url) | user | Get a one-time URL to upload a shelf-tag photo |
 | [`POST {uploadUrl}`](#uploading-the-photo-to-s3) | none (signed URL) | Upload the photo directly to S3 |
 | [`POST /price-submissions`](#post-price-submissions) | user | Submit a price |
@@ -106,6 +107,54 @@ See [Product](#product) for field details.
 200 OK
 { "items": [ { "id": "coldstorage", "name": "Cold Storage" }, { "id": "fairprice", "name": "FairPrice" }, { "id": "shengsiong", "name": "Sheng Siong" } ] }
 ```
+
+### `GET /products/search`
+
+Public, no token needed. Returns the products that match every filter given, sorted by name. Each one comes with its current price at each store and its lowest price. With no parameters it returns the whole catalog, priced, so the Search page needs only this one call.
+
+| Query | Example | Matches |
+|---|---|---|
+| `q` | `magnolia milk` | Products containing **every** word, ignoring case, in their name, brand, category, `searchTerms`, `dietary` or pack size. Up to 100 characters. |
+| `category` | `milk` | `category` equal to this, ignoring case |
+| `brand` | `Magnolia` | `brand` equal to this, ignoring case |
+| `dietary` | `halal` | `dietary` contains this, ignoring case |
+| `hcs` | `true` | `true`: Healthier Choice products only. `false`: products without the symbol. |
+| `minPriceCents`, `maxPriceCents` | `200`, `500` | Lowest current price within this range, inclusive. Whole cents, 0 or more. Products with no current price are left out whenever either bound is given. |
+
+```
+GET /products/search?q=milk&hcs=false&maxPriceCents=500
+```
+
+```jsonc
+200 OK
+{
+  "items": [
+    {
+      "id": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f", "name": "Magnolia Fresh Milk", "brand": "Magnolia",
+      "packQty": 946, "packUnit": "ml", "packCount": 1, "category": "milk", "hcs": false, "dietary": ["halal"],
+      "searchTerms": [], "minCents": 181, "maxCents": 548,
+      "prices": {
+        "fairprice":  { "priceCents": 363, "priceDate": "2026-10-25", "submissionCount": 2 },
+        "shengsiong": { "priceCents": 350, "priceDate": "2026-10-25", "submissionCount": 1 }
+      },
+      "lowestPrice": { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "priceCents": 350, "priceDate": "2026-10-25" }
+    }
+  ],
+  "total": 1,
+  "catalogSize": 42,
+  "facets": { "categories": ["bread", "cereal", "milk", …], "brands": ["Gardenia", "Magnolia", …], "dietary": ["halal", "vegetarian"] },
+  "priceMaxAgeDays": 30,
+  "pricesUpdated": "2026-10-25T16:05:01.230Z"
+}
+```
+
+- **Prices** are the same daily averages the Smart Basket uses ([how they're worked out](#post-basketcompare)). A store with no price, or only one more than `priceMaxAgeDays` old, is missing from `prices`.
+- **`lowestPrice`** is the cheapest store, with ties going to the alphabetically first retailer id. It's `null` when no store has a current price.
+- **`facets`** lists every category, brand and dietary tag in the **whole catalog**, not just the results, so dropdowns don't shrink as filters are applied.
+- **`total`** is the number of results and **`catalogSize`** the number of products, for "12 of 42 products".
+- No pagination: every match is returned.
+
+Errors: `400 VALIDATION_ERROR` (`q`, `hcs`, `minPriceCents`, `maxPriceCents`; `maxPriceCents` also when it's below `minPriceCents`).
 
 ### `POST /price-submissions/image-upload-url`
 
@@ -426,6 +475,32 @@ export interface ApiSubmission {
   rejectionReason?: string
   submitterName?: string | null
   submitterEmail?: string | null
+}
+```
+
+### Product search
+
+The response of [`GET /products/search`](#get-productssearch):
+
+```ts
+export interface ApiStorePrice {
+  priceCents: number
+  priceDate: string                   // "2026-10-25": the Singapore day this daily average comes from
+  submissionCount: number
+}
+
+export interface ApiSearchProduct extends ApiProduct {   // ApiProduct: the Product fields above
+  prices: Record<string, ApiStorePrice>                   // keyed by retailerId; stores with no current price are missing
+  lowestPrice: { retailerId: string; retailerName: string | null; priceCents: number; priceDate: string } | null
+}
+
+export interface ApiSearchResult {
+  items: ApiSearchProduct[]
+  total: number
+  catalogSize: number
+  facets: { categories: string[]; brands: string[]; dietary: string[] }
+  priceMaxAgeDays: number
+  pricesUpdated: string | null
 }
 ```
 

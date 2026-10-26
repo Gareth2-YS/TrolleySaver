@@ -1,6 +1,6 @@
 # TrolleySaver backend
 
-Serverless backend for **login** (Cognito), **community price & photo submissions** and the **Smart Basket** comparison (API Gateway → Lambda → DynamoDB, with photos in private S3). Everything is defined in [template.yaml](template.yaml) (AWS SAM) and deployed as the **`trolleysaver-dev`** stack.
+Serverless backend for **login** (Cognito), **product search**, **community price & photo submissions** and the **Smart Basket** comparison (API Gateway → Lambda → DynamoDB, with photos in private S3). Everything is defined in [template.yaml](template.yaml) (AWS SAM) and deployed as the **`trolleysaver-dev`** stack.
 
 | Looking for | Go to |
 |---|---|
@@ -16,7 +16,7 @@ Serverless backend for **login** (Cognito), **community price & photo submission
 |---|---|
 | `template.yaml` | Cognito pool, client, groups and triggers; photo bucket; DynamoDB tables (only for new environments); REST API; Lambdas |
 | `samconfig.toml` | Deploy settings for `dev` |
-| `lambdas/common/` | Shared helpers: HTTP responses and errors, caller identity, DynamoDB/S3 handles, validation, the daily average price rules (`daily_prices.py`), and the basket's price lookup (`pricing.py`), comparison (`basket.py`) and Healthier Choice swaps (`healthier.py`) |
+| `lambdas/common/` | Shared helpers: HTTP responses and errors, caller identity, DynamoDB/S3 handles, validation, the daily average price rules (`daily_prices.py`), product search and filters (`search.py`), and the basket's price lookup (`pricing.py`), comparison (`basket.py`) and Healthier Choice swaps (`healthier.py`) |
 | `lambdas/handlers/` | One module per Lambda |
 | `scripts/seed_catalog.py` | Loads the product spreadsheet into the tables. Never replaces existing data. |
 | `scripts/create_admin.py` | Creates an admin account |

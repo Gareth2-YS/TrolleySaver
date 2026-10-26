@@ -26,7 +26,7 @@ flowchart TB
     end
 
     API["API Gateway (REST)<br/>Cognito authorizer:<br/>access tokens only"]
-    L["Lambda functions · Python 3.12<br/>catalog · basket · upload-url<br/>create-submission · my-submissions<br/>admin-submissions"]
+    L["Lambda functions · Python 3.12<br/>catalog · search · basket · upload-url<br/>create-submission · my-submissions<br/>admin-submissions"]
     D[("DynamoDB<br/>product · retailer · user<br/>price-submission · retailer-price")]
     S["EventBridge Scheduler<br/>00:05 SGT daily"]
     AG["price-aggregator λ<br/>daily average price"]
@@ -57,7 +57,7 @@ flowchart TB
 | Frontend hosting | S3 + CloudFront | Serves the built React app via CDN | Decided (the frontend runs locally for now) |
 | Auth | Cognito User Pool + 2 trigger Lambdas | Sign-up (confirmed automatically), sign-in, `user`/`admin` groups. The user id (`sub`) is attached to every submission. | Built |
 | API | API Gateway (REST) | Routing, CORS, and a Cognito authorizer that accepts access tokens only | Built |
-| Backend | Lambda | Catalog, photo upload URLs, price submissions, admin moderation, Smart Basket comparison | Built (search not yet) |
+| Backend | Lambda | Catalog, product search, photo upload URLs, price submissions, admin moderation, Smart Basket comparison | Built |
 | Backend language | Python 3.12 on arm64 | Lambda runtime. Uses only the standard library and boto3. | Built |
 | Database | DynamoDB, on-demand | 5 tables + 3 GSIs: product, retailer, user, price-submission, and retailer-price (daily average price per product and store). See [database-design.md](database-design.md). | Built |
 | Scheduled jobs | EventBridge Scheduler | Runs `price-aggregator` at 00:05 SGT every day | Built |
@@ -73,6 +73,7 @@ Functions are named `trolleysaver-<env>-<name>`. All the code is in `backend/lam
 | Function | Triggered by | What it does |
 |---|---|---|
 | `catalog` | `GET /products`, `GET /retailers` (public) | Lists products and retailers |
+| `search` | `GET /products/search` (public) | Filters the catalog and attaches each product's current store prices from `retailer-price` |
 | `basket` | `POST /basket/compare` (public) | Prices a basket and its healthier version at every store from `retailer-price`, ranks the stores and works out savings |
 | `price-aggregator` | EventBridge Scheduler, 00:05 SGT daily | Averages yesterday's accepted submissions per product and store into `retailer-price` |
 | `upload-url` | `POST /price-submissions/image-upload-url` | Issues a presigned POST for one photo under `price-evidence/<userId>/` |
@@ -186,6 +187,25 @@ sequenceDiagram
 - The Lambda is stateless and public. The frontend keeps the basket.
 - Promotions, member prices and multi-buy deals are not tracked. Prices are per retailer, not per branch.
 
+### 3.5 Shopper searches for products
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as API Gateway
+    participant L as search Lambda
+    participant D as DynamoDB
+    B->>A: GET /products/search?q=milk&hcs=true&maxPriceCents=500 (no token)
+    A->>L: request
+    L->>D: scan product, retailer and retailer-price (small tables)
+    L-->>B: matching products with store prices and lowest price, totals, facets, pricesUpdated
+```
+
+- **Filters:** `common/search.py` keeps products that match every filter given. `q` must match every word, ignoring case, in the name, brand, category, search terms, dietary tags or pack size. `category`, `brand`, `dietary` and `hcs` match exactly, ignoring case. With no filters it returns the whole catalog.
+- **Prices:** the same daily averages as the basket (§3.4), read by `common/pricing.py`, with averages more than 30 days old left out. The price filter uses each product's lowest current price at any store, so products with no current price drop out when a price bound is set.
+- **Facets** (categories, brands, dietary tags) come from the whole catalog, so the page's filter options don't shrink as filters apply.
+- Every match is returned, with no pagination. This is fine at the catalog's current size.
+
 ---
 
 ## 4. Environments
@@ -233,6 +253,7 @@ sequenceDiagram
 | Price submission | 2 GetItem, 2 Query (rate limit, duplicate), 1 S3 HeadObject (with a photo), 1 PutItem, 1 UpdateItem |
 | "My submissions" page | 1 Query + 2 BatchGetItem |
 | Photo upload | 1 Lambda call to sign, then 1 direct S3 upload |
+| Product search | 3 Scans (product, retailer and retailer-price tables) |
 | Basket comparison | 3 Scans (product, retailer and retailer-price tables, about 100 small items in all) |
 | Nightly daily-price job | 1 Query on `ByStatus` (accepted submissions) + 1 BatchWrite per 25 updated prices, once a day |
 
