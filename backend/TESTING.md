@@ -486,7 +486,7 @@ $api = StackOutput ApiUrl; $clientId = StackOutput UserPoolClientId; $poolId = S
 "api=$api"
 ```
 
-**You should see:** `api=https://51ba6g72l7.execute-api.ap-southeast-1.amazonaws.com/dev`.
+**You should see:** `api=https://<api-id>.execute-api.ap-southeast-1.amazonaws.com/dev`, where `<api-id>` is the dev API's short random id.
 
 ### 4.1 Sign up and sign in a throwaway contributor
 
@@ -588,7 +588,7 @@ aws cognito-idp admin-delete-user --user-pool-id $poolId --username $email
 $poolId = aws cloudformation describe-stacks --stack-name trolleysaver-dev --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text; "poolId=$poolId"
 ```
 
-You should see `poolId=ap-southeast-1_f0KN2Wj2J`. Then run whichever of these you need.
+You should see `poolId=ap-southeast-1_` followed by the dev user pool's id. Then run whichever of these you need.
 
 List the admins' emails (prints nothing if there are none):
 
