@@ -1,5 +1,6 @@
 import { Filter, Search, X } from "lucide-react"
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react"
+// import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -17,6 +18,26 @@ import softDrinkIcon from "../../assets/product-icons/Soft.svg"
 import teaIcon from "../../assets/product-icons/Tea.svg"
 import yogurtIcon from "../../assets/product-icons/Yogurt.svg"
 
+// interface SearchProduct {
+//   id: string
+//   name: string
+//   brand?: string
+//   category?: string
+//   packQty?: number
+//   packUnit?: string
+//   packCount?: number
+//   hcs?: boolean
+//   dietary?: string[]
+//   searchTerms?: string[]
+//   prices?: Record<string, { priceCents?: number; priceDate?: string; submissionCount?: number; computedAt?: string }>
+// }
+
+interface StorePrice {
+  priceCents: number
+  priceDate: string
+  submissionCount: number
+}
+
 interface SearchProduct {
   id: string
   name: string
@@ -28,7 +49,25 @@ interface SearchProduct {
   hcs?: boolean
   dietary?: string[]
   searchTerms?: string[]
-  prices?: Record<string, { priceCents?: number; priceDate?: string; submissionCount?: number; computedAt?: string }>
+  prices: Record<string, StorePrice>
+  lowestPrice: { retailerId: string; retailerName: string | null; priceCents: number; priceDate: string } | null
+}
+
+interface SearchResult {
+  items: SearchProduct[]
+  total: number
+  catalogSize: number
+  facets: { categories: string[]; brands: string[]; dietary: string[] }
+}
+
+interface SearchCriteria {
+  q: string
+  category: string | null
+  brand: string
+  dietary: string
+  hcsOnly: boolean
+  minimumPrice: string
+  maximumPrice: string
 }
 
 const RETAILER_NAMES: Record<string, string> = {
@@ -59,57 +98,83 @@ const PRODUCT_CATEGORY_ICONS: Record<string, string> = {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "")
 
-async function fetchProducts(): Promise<SearchProduct[]> {
+// async function fetchProducts(): Promise<SearchProduct[]> {
+//   if (!API_BASE_URL) {
+//     throw new Error("Set VITE_API_BASE_URL in frontend/.env.local to load the AWS catalog.")
+//   }
+//
+//   const response = await fetch(`${API_BASE_URL}/products`)
+//   if (!response.ok) throw new Error(`Could not load products (HTTP ${response.status}).`)
+//
+//   const data = (await response.json()) as { items?: SearchProduct[] }
+//   if (!Array.isArray(data.items)) throw new Error("The catalog response did not contain a product list.")
+//   return data.items
+// }
+//
+// async function fetchProductPrices(products: SearchProduct[]): Promise<SearchProduct[]> {
+//   if (!API_BASE_URL || products.length === 0) return products
+//
+//   const pricesByProduct: Record<string, NonNullable<SearchProduct["prices"]>> = {}
+//
+//   for (let start = 0; start < products.length; start += 50) {
+//     const batch = products.slice(start, start + 50)
+//     const response = await fetch(`${API_BASE_URL}/basket/compare`, {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({ items: batch.map(({ id }) => ({ productId: id, quantity: 1 })) }),
+//     })
+//     if (!response.ok) throw new Error(`Could not load current prices (HTTP ${response.status}).`)
+//
+//     const data = (await response.json()) as {
+//       basket?: {
+//         stores?: Array<{
+//           retailerId: string
+//           lines?: Array<{ productId: string; unitPriceCents: number; priceDate: string; submissionCount: number }>
+//         }>
+//       }
+//     }
+//     if (!Array.isArray(data.basket?.stores)) throw new Error("The price response did not contain store prices.")
+//
+//     for (const store of data.basket.stores) {
+//       for (const line of store.lines ?? []) {
+//         if (!Number.isFinite(line.unitPriceCents) || line.unitPriceCents <= 0) continue
+//         pricesByProduct[line.productId] ??= {}
+//         pricesByProduct[line.productId][store.retailerId] = {
+//           priceCents: line.unitPriceCents,
+//           priceDate: line.priceDate,
+//           submissionCount: line.submissionCount,
+//         }
+//       }
+//     }
+//   }
+//
+//   return products.map((product) => ({ ...product, prices: pricesByProduct[product.id] ?? {} }))
+// }
+
+function toCents(dollars: string) {
+  return String(Math.round(Number(dollars) * 100))
+}
+
+async function fetchSearch(criteria: SearchCriteria, signal: AbortSignal): Promise<SearchResult> {
   if (!API_BASE_URL) {
     throw new Error("Set VITE_API_BASE_URL in frontend/.env.local to load the AWS catalog.")
   }
 
-  const response = await fetch(`${API_BASE_URL}/products`)
-  if (!response.ok) throw new Error(`Could not load products (HTTP ${response.status}).`)
+  const params = new URLSearchParams()
+  if (criteria.q.trim()) params.set("q", criteria.q.trim())
+  if (criteria.category) params.set("category", criteria.category)
+  if (criteria.brand) params.set("brand", criteria.brand)
+  if (criteria.dietary) params.set("dietary", criteria.dietary)
+  if (criteria.hcsOnly) params.set("hcs", "true")
+  if (criteria.minimumPrice !== "") params.set("minPriceCents", toCents(criteria.minimumPrice))
+  if (criteria.maximumPrice !== "") params.set("maxPriceCents", toCents(criteria.maximumPrice))
 
-  const data = (await response.json()) as { items?: SearchProduct[] }
-  if (!Array.isArray(data.items)) throw new Error("The catalog response did not contain a product list.")
-  return data.items
-}
+  const response = await fetch(`${API_BASE_URL}/products/search?${params}`, { signal })
+  if (!response.ok) throw new Error(`Could not search products (HTTP ${response.status}).`)
 
-async function fetchProductPrices(products: SearchProduct[]): Promise<SearchProduct[]> {
-  if (!API_BASE_URL || products.length === 0) return products
-  
-  const pricesByProduct: Record<string, NonNullable<SearchProduct["prices"]>> = {}
-
-  for (let start = 0; start < products.length; start += 50) {
-    const batch = products.slice(start, start + 50)
-    const response = await fetch(`${API_BASE_URL}/basket/compare`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: batch.map(({ id }) => ({ productId: id, quantity: 1 })) }),
-    })
-    if (!response.ok) throw new Error(`Could not load current prices (HTTP ${response.status}).`)
-
-    const data = (await response.json()) as {
-      basket?: {
-        stores?: Array<{
-          retailerId: string
-          lines?: Array<{ productId: string; unitPriceCents: number; priceDate: string; submissionCount: number }>
-        }>
-      }
-    }
-    if (!Array.isArray(data.basket?.stores)) throw new Error("The price response did not contain store prices.")
-
-    for (const store of data.basket.stores) {
-      for (const line of store.lines ?? []) {
-        if (!Number.isFinite(line.unitPriceCents) || line.unitPriceCents <= 0) continue
-        pricesByProduct[line.productId] ??= {}
-        pricesByProduct[line.productId][store.retailerId] = {
-          priceCents: line.unitPriceCents,
-          priceDate: line.priceDate,
-          submissionCount: line.submissionCount,
-        }
-      }
-    }
-  }
-
-  return products.map((product) => ({ ...product, prices: pricesByProduct[product.id] ?? {} }))
+  const data = (await response.json()) as SearchResult
+  if (!Array.isArray(data.items)) throw new Error("The search response did not contain a product list.")
+  return data
 }
 
 function formatLabel(value: string) {
@@ -132,20 +197,22 @@ function getPackDescription(product: SearchProduct) {
   return product.packCount && product.packCount > 1 ? `${product.packCount} × ${unitSize}` : unitSize
 }
 
-function getLowestPrice(product: SearchProduct) {
-  return Object.entries(product.prices ?? {})
-    .filter((entry): entry is [string, { priceCents: number; priceDate?: string }] =>
-      typeof entry[1]?.priceCents === "number" && Number.isFinite(entry[1].priceCents) && entry[1].priceCents > 0,
-    )
-    .map(([retailerId, price]) => ({ retailerId, ...price }))
-    .sort((a, b) => a.priceCents - b.priceCents || a.retailerId.localeCompare(b.retailerId))[0]
-}
+// function getLowestPrice(product: SearchProduct) {
+//   return Object.entries(product.prices ?? {})
+//     .filter((entry): entry is [string, { priceCents: number; priceDate?: string }] =>
+//       typeof entry[1]?.priceCents === "number" && Number.isFinite(entry[1].priceCents) && entry[1].priceCents > 0,
+//     )
+//     .map(([retailerId, price]) => ({ retailerId, ...price }))
+//     .sort((a, b) => a.priceCents - b.priceCents || a.retailerId.localeCompare(b.retailerId))[0]
+// }
 
-function ProductCard({ product, showNoPrice }: { product: SearchProduct; showNoPrice: boolean }) {
+// function ProductCard({ product, showNoPrice }: { product: SearchProduct; showNoPrice: boolean }) {
+function ProductCard({ product }: { product: SearchProduct }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const packDescription = getPackDescription(product)
-  const lowestPrice = getLowestPrice(product)
+  // const lowestPrice = getLowestPrice(product)
+  const lowestPrice = product.lowestPrice
   const categoryIcon = getCategoryIcon(product.category)
   const retailerIds = [
     ...Object.keys(RETAILER_NAMES),
@@ -203,12 +270,14 @@ function ProductCard({ product, showNoPrice }: { product: SearchProduct; showNoP
             <p className="mt-0.5 font-semibold text-[20px] text-primary">
               ${(lowestPrice.priceCents / 100).toFixed(2)}
               <span className="ml-2 text-sm font-normal text-foreground">
-                at {RETAILER_NAMES[lowestPrice.retailerId] ?? formatLabel(lowestPrice.retailerId)}
+                {/* at {RETAILER_NAMES[lowestPrice.retailerId] ?? formatLabel(lowestPrice.retailerId)} */}
+                at {lowestPrice.retailerName ?? RETAILER_NAMES[lowestPrice.retailerId] ?? formatLabel(lowestPrice.retailerId)}
               </span>
             </p>
           </div>
         )}
-        {!lowestPrice && showNoPrice && (
+        {/* {!lowestPrice && showNoPrice && ( */}
+        {!lowestPrice && (
           <p className="mt-4 rounded-lg border border-border/70 px-3 py-2.5 text-sm text-muted-foreground">
             No current price available
           </p>
@@ -295,12 +364,14 @@ function ProductCard({ product, showNoPrice }: { product: SearchProduct; showNoP
 }
 
 export function SearchProductsPage() {
-  const [products, setProducts] = useState<SearchProduct[]>([])
+  // const [products, setProducts] = useState<SearchProduct[]>([])
+  const [result, setResult] = useState<SearchResult | null>(null)
   const [loading, setLoading] = useState(true)
-  const [pricesLoading, setPricesLoading] = useState(true)
-  const [pricesError, setPricesError] = useState<string | null>(null)
+  const [searching, setSearching] = useState(false)
+  // const [pricesLoading, setPricesLoading] = useState(true)
+  // const [pricesError, setPricesError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [draftQuery, setDraftQuery] = useState("")
+  // const [draftQuery, setDraftQuery] = useState("")
   const [query, setQuery] = useState("")
   const [category, setCategory] = useState<string | null>(null)
   const [hcsOnly, setHcsOnly] = useState(false)
@@ -310,43 +381,47 @@ export function SearchProductsPage() {
   const [minimumPrice, setMinimumPrice] = useState("")
   const [maximumPrice, setMaximumPrice] = useState("")
 
-  useEffect(() => {
-    let active = true
+  // useEffect(() => {
+  //   let active = true
+  //
+  //   fetchProducts()
+  //     .then((items) => {
+  //       if (!active) return
+  //       setProducts(items)
+  //       setLoading(false)
+  //
+  //       return fetchProductPrices(items)
+  //         .then((pricedItems) => { if (active) setProducts(pricedItems) })
+  //         .catch((priceError: unknown) => {
+  //           if (active) setPricesError(priceError instanceof Error ? priceError.message : "Could not load current prices.")
+  //         })
+  //         .finally(() => { if (active) setPricesLoading(false) })
+  //     })
+  //     .catch((loadError: unknown) => {
+  //       if (active) setError(loadError instanceof Error ? loadError.message : "Could not load products.")
+  //       if (active) setPricesLoading(false)
+  //     })
+  //     .finally(() => { if (active) setLoading(false) })
+  //
+  //   return () => { active = false }
+  // }, [])
 
-    fetchProducts()
-      .then((items) => {
-        if (!active) return
-        setProducts(items)
-        setLoading(false)
-
-        return fetchProductPrices(items)
-          .then((pricedItems) => { if (active) setProducts(pricedItems) })
-          .catch((priceError: unknown) => {
-            if (active) setPricesError(priceError instanceof Error ? priceError.message : "Could not load current prices.")
-          })
-          .finally(() => { if (active) setPricesLoading(false) })
-      })
-      .catch((loadError: unknown) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : "Could not load products.")
-        if (active) setPricesLoading(false)
-      })
-      .finally(() => { if (active) setLoading(false) })
-
-    return () => { active = false }
-  }, [])
-
-  const categories = useMemo(
-    () => [...new Set(products.map((product) => product.category).filter((value): value is string => Boolean(value)))].sort(),
-    [products],
-  )
-  const brands = useMemo(
-    () => [...new Set(products.map((product) => product.brand).filter((value): value is string => Boolean(value)))].sort(),
-    [products],
-  )
-  const dietaryOptions = useMemo(
-    () => [...new Set(products.flatMap((product) => product.dietary ?? []))].sort(),
-    [products],
-  )
+  // const categories = useMemo(
+  //   () => [...new Set(products.map((product) => product.category).filter((value): value is string => Boolean(value)))].sort(),
+  //   [products],
+  // )
+  // const brands = useMemo(
+  //   () => [...new Set(products.map((product) => product.brand).filter((value): value is string => Boolean(value)))].sort(),
+  //   [products],
+  // )
+  // const dietaryOptions = useMemo(
+  //   () => [...new Set(products.flatMap((product) => product.dietary ?? []))].sort(),
+  //   [products],
+  // )
+  const products = result?.items ?? []
+  const categories = useMemo(() => result?.facets.categories ?? [], [result])
+  const brands = result?.facets.brands ?? []
+  const dietaryOptions = result?.facets.dietary ?? []
   const quickCategories = useMemo(
     () => QUICK_CATEGORY_LABELS.flatMap((label) => {
       const value = categories.find((item) => normalizeCategory(item) === label)
@@ -364,45 +439,64 @@ export function SearchProductsPage() {
     return null
   }, [maximumPrice, minimumPrice])
 
-  const filteredProducts = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase()
+  useEffect(() => {
+    if (priceRangeError) return // the backend would reject it with a 400 anyway
+    const controller = new AbortController()
+    // Debounce so typing in the price boxes doesn't send a request per keystroke
+    const timer = setTimeout(() => {
+      setSearching(true)
+      fetchSearch({ q: query, category, brand, dietary, hcsOnly, minimumPrice, maximumPrice }, controller.signal)
+        .then((data) => { setResult(data); setError(null) })
+        .catch((searchError: unknown) => {
+          if (!controller.signal.aborted) setError(searchError instanceof Error ? searchError.message : "Could not search products.")
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) { setSearching(false); setLoading(false) }
+        })
+    }, 300)
 
-    return products.filter((product) => {
-      const searchableText = [
-        product.name,
-        product.brand,
-        product.category,
-        ...(product.searchTerms ?? []),
-        ...(product.dietary ?? []),
-        product.packQty?.toString(),
-        product.packUnit,
-      ].filter(Boolean).join(" ").toLocaleLowerCase()
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, query])
 
-      return (!normalizedQuery || searchableText.includes(normalizedQuery))
-        && (!category || product.category === category)
-        && (!hcsOnly || product.hcs === true)
-        && (!brand || product.brand === brand)
-        && (!dietary || product.dietary?.includes(dietary) === true)
-        && (priceRangeError !== null || (minimumPrice === "" && maximumPrice === "") || (() => {
-          const lowestPrice = getLowestPrice(product)?.priceCents
-          if (lowestPrice === undefined) return false
-          const minCents = minimumPrice === "" ? 0 : Number(minimumPrice) * 100
-          const maxCents = maximumPrice === "" ? Number.POSITIVE_INFINITY : Number(maximumPrice) * 100
-          return lowestPrice >= minCents && lowestPrice <= maxCents
-        })())
-    })
-  }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, products, query])
+  // const filteredProducts = useMemo(() => {
+  //   const normalizedQuery = query.trim().toLocaleLowerCase()
+  //
+  //   return products.filter((product) => {
+  //     const searchableText = [
+  //       product.name,
+  //       product.brand,
+  //       product.category,
+  //       ...(product.searchTerms ?? []),
+  //       ...(product.dietary ?? []),
+  //       product.packQty?.toString(),
+  //       product.packUnit,
+  //     ].filter(Boolean).join(" ").toLocaleLowerCase()
+  //
+  //     return (!normalizedQuery || searchableText.includes(normalizedQuery))
+  //       && (!category || product.category === category)
+  //       && (!hcsOnly || product.hcs === true)
+  //       && (!brand || product.brand === brand)
+  //       && (!dietary || product.dietary?.includes(dietary) === true)
+  //       && (priceRangeError !== null || (minimumPrice === "" && maximumPrice === "") || (() => {
+  //         const lowestPrice = getLowestPrice(product)?.priceCents
+  //         if (lowestPrice === undefined) return false
+  //         const minCents = minimumPrice === "" ? 0 : Number(minimumPrice) * 100
+  //         const maxCents = maximumPrice === "" ? Number.POSITIVE_INFINITY : Number(maximumPrice) * 100
+  //         return lowestPrice >= minCents && lowestPrice <= maxCents
+  //       })())
+  //   })
+  // }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, products, query])
 
   const activeFilterCount = Number(Boolean(category)) + Number(hcsOnly) + Number(Boolean(brand))
     + Number(Boolean(dietary)) + Number(Boolean(minimumPrice)) + Number(Boolean(maximumPrice))
 
-  function submitSearch(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setQuery(draftQuery)
-  }
+  // function submitSearch(event: SubmitEvent<HTMLFormElement>) {
+  //   event.preventDefault()
+  //   setQuery(draftQuery)
+  // }
 
   function clearFilters() {
-    setDraftQuery("")
+    // setDraftQuery("")
     setQuery("")
     setCategory(null)
     setHcsOnly(false)
@@ -421,33 +515,37 @@ export function SearchProductsPage() {
             <p className="mt-2 text-sm text-muted-foreground">Find a product by name or brand.</p>
           </div>
           <p className="text-sm text-muted-foreground" aria-live="polite">
-            {loading ? "Loading…" : `${filteredProducts.length} of ${products.length} products`}
+            {/* {loading ? "Loading…" : `${filteredProducts.length} of ${products.length} products`} */}
+            {loading ? "Loading…" : searching ? "Updating…" : `${result?.total ?? 0} of ${result?.catalogSize ?? 0} products`}
           </p>
         </header>
 
-        {pricesLoading && !loading && (
+        {/* {pricesLoading && !loading && (
           <p className="text-sm text-muted-foreground" aria-live="polite">Loading current retailer prices…</p>
         )}
         {pricesError && !loading && (
           <p role="status" className="rounded-lg border border-border/70 px-4 py-3 text-sm text-muted-foreground">
             Product list loaded, but current prices are unavailable: {pricesError}
           </p>
-        )}
+        )} */}
 
         <div className="glass-panel space-y-5 p-5 sm:p-7">
-          <form onSubmit={submitSearch} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+          {/* <form onSubmit={submitSearch} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"> */}
+          <form onSubmit={(event) => event.preventDefault()} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
-                value={draftQuery}
-                onChange={(event) => setDraftQuery(event.target.value)}
+                // value={draftQuery}
+                // onChange={(event) => setDraftQuery(event.target.value)}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search product or brand"
                 aria-label="Search products or brands"
                 className="pl-10"
               />
             </div>
-            <Button type="submit"><Search className="size-4" />Search</Button>
+            {/* <Button type="submit"><Search className="size-4" />Search</Button> */}
             <Button
               type="button"
               variant="outline"
@@ -546,21 +644,27 @@ export function SearchProductsPage() {
           </div>
         ) : loading ? (
           <div className="glass-panel p-10 text-center text-sm text-muted-foreground" aria-live="polite">Loading products…</div>
-        ) : products.length === 0 ? (
+        // ) : products.length === 0 ? (
+        ) : result?.catalogSize === 0 ? (
           <div className="glass-panel p-10 text-center">
             <h2 className="font-semibold">No products yet</h2>
             <p className="mt-2 text-sm text-muted-foreground">Products will appear here when the catalog API returns them.</p>
           </div>
-        ) : filteredProducts.length === 0 ? (
+        // ) : filteredProducts.length === 0 ? (
+        ) : products.length === 0 ? (
           <div className="glass-panel p-10 text-center">
             <h2 className="font-semibold">No matching products</h2>
             <p className="mt-2 text-sm text-muted-foreground">Try a different search or clear some filters.</p>
             <Button type="button" variant="outline" className="mt-4" onClick={clearFilters}>Clear search and filters</Button>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-live="polite">
-            {filteredProducts.map((product) => (
+          // <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-live="polite">
+          <div className={`grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${searching ? "opacity-60" : ""}`} aria-live="polite" aria-busy={searching}>
+            {/* {filteredProducts.map((product) => (
               <ProductCard key={product.id} product={product} showNoPrice={!pricesLoading && !pricesError} />
+            ))} */}
+            {products.map((product) => (
+              <ProductCard key={product.id} product={product} />
             ))}
           </div>
         )}
