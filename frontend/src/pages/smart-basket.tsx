@@ -193,20 +193,19 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
 
         <FormAlert message={catalogError ?? compareError} />
 
-        <div className="grid items-start gap-5 lg:grid-cols-12">
-          <section className="glass-panel p-5 sm:p-7 lg:col-span-7">
-            <PanelHeading icon={ShoppingBasket} title="Your basket" description={`${basket.length} ${basket.length === 1 ? "product" : "products"} · ${packCount} ${packCount === 1 ? "pack" : "packs"}`}>
-              {basket.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={() => setItems([])}><Trash2 className="size-4" />Clear</Button>}
-            </PanelHeading>
+        {/* On large screens the cart is a sticky sidebar beside every other panel; on phones it follows the product search. */}
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="glass-panel p-5 sm:p-7 lg:col-start-1">
+            <PanelHeading icon={Search} title="Add groceries" description="Search the catalog and add items to your basket" />
 
             <div className="mt-6 space-y-2">
-              <Label htmlFor="product-search">Add groceries</Label>
+              <Label htmlFor="product-search" className="sr-only">Search groceries</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input id="product-search" ref={searchRef} className="pl-9" placeholder="Search by product, brand or category" value={query} onChange={(event) => setQuery(event.target.value)} />
               </div>
             </div>
-            <ul className="mt-3 max-h-64 divide-y overflow-y-auto rounded-xl border bg-card/35" aria-label="Products">
+            <ul className="mt-3 max-h-80 divide-y overflow-y-auto rounded-xl border bg-card/35" aria-label="Products">
               {catalogLoading ? (
                 <li className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading products…</li>
               ) : matches.length === 0 ? (
@@ -229,27 +228,38 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                 )
               })}
             </ul>
+          </section>
 
-            <div className="mt-6 border-t border-border/70 pt-2" aria-live="polite">
+          <aside className="glass-panel flex max-h-[32rem] flex-col p-5 sm:p-6 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:max-h-[calc(100vh-7rem)]" aria-label="Basket">
+            <PanelHeading icon={ShoppingBasket} title="Your basket" description={`${basket.length} ${basket.length === 1 ? "product" : "products"} · ${packCount} ${packCount === 1 ? "pack" : "packs"}`}>
+              {basket.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={() => setItems([])}><Trash2 className="size-4" />Clear</Button>}
+            </PanelHeading>
+
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1" aria-live="polite">
               {basket.length === 0 ? (
                 <div className="py-10 text-center">
                   <span className="mx-auto grid size-14 place-items-center rounded-xl bg-accent text-primary"><ShoppingBasket className="size-7" /></span>
                   <h3 className="mt-4 font-semibold">Your basket is empty</h3>
-                  <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">Add groceries above to compare the full basket total at every supermarket.</p>
+                  <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">Add groceries to compare the full basket total at every supermarket.</p>
                   <Button type="button" className="mt-5" onClick={() => searchRef.current?.focus()}><Search className="size-4" />Browse groceries</Button>
                 </div>
               ) : (
-                <ul className="divide-y">
+                <ul className="divide-y" aria-label="Basket items">
                   {basket.map((item) => {
                     const product = catalog.get(item.productId)!
                     const line = cheapest?.lines.find((entry) => entry.productId === item.productId)
                     return (
-                      <li key={item.productId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 py-4 sm:grid-cols-[minmax(0,1fr)_auto_88px]">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold leading-snug">{product.name}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
+                      <li key={item.productId} className="py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-snug">{product.name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
+                          </div>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums">
+                            {line ? formatCents(line.subtotalCents) : <span className="text-xs font-medium text-muted-foreground">{comparing ? "…" : "No price"}</span>}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-1 rounded-md border bg-card/60 p-1">
+                        <div className="mt-3 flex w-fit items-center gap-1 rounded-md border bg-card/60 p-1">
                           <Button type="button" variant="ghost" size="icon" className="size-8" onClick={() => setQuantity(item.productId, item.quantity - 1)} aria-label={item.quantity === 1 ? `Remove ${product.name}` : `Decrease ${product.name}`}>
                             {item.quantity === 1 ? <Trash2 className="size-4" /> : <Minus className="size-4" />}
                           </Button>
@@ -258,18 +268,34 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                             <Plus className="size-4" />
                           </Button>
                         </div>
-                        <span className="col-span-2 text-right text-sm font-semibold tabular-nums sm:col-span-1">
-                          {line ? formatCents(line.subtotalCents) : <span className="text-xs font-medium text-muted-foreground">{comparing ? "…" : "No price"}</span>}
-                        </span>
                       </li>
                     )
                   })}
                 </ul>
               )}
             </div>
-          </section>
 
-          <section className="glass-panel p-5 sm:p-7 lg:col-span-5">
+            {basket.length > 0 && (
+              <div className="mt-2 space-y-1 border-t border-border/70 pt-4">
+                {recommendation ? (
+                  <>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-sm text-muted-foreground">Cheapest at {recommendedName}</span>
+                      <strong className="text-2xl font-semibold tabular-nums text-primary">{formatCents(recommendation.totalCents)}</strong>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {recommendation.complete ? "Item prices shown at this store." : "Some items have no price at this store."}
+                      {comparison?.maxSavingsCents ? ` Save up to ${formatCents(comparison.maxSavingsCents)} versus other stores.` : ""}
+                    </p>
+                  </>
+                ) : (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">{comparing && <LoaderCircle className="size-4 animate-spin" />}{comparing ? "Comparing store prices…" : "No prices found yet."}</p>
+                )}
+              </div>
+            )}
+          </aside>
+
+          <section className="glass-panel p-5 sm:p-7 lg:col-start-1">
             <PanelHeading icon={Store} title="Price comparison" description="Whole-basket total at each supermarket">
               {comparing && <LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label="Updating prices" />}
             </PanelHeading>
@@ -285,7 +311,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />No single store has a price for every item yet. Totals only include the items each store prices.
                   </p>
                 )}
-                <ol className="mt-5 space-y-3">
+                <ol className="mt-5 grid gap-3 md:grid-cols-3">
                   {comparison.stores.map((store) => {
                     const selected = store.retailerId === selectedStore?.retailerId
                     const best = store.rank === 1 && store.pricedCount > 0
@@ -297,7 +323,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                           aria-pressed={selected}
                           onClick={() => setSelectedStoreId(store.retailerId)}
                           className={cn(
-                            "w-full rounded-xl border bg-card/45 p-4 text-left transition-colors hover:border-primary/50 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            "h-full w-full rounded-xl border bg-card/45 p-4 text-left transition-colors hover:border-primary/50 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                             selected && "border-primary/60 bg-accent/50",
                           )}
                         >
@@ -322,9 +348,8 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
               </>
             )}
           </section>
-        </div>
 
-        <section className="glass-panel p-5 sm:p-7">
+        <section className="glass-panel p-5 sm:p-7 lg:col-start-1">
           <PanelHeading icon={ChartColumn} title="Savings by supermarket" description="What you save by choosing the cheapest store instead of buying the whole basket elsewhere" />
           {!comparison || !recommendation ? (
             <div className="mt-6 rounded-xl border border-dashed p-10 text-center">
@@ -333,7 +358,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
               <p className="mt-1 text-xs text-muted-foreground">{comparison ? "None of these products has a recent price at any store. We're working on it." : "Savings are worked out against every supermarket in the comparison."}</p>
             </div>
           ) : (
-            <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,.8fr)_minmax(0,2fr)]">
+            <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,.8fr)_minmax(0,2fr)]">
               <article className="rounded-xl border border-primary/40 bg-accent/50 p-5">
                 <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Best single store</span>
                 <h3 className="mt-2 text-2xl font-semibold">{recommendedName}</h3>
@@ -354,7 +379,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
         </section>
 
         {selectedStore && selectedStore.pricedCount + selectedStore.missingCount > 0 && (
-          <section className="glass-panel p-5 sm:p-7">
+          <section className="glass-panel p-5 sm:p-7 lg:col-start-1">
             <PanelHeading icon={ClipboardList} title={`Shopping list · ${selectedStore.retailerName ?? selectedStore.retailerId}`} description="Choose a store in the price comparison to see its list">
               <span className="w-fit shrink-0 rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">{selectedStore.pricedCount} priced · {selectedStore.missingCount} missing</span>
             </PanelHeading>
@@ -396,6 +421,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
             </div>
           </section>
         )}
+        </div>
       </div>
     </AppShell>
   )
