@@ -230,6 +230,10 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 
   function clearForm() {
     reset({ productId: "", storeId: "", price: 0, observedDate: today })
+    setProductSearch("")
+    setProductCategory("")
+    setProductListOpen(false)
+    setActiveProductIndex(-1)
     clearImage()
     setLoadError(null)
   }
