@@ -9,6 +9,7 @@ import {
   ImageUp,
   ListChecks,
   LoaderCircle,
+  Search,
   ShieldCheck,
   Store,
   X,
@@ -135,6 +136,10 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const { user, getAccessToken } = useAuth()
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
   const [products, setProducts] = useState<CatalogProduct[]>([])
+  const [productSearch, setProductSearch] = useState("")
+  const [productCategory, setProductCategory] = useState("")
+  const [productListOpen, setProductListOpen] = useState(false)
+  const [activeProductIndex, setActiveProductIndex] = useState(-1)
   const [stores, setStores] = useState<CatalogRetailer[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -150,11 +155,40 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     reset,
     clearErrors,
     setError,
+    setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<ContributionInput, unknown, ContributionValues>({
     resolver: zodResolver(contributionSchema),
     defaultValues: { productId: "", storeId: "", price: 0, observedDate: today },
   })
+  const selectedProductId = watch("productId")
+
+  const productCategories = useMemo(
+    () => [...new Set(products.map((product) => product.category?.trim()).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b)),
+    [products],
+  )
+  const filteredProducts = useMemo(() => {
+    const query = productSearch.trim().toLocaleLowerCase()
+    const category = productCategory.trim().toLocaleLowerCase()
+    return products.filter((product) => {
+      const matchesCategory = !category || product.category?.trim().toLocaleLowerCase() === category
+      const searchableText = [product.name, product.brand, ...(product.searchTerms ?? [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase()
+      return matchesCategory && (!query || searchableText.includes(query))
+    })
+  }, [productCategory, productSearch, products])
+  const showProductOptions = productListOpen
+
+  function chooseProduct(product: CatalogProduct) {
+    setValue("productId", product.id, { shouldDirty: true, shouldValidate: true })
+    clearErrors("productId")
+    setProductSearch(product.name)
+    setProductListOpen(false)
+    setActiveProductIndex(-1)
+  }
 
   const loadMine = useCallback(async () => {
     if (!user) return
@@ -284,13 +318,124 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
             <div><h2 className="text-xl font-semibold">Price details</h2><p className="text-xs text-muted-foreground">Tell us what you saw and where</p></div>
           </div>
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="product">Product</Label>
-              <select id="product" className={selectClass} disabled={loading} aria-invalid={Boolean(errors.productId)} {...register("productId")}>
-                <option value="">{loading ? "Loading products…" : "Select a product"}</option>
-                {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-              </select>
-              <FieldError>{errors.productId?.message}</FieldError>
+            <div
+              className="space-y-2 sm:col-span-2"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProductListOpen(false)
+              }}
+            >
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,0.45fr)]">
+                <div className="space-y-2">
+                  <Label htmlFor="product-search">Product · search by name or brand</Label>
+                  <div className="relative">
+                    <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="product-search"
+                      type="search"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={showProductOptions}
+                      aria-controls={filteredProducts.length > 0 ? "product-options" : undefined}
+                      aria-activedescendant={showProductOptions && activeProductIndex >= 0 ? `product-option-${filteredProducts[activeProductIndex]?.id}` : undefined}
+                      aria-invalid={Boolean(errors.productId)}
+                      aria-describedby={errors.productId ? "product-error" : undefined}
+                      autoComplete="off"
+                      placeholder="Start typing a product or brand"
+                      className="pl-9"
+                      value={productSearch}
+                      onFocus={() => {
+                        setProductListOpen(true)
+                        setActiveProductIndex(-1)
+                      }}
+                      onChange={(event) => {
+                        const query = event.target.value
+                        setProductSearch(query)
+                        setValue("productId", "")
+                        setProductListOpen(true)
+                        setActiveProductIndex(-1)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "ArrowDown" && filteredProducts.length > 0) {
+                          event.preventDefault()
+                          setProductListOpen(true)
+                          setActiveProductIndex((current) => Math.min(current + 1, filteredProducts.length - 1))
+                        } else if (event.key === "ArrowUp" && filteredProducts.length > 0) {
+                          event.preventDefault()
+                          setProductListOpen(true)
+                          setActiveProductIndex((current) => current <= 0 ? filteredProducts.length - 1 : current - 1)
+                        } else if (event.key === "Enter" && showProductOptions && filteredProducts.length > 0) {
+                          event.preventDefault()
+                          chooseProduct(filteredProducts[activeProductIndex >= 0 ? activeProductIndex : 0])
+                        } else if (event.key === "Escape") {
+                          setProductListOpen(false)
+                          setActiveProductIndex(-1)
+                        }
+                      }}
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="product-category">Optional type filter</Label>
+                  <select
+                    id="product-category"
+                    className={selectClass}
+                    value={productCategory}
+                    disabled={loading || productCategories.length === 0}
+                    onChange={(event) => {
+                      const category = event.target.value
+                      setProductCategory(category)
+                      setValue("productId", "")
+                      setProductListOpen(true)
+                      setActiveProductIndex(-1)
+                    }}
+                  >
+                    <option value="">All types</option>
+                    {productCategories.map((category) => (
+                      <option key={category} value={category}>{category.charAt(0).toLocaleUpperCase() + category.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {showProductOptions && (
+                <div className="overflow-hidden rounded-md border bg-popover shadow-lg">
+                  {filteredProducts.length > 0 ? (
+                    <div id="product-options" role="listbox" aria-label="Matching products" className="max-h-64 overflow-y-auto py-1">
+                      {filteredProducts.map((product, index) => (
+                        <div
+                          id={`product-option-${product.id}`}
+                          key={product.id}
+                          role="option"
+                          aria-selected={product.id === selectedProductId}
+                          className={cn(
+                            "flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-sm",
+                            index === activeProductIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+                          )}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => setActiveProductIndex(index)}
+                          onClick={() => chooseProduct(product)}
+                        >
+                          <span>{product.name}</span>
+                          {product.category && <span className="shrink-0 text-xs text-muted-foreground">{product.category}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p role="status" className="px-3 py-3 text-sm text-muted-foreground">No products match. Try another name or product type.</p>
+                  )}
+                </div>
+              )}
+
+              <input type="hidden" {...register("productId")} />
+              {!loading && products.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {productSearch.trim() || productCategory
+                    ? `Showing ${filteredProducts.length} of ${products.length} products. Select a suggestion from the list.`
+                    : `${products.length} products available. Type to search, or choose a suggestion from the full list.`}
+                </p>
+              )}
+              {errors.productId && <p id="product-error" role="alert" className="text-xs font-medium text-destructive">{errors.productId.message}</p>}
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="store">Store</Label>
