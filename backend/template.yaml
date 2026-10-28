@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: TrolleySaver backend - Cognito auth, catalog and community price submissions
+Description: TrolleySaver backend - Cognito auth, catalog, community price submissions and Smart Basket
 
 Parameters:
   Env:
@@ -36,6 +36,7 @@ Globals:
         RETAILER_TABLE: !Sub trolleysaver-${Env}-retailer
         SUBMISSION_TABLE: !Sub trolleysaver-${Env}-price-submission
         USER_TABLE: !Sub trolleysaver-${Env}-user
+        RETAILER_PRICE_TABLE: !Sub trolleysaver-${Env}-retailer-price
         ALLOWED_ORIGIN: !Ref AllowedOrigin
         MAX_UPLOAD_BYTES: "5242880"
         RATE_LIMIT_PER_HOUR: "30"
@@ -285,6 +286,24 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # Daily average price per (product, retailer), written by PriceAggregatorFunction, read by the basket.
+  RetailerPriceTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldCreateTables
+    Properties:
+      TableName: !Sub trolleysaver-${Env}-retailer-price
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+        - AttributeName: retailerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+        - AttributeName: retailerId
+          KeyType: RANGE
+
   # ---------- API ----------
   Api:
     Type: AWS::Serverless::Api
@@ -345,6 +364,76 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+
+  BasketFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-basket
+      Handler: handlers.basket.handler
+      Environment:
+        Variables:
+          PRICE_MAX_AGE_DAYS: "30"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer-price
+      Events:
+        CompareBasket:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /basket/compare
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  SearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-search
+      Handler: handlers.search.handler
+      Environment:
+        Variables:
+          PRICE_MAX_AGE_DAYS: "30"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer-price
+      Events:
+        SearchProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products/search
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  PriceAggregatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-price-aggregator
+      Handler: handlers.aggregate_prices.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-price-submission
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer-price
+      Events:
+        Nightly:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub trolleysaver-${Env}-daily-prices
+            Description: Average yesterday's accepted price submissions per product and retailer
+            ScheduleExpression: cron(5 0 * * ? *)
+            ScheduleExpressionTimezone: Asia/Singapore
 
   UploadUrlFunction:
     Type: AWS::Serverless::Function

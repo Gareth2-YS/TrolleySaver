@@ -1,10 +1,10 @@
 # TrolleySaver API reference
 
-**Owner:** Gareth (backend) · **Last updated:** 24 Oct 2026 · **Covers:** login, catalog, price & photo submissions, admin moderation
+**Owner:** Gareth (backend) · **Last updated:** 26 Oct 2026 · **Covers:** login, catalog, product search, price & photo submissions, admin moderation, Smart Basket
 
-This is the contract between the frontend and the backend. It covers login, the product catalog, price and photo submissions, and admin moderation. Smart Basket and Search endpoints don't exist yet.
+This is the contract between the frontend and the backend. It covers login, the product catalog and search, price and photo submissions, admin moderation and the Smart Basket comparison.
 
-How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md) and [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md).
+How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md), [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md) and [Smart Basket](../handoffs/2026-10-24-smart-basket-backend-to-frontend.md).
 
 - [1. Basics](#1-basics)
 - [2. Authentication](#2-authentication)
@@ -24,7 +24,7 @@ How the frontend should adopt it is described in the feature handoffs: [auth](..
 | **Base URL** | The stack output `ApiUrl`, e.g. `https://<api-id>.execute-api.ap-southeast-1.amazonaws.com/dev`. Use it as `VITE_API_BASE_URL`. |
 | **Environment** | `dev` is the only deployed environment. Build the frontend against it. |
 | **Format** | JSON request and response bodies (`Content-Type: application/json`) |
-| **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog |
+| **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog and the basket comparison |
 | **CORS** | Allowed origin is `http://localhost:5173` (the Vite dev server). Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH`. Other origins can be added on request. |
 | **Money** | Integer cents: `363` means $3.63 |
 | **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
@@ -62,12 +62,14 @@ The server always takes the caller's identity from the verified token. Fields li
 |---|---|---|
 | [`GET /products`](#get-products) | public | Product catalog |
 | [`GET /retailers`](#get-retailers) | public | Store list |
+| [`GET /products/search`](#get-productssearch) | public | Search and filter products, with each one's current store prices |
 | [`POST /price-submissions/image-upload-url`](#post-price-submissionsimage-upload-url) | user | Get a one-time URL to upload a shelf-tag photo |
 | [`POST {uploadUrl}`](#uploading-the-photo-to-s3) | none (signed URL) | Upload the photo directly to S3 |
 | [`POST /price-submissions`](#post-price-submissions) | user | Submit a price |
 | [`GET /price-submissions/mine`](#get-price-submissionsmine) | user | The caller's own submissions |
 | [`GET /admin/price-submissions`](#get-adminprice-submissions) | admin | Review queue (flagged prices) |
 | [`PATCH /admin/price-submissions/{id}`](#patch-adminprice-submissionsid) | admin | Accept or reject a flagged price |
+| [`POST /basket/compare`](#post-basketcompare) | public | Price a basket at every store, plus a healthier version of it |
 
 "user" means any signed-in account, including admins.
 
@@ -105,6 +107,54 @@ See [Product](#product) for field details.
 200 OK
 { "items": [ { "id": "coldstorage", "name": "Cold Storage" }, { "id": "fairprice", "name": "FairPrice" }, { "id": "shengsiong", "name": "Sheng Siong" } ] }
 ```
+
+### `GET /products/search`
+
+Public, no token needed. Returns the products that match every filter given, sorted by name. Each one comes with its current price at each store and its lowest price. With no parameters it returns the whole catalog, priced, so the Search page needs only this one call.
+
+| Query | Example | Matches |
+|---|---|---|
+| `q` | `magnolia milk` | Products containing **every** word, ignoring case, in their name, brand, category, `searchTerms`, `dietary` or pack size. Up to 100 characters. |
+| `category` | `milk` | `category` equal to this, ignoring case |
+| `brand` | `Magnolia` | `brand` equal to this, ignoring case |
+| `dietary` | `halal` | `dietary` contains this, ignoring case |
+| `hcs` | `true` | `true`: Healthier Choice products only. `false`: products without the symbol. |
+| `minPriceCents`, `maxPriceCents` | `200`, `500` | Lowest current price within this range, inclusive. Whole cents, 0 or more. Products with no current price are left out whenever either bound is given. |
+
+```
+GET /products/search?q=milk&hcs=false&maxPriceCents=500
+```
+
+```jsonc
+200 OK
+{
+  "items": [
+    {
+      "id": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f", "name": "Magnolia Fresh Milk", "brand": "Magnolia",
+      "packQty": 946, "packUnit": "ml", "packCount": 1, "category": "milk", "hcs": false, "dietary": ["halal"],
+      "searchTerms": [], "minCents": 181, "maxCents": 548,
+      "prices": {
+        "fairprice":  { "priceCents": 363, "priceDate": "2026-10-25", "submissionCount": 2 },
+        "shengsiong": { "priceCents": 350, "priceDate": "2026-10-25", "submissionCount": 1 }
+      },
+      "lowestPrice": { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "priceCents": 350, "priceDate": "2026-10-25" }
+    }
+  ],
+  "total": 1,
+  "catalogSize": 42,
+  "facets": { "categories": ["bread", "cereal", "milk", …], "brands": ["Gardenia", "Magnolia", …], "dietary": ["halal", "vegetarian"] },
+  "priceMaxAgeDays": 30,
+  "pricesUpdated": "2026-10-25T16:05:01.230Z"
+}
+```
+
+- **Prices** are the same daily averages the Smart Basket uses ([how they're worked out](#post-basketcompare)). A store with no price, or only one more than `priceMaxAgeDays` old, is missing from `prices`.
+- **`lowestPrice`** is the cheapest store, with ties going to the alphabetically first retailer id. It's `null` when no store has a current price.
+- **`facets`** lists every category, brand and dietary tag in the **whole catalog**, not just the results, so dropdowns don't shrink as filters are applied.
+- **`total`** is the number of results and **`catalogSize`** the number of products, for "12 of 42 products".
+- No pagination: every match is returned.
+
+Errors: `400 VALIDATION_ERROR` (`q`, `hcs`, `minPriceCents`, `maxPriceCents`; `maxPriceCents` also when it's below `minPriceCents`).
 
 ### `POST /price-submissions/image-upload-url`
 
@@ -271,6 +321,95 @@ PATCH /admin/price-submissions/ZTBiYmIyNTEtODZm…
 
 Errors: `400 VALIDATION_ERROR` (`decision`, `reason`), `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 ALREADY_MODERATED`. A 409 means the submission isn't flagged: either another admin got there first, or it was accepted automatically.
 
+### `POST /basket/compare`
+
+Public, no token needed. Prices the shopper's basket at every store and returns two comparisons side by side:
+- `basket`: exactly the products the shopper picked.
+- `healthierBasket`: the same basket with each product swapped for a Healthier Choice product in its category, where one exists.
+
+Nothing is stored. The frontend keeps the basket (e.g. in `localStorage`) and sends all of it each time.
+
+**Prices update once a day.** Each store's price for a product is that day's **average** of the accepted prices contributors submitted for that store, worked out at 00:05 Singapore time. A price submitted today shows in the basket from tomorrow. Show `pricesUpdated` on the page, e.g. "Prices updated 26 Oct, 00:05".
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `items` | array | yes | 1–50 lines of `{ productId, quantity }` |
+| `items[].productId` | string | yes | An `id` from `GET /products` |
+| `items[].quantity` | integer | yes | Number of packs, 1–99. Repeated products are merged by adding their quantities, up to 99 in total. |
+| `retailerIds` | string[] | no | Only compare these stores. Leave it out to compare every store. |
+
+```json
+POST /basket/compare
+{ "items": [ { "productId": "<white bread id>", "quantity": 2 }, { "productId": "<Dynamo id>", "quantity": 1 },
+             { "productId": "<Thai rice id>", "quantity": 1 } ] }
+```
+
+```jsonc
+200 OK
+{
+  "priceMaxAgeDays": 30,
+  "pricesUpdated": "2026-10-25T16:05:01.230Z",
+  "basket": {
+    "stores": [
+      { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "rank": 1, "complete": true,
+        "pricedCount": 3, "missingCount": 0, "coveragePercent": 100.0, "totalCents": 3750,
+        "lines": [ { "productId": "…", "productName": "Gardenia Enriched White Bread", "brand": "Gardenia",
+                     "packQty": 400, "packUnit": "g", "packCount": 1, "hcs": false, "category": "bread",
+                     "quantity": 2, "unitPriceCents": 250, "subtotalCents": 500,
+                     "priceDate": "2026-10-24", "submissionCount": 1 },
+                   … ],
+        "unpriced": [] },
+      { "retailerId": "fairprice", "rank": 2, "totalCents": 3970, … },
+      { "retailerId": "coldstorage", "rank": 3, "totalCents": 4370, … }
+    ],
+    "recommendation": { "retailerId": "shengsiong", "retailerName": "Sheng Siong", "totalCents": 3750, "complete": true },
+    "savings": [
+      { "retailerId": "fairprice", "retailerName": "FairPrice", "basis": "full-basket", "comparedLines": 3,
+        "otherTotalCents": 3970, "recommendedTotalCents": 3750, "savingsCents": 220, "savingsPercent": 5.5 },
+      { "retailerId": "coldstorage", …, "savingsCents": 620, "savingsPercent": 14.2 }
+    ],
+    "maxSavingsCents": 620
+  },
+  "healthierBasket": {
+    "stores": [ { "retailerId": "shengsiong", "totalCents": 3934,
+                  "lines": [ { "productName": "Gardenia 100% Wholemeal Extra Soft & Fine Bread", "hcs": true,
+                               "replacesProductId": "<white bread id>", "quantity": 2, "subtotalCents": 660, … }, … ], … }, … ],
+    "recommendation": { "retailerId": "shengsiong", "totalCents": 3934, "complete": true, … },
+    "savings": [ … ], "maxSavingsCents": 696,
+    "swaps": [
+      { "originalProductId": "<white bread id>", "originalName": "Gardenia Enriched White Bread", "category": "bread", "status": "swapped" },
+      { "originalProductId": "<Dynamo id>", "originalName": "Dynamo Laundry Detergent - Anti-Bacterial", "category": "detergent", "status": "no-hcs-option" },
+      { "originalProductId": "<Thai rice id>", "originalName": "SongHe AAA Thai Hom Mali Rice", "category": "rice", "status": "swapped" }
+    ]
+  },
+  "healthierExtra": { "basketTotalCents": 3750, "healthierTotalCents": 3934, "extraCents": 184, "extraPercent": 4.9 }
+}
+```
+
+How it decides:
+- **Which price a store uses:** the store's **daily average** for that product.
+  - **What goes in:** the accepted prices submitted for that product at that store during the previous Singapore day, rounded to the nearest cent. Flagged and rejected prices are never used.
+  - **On each line:** `priceDate` is the day the average comes from, and `submissionCount` is how many prices went into it.
+  - **Days with no new prices:** the last average is kept, up to `priceMaxAgeDays` (30) days old.
+  - **No usable price:** a product with no price at a store is listed in that store's `unpriced`, not left out.
+  - **`pricesUpdated`:** when the averages were last worked out. It's `null` if they have never been computed.
+- **Ranking:** stores that price every line (`complete`) come first, cheapest first. Incomplete stores follow, by how many lines they price and then by total. Equal totals are ordered by store name. `totalCents` only adds up the priced lines.
+- **Recommendation:** the top-ranked store, or `null` if no store has a price for anything. When `complete` is `false`, no store sells the whole basket. Say so in the UI.
+- **Savings:** the recommended store compared with each other store.
+  - `basis: "full-basket"`: both stores price everything, so this is the true saving on the whole basket.
+  - `basis: "common-items"`: one of them is missing something, so only the `comparedLines` lines both stores price are compared. The saving can be negative.
+  - `savingsCents` is `null` when the two stores share no priced lines.
+  - `maxSavingsCents` is the largest full-basket saving: the "you save up to …" figure.
+- **Healthier basket:** each line's `swaps[].status` says what happened to it.
+  - `swapped`: replaced with a Healthier Choice product from the same category. Each store uses its cheapest one, and the line carries `replacesProductId`.
+  - `already-hcs`: kept, because it is already a Healthier Choice product.
+  - `no-hcs-option`: kept, because the category has no Healthier Choice product.
+
+  If a swapped line has no Healthier Choice price at some store, it is unpriced there rather than falling back to the original. `healthierBasket` is `null` when nothing can be swapped.
+- **`healthierExtra`:** how much more the healthier basket's best store costs than the basket's best store. It can be negative when the healthier basket is cheaper. It is `null` unless both recommendations are complete.
+
+Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[i].productId`, `items[i].quantity`, `retailerIds`).
+
 ## 4. Data types
 
 ### Product
@@ -339,6 +478,97 @@ export interface ApiSubmission {
 }
 ```
 
+### Product search
+
+The response of [`GET /products/search`](#get-productssearch):
+
+```ts
+export interface ApiStorePrice {
+  priceCents: number
+  priceDate: string                   // "2026-10-25": the Singapore day this daily average comes from
+  submissionCount: number
+}
+
+export interface ApiSearchProduct extends ApiProduct {   // ApiProduct: the Product fields above
+  prices: Record<string, ApiStorePrice>                   // keyed by retailerId; stores with no current price are missing
+  lowestPrice: { retailerId: string; retailerName: string | null; priceCents: number; priceDate: string } | null
+}
+
+export interface ApiSearchResult {
+  items: ApiSearchProduct[]
+  total: number
+  catalogSize: number
+  facets: { categories: string[]; brands: string[]; dietary: string[] }
+  priceMaxAgeDays: number
+  pricesUpdated: string | null
+}
+```
+
+### Basket comparison
+
+The response of [`POST /basket/compare`](#post-basketcompare):
+
+```ts
+export interface ApiBasketLine {
+  productId: string
+  productName: string | null
+  brand: string | null
+  packQty: number | null
+  packUnit: string | null
+  packCount: number
+  hcs: boolean
+  category: string | null
+  quantity: number
+  unitPriceCents: number
+  subtotalCents: number
+  priceDate: string                   // "2026-10-24": the Singapore day this daily average comes from
+  submissionCount: number             // prices averaged into unitPriceCents
+  replacesProductId?: string          // healthier basket only, on swapped lines
+}
+
+export interface ApiBasketStore {
+  retailerId: string
+  retailerName: string | null
+  rank: number                        // 1 = best
+  complete: boolean                   // prices every line
+  pricedCount: number
+  missingCount: number
+  coveragePercent: number
+  totalCents: number                  // priced lines only
+  lines: ApiBasketLine[]
+  unpriced: { productId: string; productName: string | null; category: string | null }[]
+}
+
+export interface ApiBasketSaving {
+  retailerId: string
+  retailerName: string | null
+  basis: "full-basket" | "common-items"
+  comparedLines: number
+  otherTotalCents: number | null
+  recommendedTotalCents: number | null
+  savingsCents: number | null         // other store minus recommended store
+  savingsPercent: number | null       // of otherTotalCents
+}
+
+export interface ApiBasketComparison {
+  stores: ApiBasketStore[]
+  recommendation: { retailerId: string; retailerName: string | null; totalCents: number; complete: boolean } | null
+  savings: ApiBasketSaving[]
+  maxSavingsCents: number | null
+}
+
+export interface ApiBasketResult {
+  priceMaxAgeDays: number
+  pricesUpdated: string | null        // when the daily averages were last computed (UTC ISO 8601)
+  basket: ApiBasketComparison
+  healthierBasket: (ApiBasketComparison & {
+    swaps: { originalProductId: string; originalName: string | null; category: string | null
+             status: "swapped" | "already-hcs" | "no-hcs-option" }[]
+  }) | null
+  healthierExtra: { basketTotalCents: number; healthierTotalCents: number; extraCents: number; extraPercent: number } | null
+}
+```
+
 ## 5. Errors
 
 Errors from the backend always have this shape:
@@ -388,6 +618,8 @@ Errors from the backend always have this shape:
 | Duplicate rule | One submission per user, product, store, price and Singapore day |
 | Rejection reason | 500 characters |
 | Page size | Default 50, max 100 |
+| Basket | 1–50 products, 1–99 of each |
+| Basket prices | Daily averages, recomputed at 00:05 SGT; kept for up to 30 days without new submissions |
 
 Not supported yet: promotions and member prices, branch-level prices, editing or withdrawing a submission, and users flagging other users' prices.
 

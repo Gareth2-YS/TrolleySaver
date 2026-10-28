@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "name": "weekly-staples",
+      "description": "The hand-worked example in TESTING.md: two swaps and one product with no Healthier Choice option.",
+      "items": [
+        { "product": "Gardenia Enriched White Bread", "quantity": 2 },
+        { "product": "Dynamo Laundry Detergent - Anti-Bacterial", "quantity": 1 },
+        { "product": "SongHe AAA Thai Hom Mali Rice", "quantity": 1 }
+      ]
+    },
+    {
+      "name": "breakfast",
+      "description": "Milk, cereal and yoghurt all swap; eggs have no Healthier Choice option.",
+      "items": [
+        { "product": "Magnolia Fresh Milk", "quantity": 2 },
+        { "product": "Kellogg's Coco Pops", "quantity": 1 },
+        { "product": "Farmers Union Greek Style Natural Yogurt", "quantity": 1 },
+        { "product": "Chew's Fresh Eggs with Vitamin E", "quantity": 1 }
+      ]
+    },
+    {
+      "name": "drinks-and-snacks",
+      "description": "Multi-packs (6 cans, 9 packets, 12 and 20 sachets), all with a healthier option.",
+      "items": [
+        { "product": "Coca-Cola Mini Classic", "quantity": 2 },
+        { "product": "Oreo Sandwich Cookie Multipack - Vanilla", "quantity": 1 },
+        { "product": "Lipton 3 in 1 Instant Milk Tea Latte - Teh Tarik", "quantity": 1 },
+        { "product": "Owl Kopitiam Roast & Ground Coffee Bags - Kopi-O Gao", "quantity": 1 }
+      ]
+    },
+    {
+      "name": "already-healthy",
+      "description": "Every product is already Healthier Choice or has no option, so there is no healthier basket.",
+      "items": [
+        { "product": "Marigold HL Milk - Plain", "quantity": 1 },
+        { "product": "Songhe Noble Brown Rice 5kg", "quantity": 1 },
+        { "product": "Kleenex Toilet Tissue Rolls - Ultra Soft (3ply)", "quantity": 1 }
+      ]
+    },
+    {
+      "name": "household",
+      "description": "Detergent, toilet rolls and eggs: categories with no Healthier Choice products at all.",
+      "items": [
+        { "product": "Top Concentrated Liquid Detergent Bottle - Super White", "quantity": 1 },
+        { "product": "PurSoft Bathroom Tissue Roll - Unscented (4-Ply)", "quantity": 2 },
+        { "product": "NUYOLK Vitamins Eggs", "quantity": 1 }
+      ]
+    },
+    {
+      "name": "two-stores",
+      "description": "The weekly staples, but the shopper only shops at FairPrice and Cold Storage.",
+      "retailerIds": ["fairprice", "coldstorage"],
+      "items": [
+        { "product": "Gardenia Enriched White Bread", "quantity": 2 },
+        { "product": "Dynamo Laundry Detergent - Anti-Bacterial", "quantity": 1 },
+        { "product": "SongHe AAA Thai Hom Mali Rice", "quantity": 1 }
+      ]
+    }
+  ]
+}
