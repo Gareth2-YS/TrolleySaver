@@ -1,10 +1,12 @@
-import { Filter, Search, X } from "lucide-react"
+import { Filter, Plus, Search, X } from "lucide-react"
 // import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react"
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
+import { loadBasket, saveBasket } from "../basket/service"
+import type { BasketItem } from "../basket/types"
 import breadIcon from "../../assets/product-icons/Bread.svg"
 import cerealIcon from "../../assets/product-icons/Cereal.svg"
 import coffeeIcon from "../../assets/product-icons/Coffee.svg"
@@ -132,8 +134,15 @@ function getPackDescription(product: SearchProduct) {
 }
 
 
-// function ProductCard({ product, showNoPrice }: { product: SearchProduct; showNoPrice: boolean }) {
-function ProductCard({ product }: { product: SearchProduct }) {
+function ProductCard({
+  product,
+  basketQuantity,
+  onAdd,
+}: {
+  product: SearchProduct
+  basketQuantity: number
+  onAdd: (productId: string) => void
+}) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const packDescription = getPackDescription(product)
@@ -156,32 +165,27 @@ function ProductCard({ product }: { product: SearchProduct }) {
     setDetailsOpen(true)
   }
 
-  function handleCardKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault()
-      openDetails()
-    }
-  }
-
   return (
     <>
       <article
-        className="glass-panel flex h-full cursor-pointer flex-col p-5 text-left transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        role="button"
-        tabIndex={0}
-        aria-haspopup="dialog"
-        aria-label={`View details for ${product.name}`}
-        onClick={openDetails}
-        onKeyDown={handleCardKeyDown}
+        className="glass-panel flex h-full flex-col p-5 text-left transition hover:border-primary/50"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             {categoryIcon && <img src={categoryIcon} alt="" aria-hidden="true" className="size-12 shrink-0 object-contain" />}
             <div className="min-w-0">
-              <h2 className="font-semibold leading-snug">{product.name}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {[product.brand, packDescription].filter(Boolean).join(" · ") || "Product details unavailable"}
-              </p>
+              <button
+                type="button"
+                className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-haspopup="dialog"
+                aria-label={`View details for ${product.name}`}
+                onClick={openDetails}
+              >
+                <span className="block font-semibold leading-snug">{product.name}</span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  {[product.brand, packDescription].filter(Boolean).join(" · ") || "Product details unavailable"}
+                </span>
+              </button>
             </div>
           </div>
           {product.hcs && (
@@ -209,17 +213,29 @@ function ProductCard({ product }: { product: SearchProduct }) {
           </p>
         )}
 
-        <div className="mt-auto flex flex-wrap gap-2 pt-5">
-          {product.category && (
-            <span className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
-              {formatLabel(product.category)}
-            </span>
-          )}
-          {product.dietary?.map((tag) => (
-            <span key={tag} className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
-              {formatLabel(tag)}
-            </span>
-          ))}
+        <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
+          <div className="flex flex-wrap gap-2">
+            {product.category && (
+              <span className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
+                {formatLabel(product.category)}
+              </span>
+            )}
+            {product.dietary?.map((tag) => (
+              <span key={tag} className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
+                {formatLabel(tag)}
+              </span>
+            ))}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant={basketQuantity > 0 ? "default" : "outline"}
+            disabled={basketQuantity >= 99}
+            aria-label={basketQuantity >= 99 ? `${product.name} is already at the maximum basket quantity` : basketQuantity > 0 ? `Add another ${product.name}; ${basketQuantity} currently in basket` : `Add ${product.name} to basket`}
+            onClick={() => onAdd(product.id)}
+          >
+            <Plus className="size-4" />{basketQuantity > 0 ? `Add (${basketQuantity})` : "Add"}
+          </Button>
         </div>
       </article>
 
@@ -292,6 +308,7 @@ function ProductCard({ product }: { product: SearchProduct }) {
 export function SearchProductsPage() {
   // const [products, setProducts] = useState<SearchProduct[]>([])
   const [result, setResult] = useState<SearchResult | null>(null)
+  const [basketItems, setBasketItems] = useState<BasketItem[]>(loadBasket)
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
   // const [pricesLoading, setPricesLoading] = useState(true)
@@ -308,6 +325,10 @@ export function SearchProductsPage() {
   const [maximumPrice, setMaximumPrice] = useState("")
 
   const products = result?.items ?? []
+  const basketQuantities = useMemo(
+    () => new Map(basketItems.map((item) => [item.productId, item.quantity])),
+    [basketItems],
+  )
   const categories = useMemo(() => result?.facets.categories ?? [], [result])
   const brands = result?.facets.brands ?? []
   const dietaryOptions = result?.facets.dietary ?? []
@@ -318,6 +339,18 @@ export function SearchProductsPage() {
     }),
     [categories],
   )
+
+  useEffect(() => { saveBasket(basketItems) }, [basketItems])
+
+  function addToBasket(productId: string) {
+    setBasketItems((current) => {
+      const existing = current.find((item) => item.productId === productId)
+      if (existing && existing.quantity >= 99) return current
+      return existing
+        ? current.map((item) => item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item)
+        : [...current, { productId, quantity: 1 }]
+    })
+  }
 
   const priceRangeError = useMemo(() => {
     const min = minimumPrice === "" ? 0 : Number(minimumPrice)
@@ -513,7 +546,12 @@ export function SearchProductsPage() {
               <ProductCard key={product.id} product={product} showNoPrice={!pricesLoading && !pricesError} />
             ))} */}
             {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+              <ProductCard
+                key={product.id}
+                product={product}
+                basketQuantity={basketQuantities.get(product.id) ?? 0}
+                onAdd={addToBasket}
+              />
             ))}
           </div>
         )}
