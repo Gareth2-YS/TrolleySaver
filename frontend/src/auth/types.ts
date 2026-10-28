@@ -18,5 +18,5 @@ export interface AuthService {
   signUp(input: SignUpInput): Promise<AuthNextStep>
   signOut(): Promise<void>
   getCurrentUser(): Promise<AuthUser | null>
-  getAccessToken(): Promise<string | null>
+  getAccessToken(forceRefresh?: boolean): Promise<string | null>
 }

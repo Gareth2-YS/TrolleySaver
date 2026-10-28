@@ -12,6 +12,7 @@ Notes passed between team members when one person's work becomes someone else's 
 | 24 Oct 2026 | Auth (login, roles) | backend → frontend | [2026-10-24-auth-backend-to-frontend.md](2026-10-24-auth-backend-to-frontend.md) | **Open**: frontend to adopt |
 | 24 Oct 2026 | Price & image upload | backend → frontend | [2026-10-24-price-upload-backend-to-frontend.md](2026-10-24-price-upload-backend-to-frontend.md) | **Open**: frontend to adopt |
 | 24 Oct 2026 | Smart Basket | backend → frontend | [2026-10-24-smart-basket-backend-to-frontend.md](2026-10-24-smart-basket-backend-to-frontend.md) | **Open**: frontend to build the page |
+| 25 Oct 2026 | Auth, API and price upload integration | frontend → team | [2026-10-25-frontend-integration-findings.md](2026-10-25-frontend-integration-findings.md) | **Complete** |
 | 27 Oct 2026 | Search & filter | backend → frontend | [2026-10-27-search-backend-to-frontend.md](2026-10-27-search-backend-to-frontend.md) | **Open**: Search page in progress, moving to `GET /products/search` |
 
 The API contract that the backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).

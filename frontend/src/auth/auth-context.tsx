@@ -8,7 +8,7 @@ interface AuthContextValue {
   signIn(input: SignInInput, intendedRole: AuthRole): Promise<AuthNextStep & { authenticatedRole?: AuthRole }>
   signUp(input: SignUpInput): Promise<AuthNextStep>
   signOut(): Promise<void>
-  getAccessToken(): Promise<string | null>
+  getAccessToken(forceRefresh?: boolean): Promise<string | null>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -59,7 +59,7 @@ export function AuthProvider({ children, serviceOverride }: { children: ReactNod
     },
     async signUp(input) { if (!service) throw new Error("Authentication is still loading."); return service.signUp(input) },
     async signOut() { if (service) await service.signOut(); setUser(null) },
-    async getAccessToken() { return service?.getAccessToken() ?? null },
+    async getAccessToken(forceRefresh = false) { return service?.getAccessToken(forceRefresh) ?? null },
   }), [loading, refreshUser, service, user])
 
   return <AuthContext value={value}>{children}</AuthContext>
