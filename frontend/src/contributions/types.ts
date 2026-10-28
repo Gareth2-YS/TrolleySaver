@@ -5,6 +5,9 @@ export type SubmissionStatus = "accepted" | "flagged" | "rejected"
 export interface CatalogProduct {
   id: string
   name: string
+  brand?: string
+  category?: string
+  searchTerms?: string[]
   minCents?: number
   maxCents?: number
 }
