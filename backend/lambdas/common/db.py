@@ -61,6 +61,10 @@ def users():
     return _dynamodb().Table(os.environ["USER_TABLE"])
 
 
+def retailer_prices():
+    return _dynamodb().Table(os.environ["RETAILER_PRICE_TABLE"])
+
+
 def photo_bucket():
     return os.environ["PHOTO_BUCKET"]
 

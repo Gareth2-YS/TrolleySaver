@@ -1,6 +1,6 @@
 # TrolleySaver Database Design (Draft)
 
-**Owner:** Yong Hsien · **Last updated:** 24 Oct 2026 · **Database:** Amazon DynamoDB
+**Owner:** Yong Hsien · **Last updated:** 25 Oct 2026 · **Database:** Amazon DynamoDB
 
 ## 1. Entity Relationship Diagram
 
@@ -10,6 +10,9 @@ erDiagram
     RETAILER ||--o{ PRICE_SUBMISSION : "is observed at"
     USER ||--o{ PRICE_SUBMISSION : "submits"
     USER |o--o{ PRICE_SUBMISSION : "reviews (admin)"
+    PRODUCT ||--o{ RETAILER_PRICE : "has a daily price"
+    RETAILER ||--o{ RETAILER_PRICE : "at"
+    PRICE_SUBMISSION }o--|| RETAILER_PRICE : "averaged nightly into"
 
     PRODUCT {
         string id PK "UUID"
@@ -56,11 +59,23 @@ erDiagram
         number submissionCount "12"
         string createdAt "2026-10-18T02:00:00.000Z"
     }
+
+    RETAILER_PRICE {
+        string productId PK "reference to PRODUCT.id (UUID)"
+        string retailerId PK "reference to RETAILER.id - fairprice"
+        number priceCents "288 = average of that day's accepted prices"
+        number submissionCount "2 - prices in the average"
+        string priceDate "2026-10-24 - Singapore day they came from"
+        string computedAt "2026-10-24T16:05:00.000Z - last job run"
+    }
 ```
 
 ## 2. DynamoDB Tables and Indexes
 
-One table per entity, named `trolleysaver-<env>-<entity>` (e.g. `trolleysaver-dev-price-submission`).
+There are **5 tables**, one per entity, named `trolleysaver-<env>-<entity>` (e.g. `trolleysaver-dev-price-submission`):
+- `product`, `retailer` and `user` hold reference data.
+- `price-submission` holds every price a contributor (or the seed) reported.
+- `retailer-price` holds the **one price per product and store** that the Smart Basket uses. It is derived from `price-submission` by a nightly job (section 4).
 
 ```mermaid
 flowchart LR
@@ -70,6 +85,8 @@ flowchart LR
     Q2(["All prices at a retailer"]) --> G1
     Q3(["My submissions,<br/>rate limit"]) --> G2
     Q7(["Admin review queue<br/>(flagged prices)"]) --> G3
+    Q8(["Nightly job:<br/>yesterday's accepted prices"]) --> G3
+    Q9(["Smart Basket prices"]) --> RP
     Q5(["User profile"]) --> US
 
     PR["<b>product</b><br/>PK: id<br/><i>24 items</i>"]
@@ -79,17 +96,19 @@ flowchart LR
     G2["<b>GSI ByUser</b><br/><i>auto-copy of price-submission</i><br/>PK: userId<br/>SK: submittedAt"]
     G3["<b>GSI ByStatus</b><br/><i>auto-copy of price-submission</i><br/>PK: status<br/>SK: submittedAt"]
     US["<b>user</b><br/>PK: userId"]
+    RP["<b>retailer-price</b><br/>PK: productId<br/>SK: retailerId<br/><i>≤ 72 items</i>"]
 
     PS -.-> G1
     PS -.-> G2
     PS -.-> G3
+    G3 == "averaged nightly" ==> RP
 
     classDef table fill:#e8f1ff,stroke:#3b6fd8,color:#111
     classDef index fill:#fff4dd,stroke:#c98a00,color:#111
     classDef query fill:#f2f2f2,stroke:#888,color:#111
-    class PR,RT,PS,US table
+    class PR,RT,PS,US,RP table
     class G1,G2,G3 index
-    class Q1,Q2,Q3,Q4,Q5,Q6,Q7 query
+    class Q1,Q2,Q3,Q4,Q5,Q6,Q7,Q8,Q9 query
 ```
 
 **Notes:**
@@ -114,7 +133,28 @@ stateDiagram-v2
 - Only `accepted` prices should be used for search, comparison and the smart basket. `flagged` and `rejected` prices are ignored.
 - Letting users flag each other's submissions is a possible future feature and is not part of this design.
 
-## 4. Other rules enforced by the backend
+## 4. Daily average price (`retailer-price`)
+
+A price belongs to a (product, retailer) pair, so it can't be stored on the product. The Smart Basket reads one price per pair from `retailer-price`, which a scheduled Lambda (`price-aggregator`) rebuilds every night.
+
+```mermaid
+flowchart LR
+    S["price-submission<br/>(accepted only, via ByStatus)"] -- "00:05 SGT every night:<br/>yesterday's prices,<br/>averaged per product + store" --> R["retailer-price<br/>1 row per product + store"]
+    R -- "read on every page load" --> B["Smart Basket"]
+```
+
+| Rule | Detail |
+|---|---|
+| **Which prices** | Accepted submissions that **entered the system during the previous Singapore day** (00:00–24:00 SGT), whatever date they were observed. A flagged price an admin accepts counts on the day it was accepted (`reviewedAt`). Flagged and rejected prices never count. |
+| **Per pair** | Averaged separately for each product **and** store. A store's price only comes from submissions for that store. |
+| **Average** | The mean, rounded to the nearest cent, halves up. Example: eggs at Cold Storage on 24 Oct, (375 + 500) / 2 = **438**. `submissionCount` says how many prices went in. |
+| **No submissions that day** | The row isn't touched, so the pair keeps its last average and its `priceDate`. |
+| **Stale** | The basket ignores a row whose `priceDate` is more than 30 days old (`PRICE_MAX_AGE_DAYS`), and shows the product as unpriced at that store. |
+| **When** | 00:05 SGT daily (EventBridge Scheduler). A price submitted today reaches the basket after tonight's run. The job can also be run for one date, or to backfill the last N days. |
+
+The table is small (at most products × stores rows, 72 today), so the basket reads it whole on each request.
+
+## 5. Other rules enforced by the backend
 
 - `productId` and `retailerId` must exist before a submission is saved.
 - Rate limit: 30 submissions per user per hour, counted with the `ByUser` index.
@@ -129,7 +169,8 @@ stateDiagram-v2
 | Abbreviation | Meaning |
 | --- | --- |
 | PK | Primary key. In the ER diagram it marks the fields that make up a record's key. In the DynamoDB diagram it means **partition key**, the field that groups records together |
-| SK / `sk` | Sort key: orders records within a partition and keeps each one unique. In `price-submission`, `sk` = `retailerId#observedAt#submissionId` |
+| SK / `sk` | Sort key: orders records within a partition and keeps each one unique. In `price-submission`, `sk` = `retailerId#observedAt#submissionId`; in `retailer-price` the sort key is `retailerId` |
+| SGT | Singapore time (UTC+8). Days in the daily price run midnight to midnight SGT |
 | Reference | Not an abbreviation, but worth noting: a field that stores another item's id (e.g. `retailerId` → RETAILER). DynamoDB has no foreign keys or joins, so nothing enforces these links; the backend checks the id exists before saving |
 | GSI | Global Secondary Index: an automatically kept copy of a table, organised by a different key so it can be searched another way |
 | HCS / `hcs` | Healthier Choice Symbol: the Health Promotion Board label for healthier products |
