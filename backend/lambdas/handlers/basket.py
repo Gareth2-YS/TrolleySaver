@@ -2,7 +2,8 @@
 
 Public and stateless: the frontend keeps the basket and sends it whole each time. The response has
 the basket as picked and, beside it, the same basket with Healthier Choice swaps, each with the
-cheapest store, a per-store breakdown, unpriced items and savings against the other stores.
+cheapest store, a per-store breakdown, unpriced items and savings against the other stores. Each
+swap also lists every Healthier Choice option for that line, so the shopper can pick a different one.
 Prices are the daily averages stored by the nightly price-aggregator job.
 """
 
@@ -29,8 +30,9 @@ def handler(event, context):
     prices, prices_updated = stored_prices(product_ids, retailer_ids, datetime.now(timezone.utc), max_age)
 
     basket = compare(lines, products, retailers, exact_choices(lines, products, prices, retailer_ids))
+    ranking_id = basket["recommendation"]["retailerId"] if basket["recommendation"] else None
     healthier = None
-    choices, swaps = healthier_choices(lines, products, prices, retailer_ids)
+    choices, swaps = healthier_choices(lines, products, prices, retailer_ids, ranking_id)
     if choices:
         healthier = compare(lines, products, retailers, choices)
         healthier["swaps"] = swaps

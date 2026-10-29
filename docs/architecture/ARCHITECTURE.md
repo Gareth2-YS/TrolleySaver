@@ -183,7 +183,7 @@ sequenceDiagram
   - The basket (`common/pricing.py`) ignores averages more than 30 days old (`PRICE_MAX_AGE_DAYS`).
   - New prices reach the basket after the next nightly run, and the response's `pricesUpdated` says when that was.
 - **Comparison:** `common/basket.py` totals the basket at every store and lists unpriced items. It ranks stores that price everything first, cheapest first, and compares the cheapest with each other store, over the full basket or only the items both price.
-- **Healthier basket:** `common/healthier.py` swaps each product for the cheapest Healthier Choice product in its category at each store, where one exists. The same comparison then runs on the swapped basket, and the extra cost against the original is reported.
+- **Healthier basket:** `common/healthier.py` swaps each product for the cheapest Healthier Choice product in its category at each store, where one exists. The same comparison then runs on the swapped basket, and the extra cost against the original is reported. Each swap also lists every Healthier Choice option in the category, sorted by price at the recommended store, so the shopper can pick a different one.
 - The Lambda is stateless and public. The frontend keeps the basket.
 - Promotions, member prices and multi-buy deals are not tracked. Prices are per retailer, not per branch.
 

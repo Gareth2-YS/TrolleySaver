@@ -23,9 +23,9 @@ def exact_choices(lines, products, prices, retailer_ids):
     return {rid: [price_choice(products[line["productId"]], prices, rid) for line in lines] for rid in retailer_ids}
 
 
-def _line(line, choice):
-    product = choice["product"]
-    record = {
+def product_fields(product):
+    """The product details every basket line and healthier option carries."""
+    return {
         "productId": product["id"],
         "productName": product.get("name"),
         "brand": product.get("brand"),
@@ -34,6 +34,12 @@ def _line(line, choice):
         "packCount": product.get("packCount") or 1,
         "hcs": bool(product.get("hcs")),
         "category": product.get("category"),
+    }
+
+
+def _line(line, choice):
+    record = {
+        **product_fields(choice["product"]),
         "quantity": line["quantity"],
         "unitPriceCents": choice["priceCents"],
         "subtotalCents": choice["priceCents"] * line["quantity"],

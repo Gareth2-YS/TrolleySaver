@@ -1,7 +1,11 @@
 """Pure tests of the basket and healthier-basket calculations, on hand-worked numbers (no AWS)."""
 
+from decimal import Decimal
+
+import pytest
+
 from common.basket import compare, exact_choices
-from common.healthier import candidate_ids, extra_cost, healthier_choices
+from common.healthier import _per_100, candidate_ids, extra_cost, healthier_choices
 
 FP, SS, CS = "fairprice", "shengsiong", "coldstorage"
 RETAILERS = [{"id": FP, "name": "FairPrice"}, {"id": SS, "name": "Sheng Siong"}, {"id": CS, "name": "Cold Storage"}]
@@ -203,3 +207,81 @@ def test_extra_cost_needs_complete_recommendations():
 def test_candidate_ids_are_hcs_products_in_non_hcs_categories():
     assert candidate_ids(BASKET, PRODUCTS) == ["wholemeal", "brown"]
     assert candidate_ids([{"productId": "wholemeal", "quantity": 1}], PRODUCTS) == []
+
+
+# ---------- Swap options ----------
+
+BREADS = {**PRODUCTS,
+          "oat": {"id": "oat", "name": "Oat Loaf", "brand": "Sunshine", "category": "bread", "hcs": True, "packQty": 600, "packUnit": "g"},
+          "rye": {"id": "rye", "name": "Rye Loaf", "category": "bread", "hcs": True, "packQty": 500, "packUnit": "g"}}
+WHITE = [{"productId": "white", "quantity": 2}]
+
+
+def options_for(lines=BASKET, table=SHEET, products=PRODUCTS, retailer_ids=ALL, ranking_id=SS):
+    """{originalProductId: options} for the lines that have any."""
+    _, swaps = healthier_choices(lines, products, prices_from(table), retailer_ids, ranking_id)
+    return {s["originalProductId"]: s["options"] for s in swaps if s["options"]}
+
+
+def test_options_are_sorted_by_price_at_the_ranking_store():
+    table = {**SHEET, "oat": {FP: 280, SS: 340, CS: 300}, "rye": {FP: 400, SS: 330, CS: 300}}
+    bread = options_for(lines=WHITE, table=table, products=BREADS)["white"]
+    # Sheng Siong: wholemeal and rye tie at 330, so the name breaks it; oat is 340.
+    assert [o["productId"] for o in bread] == ["wholemeal", "rye", "oat"]
+    assert bread[0] == {
+        "productId": "wholemeal", "productName": "Gardenia 100% Wholemeal", "brand": None,
+        "packQty": 400, "packUnit": "g", "packCount": 1, "hcs": True, "category": "bread",
+        "prices": prices_from(table)["wholemeal"],
+        "priceCents": 330, "priceDiffCents": 80, "pricePer100": {"cents": 82.5, "unit": "g"},
+    }
+    assert (bread[1]["priceDiffCents"], bread[1]["pricePer100"]) == (80, {"cents": 66.0, "unit": "g"})
+
+
+def test_options_unpriced_at_the_ranking_store_go_last_by_lowest_price():
+    table = {**SHEET, "oat": {FP: 200}, "rye": {CS: 250}}
+    bread = options_for(lines=WHITE, table=table, products=BREADS)["white"]
+    assert [o["productId"] for o in bread] == ["wholemeal", "oat", "rye"]
+    oat = bread[1]
+    assert (oat["priceCents"], oat["priceDiffCents"], oat["pricePer100"]) == (None, None, None)
+    assert set(oat["prices"]) == {FP}
+
+
+def test_options_only_use_allowed_stores():
+    table = {**SHEET, "wholemeal": {CS: 330}, "oat": {FP: 280, CS: 260}}
+    result = options_for(lines=WHITE, table=table, products=BREADS, retailer_ids=[FP, SS], ranking_id=FP)
+    # Wholemeal is only priced at Cold Storage, which isn't compared; oat keeps only its FairPrice price.
+    assert [o["productId"] for o in result["white"]] == ["oat"]
+    assert set(result["white"][0]["prices"]) == {FP}
+
+    no_option = {**SHEET, "wholemeal": {CS: 330}}
+    assert options_for(lines=WHITE, table=no_option, retailer_ids=[FP, SS], ranking_id=FP) == {}
+    _, swaps = healthier_choices(WHITE, PRODUCTS, prices_from(no_option), [FP, SS])
+    assert swaps[0]["status"] == "no-hcs-option"
+
+
+def test_only_swapped_lines_get_options():
+    lines = [{"productId": "wholemeal", "quantity": 1}, {"productId": "dynamo", "quantity": 1}, {"productId": "thai", "quantity": 1}]
+    _, swaps = healthier_choices(lines, PRODUCTS, prices_from(SHEET), ALL, SS)
+    assert [(s["status"], len(s["options"])) for s in swaps] == [("already-hcs", 0), ("no-hcs-option", 0), ("swapped", 1)]
+    brown = swaps[2]["options"][0]
+    assert (brown["productId"], brown["priceCents"], brown["priceDiffCents"]) == ("brown", 1884, 24)
+
+
+def test_no_ranking_store_orders_by_lowest_price_anywhere():
+    table = {**SHEET, "oat": {FP: 280, SS: 340}, "rye": {CS: 300}}
+    bread = options_for(lines=WHITE, table=table, products=BREADS, ranking_id=None)["white"]
+    assert [o["productId"] for o in bread] == ["oat", "rye", "wholemeal"]
+    assert all(o["priceCents"] is None and o["priceDiffCents"] is None for o in bread)
+
+
+@pytest.mark.parametrize("pack, cents, expected", [
+    ({"packQty": 400, "packUnit": "g"}, 330, {"cents": 82.5, "unit": "g"}),
+    ({"packQty": 5, "packUnit": "kg"}, 1884, {"cents": 37.7, "unit": "g"}),
+    ({"packQty": 180, "packUnit": "ml", "packCount": 6}, 525, {"cents": 48.6, "unit": "ml"}),
+    ({"packQty": Decimal("1.5"), "packUnit": "L"}, 300, {"cents": 20.0, "unit": "ml"}),
+    ({"packQty": 10, "packUnit": "pcs"}, 500, None),
+    ({"packQty": None, "packUnit": "g"}, 500, None),
+    ({"packQty": 400, "packUnit": "g"}, None, None),
+])
+def test_price_per_100(pack, cents, expected):
+    assert _per_100(pack, cents) == expected

@@ -377,9 +377,15 @@ POST /basket/compare
     "recommendation": { "retailerId": "shengsiong", "totalCents": 3934, "complete": true, … },
     "savings": [ … ], "maxSavingsCents": 696,
     "swaps": [
-      { "originalProductId": "<white bread id>", "originalName": "Gardenia Enriched White Bread", "category": "bread", "status": "swapped" },
-      { "originalProductId": "<Dynamo id>", "originalName": "Dynamo Laundry Detergent - Anti-Bacterial", "category": "detergent", "status": "no-hcs-option" },
-      { "originalProductId": "<Thai rice id>", "originalName": "SongHe AAA Thai Hom Mali Rice", "category": "rice", "status": "swapped" }
+      { "originalProductId": "<white bread id>", "originalName": "Gardenia Enriched White Bread", "category": "bread", "status": "swapped",
+        "options": [
+          { "productId": "<wholemeal id>", "productName": "Gardenia 100% Wholemeal Extra Soft & Fine Bread", "brand": "Gardenia",
+            "packQty": 400, "packUnit": "g", "packCount": 1, "hcs": true, "category": "bread",
+            "prices": { "fairprice": { "priceCents": 330, "priceDate": "2026-10-24", "submissionCount": 1 }, … },
+            "priceCents": 330, "priceDiffCents": 80, "pricePer100": { "cents": 82.5, "unit": "g" } }
+        ] },
+      { "originalProductId": "<Dynamo id>", "originalName": "Dynamo Laundry Detergent - Anti-Bacterial", "category": "detergent", "status": "no-hcs-option", "options": [] },
+      { "originalProductId": "<Thai rice id>", "originalName": "SongHe AAA Thai Hom Mali Rice", "category": "rice", "status": "swapped", "options": [ … ] }
     ]
   },
   "healthierExtra": { "basketTotalCents": 3750, "healthierTotalCents": 3934, "extraCents": 184, "extraPercent": 4.9 }
@@ -406,6 +412,11 @@ How it decides:
   - `no-hcs-option`: kept, because the category has no Healthier Choice product.
 
   If a swapped line has no Healthier Choice price at some store, it is unpriced there rather than falling back to the original. `healthierBasket` is `null` when nothing can be swapped.
+- **Healthier options:** each `swaps[]` entry lists `options`, every Healthier Choice product in the same category that a compared store prices, for a "Healthier options" picker. It is `[]` unless `status` is `swapped`, so its length is the number to show on the button.
+  - **Ranking store:** `basket.recommendation`'s store. `priceCents` is the option's price there, `priceDiffCents` is that minus the original product's price there, and `pricePer100` is the price per 100 g or 100 ml there (`null` for other pack units). Each is `null` when a price it needs is missing.
+  - **Order:** options priced at the ranking store come first, cheapest first. The rest follow by their lowest price at any compared store. Equal prices are ordered by name. With no recommendation, every option is ordered by its lowest price.
+  - **`prices`:** the option's price at each compared store, in the same shape as `GET /products/search`, so the frontend can re-sort (e.g. by `pricePer100`) or show another store without calling again.
+  - **Swapping:** replace the original `productId` with the option's in the basket and call this endpoint again.
 - **`healthierExtra`:** how much more the healthier basket's best store costs than the basket's best store. It can be negative when the healthier basket is cheaper. It is `null` unless both recommendations are complete.
 
 Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[i].productId`, `items[i].quantity`, `retailerIds`).
@@ -557,13 +568,29 @@ export interface ApiBasketComparison {
   maxSavingsCents: number | null
 }
 
+export interface ApiSwapOption {
+  productId: string
+  productName: string | null
+  brand: string | null
+  packQty: number | null
+  packUnit: string | null
+  packCount: number
+  hcs: true
+  category: string | null
+  prices: Record<string, { priceCents: number; priceDate: string; submissionCount: number }>  // by retailerId
+  priceCents: number | null           // at basket.recommendation's store
+  priceDiffCents: number | null       // priceCents minus the original product's price there
+  pricePer100: { cents: number; unit: "g" | "ml" } | null
+}
+
 export interface ApiBasketResult {
   priceMaxAgeDays: number
   pricesUpdated: string | null        // when the daily averages were last computed (UTC ISO 8601)
   basket: ApiBasketComparison
   healthierBasket: (ApiBasketComparison & {
     swaps: { originalProductId: string; originalName: string | null; category: string | null
-             status: "swapped" | "already-hcs" | "no-hcs-option" }[]
+             status: "swapped" | "already-hcs" | "no-hcs-option"
+             options: ApiSwapOption[] }[]  // [] unless swapped; sorted, see "Healthier options"
   }) | null
   healthierExtra: { basketTotalCents: number; healthierTotalCents: number; extraCents: number; extraPercent: number } | null
 }

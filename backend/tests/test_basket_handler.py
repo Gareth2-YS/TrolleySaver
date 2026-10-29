@@ -28,6 +28,13 @@ def test_public_basket_with_healthier_version(basket_catalog):
     assert (bread["productId"], bread["replacesProductId"], bread["subtotalCents"]) == (WHOLEMEAL_ID, WHITE_ID, 640)
     assert result["healthierExtra"] == {"basketTotalCents": 1327, "healthierTotalCents": 1487, "extraCents": 160, "extraPercent": 12.1}
 
+    bread_swap, detergent_swap = healthier["swaps"]
+    assert [o["productId"] for o in bread_swap["options"]] == [WHOLEMEAL_ID]
+    option = bread_swap["options"][0]
+    assert (option["priceCents"], option["priceDiffCents"], option["pricePer100"]) == (320, 80, {"cents": 80.0, "unit": "g"})
+    assert set(option["prices"]) == {"fairprice", "shengsiong", "coldstorage"}
+    assert detergent_swap["options"] == []
+
 
 def test_signed_in_callers_get_the_same_answer(basket_catalog):
     body = {"items": [{"productId": WHITE_ID, "quantity": 1}]}
