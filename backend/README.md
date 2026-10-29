@@ -1,6 +1,6 @@
 # TrolleySaver backend
 
-Serverless backend for **login** (Cognito) and **community price & photo submissions** (API Gateway → Lambda → DynamoDB, with photos in private S3). Everything is defined in [template.yaml](template.yaml) (AWS SAM) and deployed as the **`trolleysaver-dev`** stack.
+Serverless backend for **login** (Cognito), **product search**, **community price & photo submissions** and the **Smart Basket** comparison (API Gateway → Lambda → DynamoDB, with photos in private S3). Everything is defined in [template.yaml](template.yaml) (AWS SAM) and deployed as the **`trolleysaver-dev`** stack.
 
 | Looking for | Go to |
 |---|---|
@@ -16,12 +16,13 @@ Serverless backend for **login** (Cognito) and **community price & photo submiss
 |---|---|
 | `template.yaml` | Cognito pool, client, groups and triggers; photo bucket; DynamoDB tables (only for new environments); REST API; Lambdas |
 | `samconfig.toml` | Deploy settings for `dev` |
-| `lambdas/common/` | Shared helpers: HTTP responses and errors, caller identity, DynamoDB/S3 handles, validation |
+| `lambdas/common/` | Shared helpers: HTTP responses and errors, caller identity, DynamoDB/S3 handles, validation, the daily average price rules (`daily_prices.py`), product search and filters (`search.py`), and the basket's price lookup (`pricing.py`), comparison (`basket.py`) and Healthier Choice swaps (`healthier.py`) |
 | `lambdas/handlers/` | One module per Lambda |
 | `scripts/seed_catalog.py` | Loads the product spreadsheet into the tables. Never replaces existing data. |
 | `scripts/create_admin.py` | Creates an admin account |
 | `scripts/invoke.py` | Calls any Lambda directly as any user, without Cognito |
-| `scripts/smoke_test.py` | 27 end-to-end checks over real HTTP; cleans up after itself |
+| `scripts/basket_eval.py` | Smart Basket evaluation: checks the backend's totals and savings against figures worked out from the spreadsheet, for the baskets in `scripts/basket_cases.json` |
+| `scripts/smoke_test.py` | 32 end-to-end checks over real HTTP, including the Smart Basket; cleans up after itself |
 | `tests/` | Unit tests (pytest + moto, no AWS needed) |
 
 ## Setup
@@ -42,7 +43,8 @@ aws cloudformation describe-stacks --stack-name trolleysaver-dev --query "Stacks
 
 Frontend values from the outputs: `ApiUrl` → `VITE_API_BASE_URL`, `UserPoolId` → `VITE_COGNITO_USER_POOL_ID`, `UserPoolClientId` → `VITE_COGNITO_CLIENT_ID`.
 
-- **Indexes on the dev tables are managed by hand.** The `ByStatus` index on `trolleysaver-dev-price-submission` was added that way on 24 Oct 2026. A new index has to be added to dev the same way, as well as to `template.yaml`.
+- **Indexes and tables on dev are managed by hand.** The `ByStatus` index on `trolleysaver-dev-price-submission` was added that way on 24 Oct 2026, and the fifth table, `trolleysaver-dev-retailer-price` (daily average prices), on 25 Oct 2026. A new index or table has to be added to dev the same way, as well as to `template.yaml`.
+- **Daily prices.** The `price-aggregator` Lambda refreshes `retailer-price` at 00:05 SGT. After seeding, or to pick up today's submissions straight away, run `.venv\Scripts\python scripts\invoke.py aggregate --set backfillDays=30` ([TESTING.md §8](TESTING.md#daily-prices-run-the-nightly-job-by-hand)).
 - **A new environment** (e.g. staging): copy the `[dev.*]` sections in `samconfig.toml` with a new stack name and `Env=<name> CreateTables=true`, so the stack creates its own tables.
 
 ## Everyday commands

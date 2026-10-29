@@ -13,10 +13,15 @@ Usage (from backend/; see TESTING.md for a full walkthrough):
     .venv/Scripts/python scripts/invoke.py mine
     .venv/Scripts/python scripts/invoke.py review-queue --as admin
     .venv/Scripts/python scripts/invoke.py moderate --as admin --id <id> --set decision=rejected --set reason="Unreadable label"
+    .venv/Scripts/python scripts/invoke.py basket --body-file baskets/weekly-staples.json
+    .venv/Scripts/python scripts/invoke.py search --query q=milk --query maxPriceCents=500
+    .venv/Scripts/python scripts/invoke.py aggregate                          # nightly price job, for yesterday
+    .venv/Scripts/python scripts/invoke.py aggregate --set date=2026-10-24    # ... or one day, or --set backfillDays=30
     .venv/Scripts/python scripts/invoke.py cleanup        # delete everything the fake users created
 
 --set KEY=VALUE builds the JSON body for you (whole numbers become numbers, true/false booleans,
-everything else text), which avoids shell quoting problems. --body '<json>' sends raw JSON instead.
+everything else text), which avoids shell quoting problems. --body '<json>' sends raw JSON instead,
+and --body-file reads it from a file (easiest for nested bodies such as a basket).
 Add --local to run the handler in-process (set breakpoints, add prints, no deploy needed).
 """
 
@@ -48,6 +53,12 @@ ROUTES = {
     "mine": ("my-submissions", "my_submissions", "GET", "/price-submissions/mine", True),
     "review-queue": ("admin-submissions", "admin_submissions", "GET", "/admin/price-submissions", True),
     "moderate": ("admin-submissions", "admin_submissions", "PATCH", "/admin/price-submissions/{id}", True),
+    "basket": ("basket", "basket", "POST", "/basket/compare", False),
+    "search": ("search", "search", "GET", "/products/search", False),
+}
+# Lambdas that aren't behind API Gateway: the --set fields are sent as the raw event.
+JOBS = {
+    "aggregate": ("price-aggregator", "aggregate_prices"),
 }
 
 
@@ -72,7 +83,7 @@ def build_event(route, user_id, groups, body, query, submission_id):
 
 
 def invoke_deployed(env, region, route, event):
-    function_name = f"trolleysaver-{env}-{ROUTES[route][0]}"
+    function_name = f"trolleysaver-{env}-{(ROUTES.get(route) or JOBS[route])[0]}"
     result = boto3.client("lambda", region_name=region).invoke(FunctionName=function_name, Payload=json.dumps(event))
     payload = json.loads(result["Payload"].read())
     if result.get("FunctionError"):
@@ -88,13 +99,14 @@ def invoke_local(env, region, route, event):
         "RETAILER_TABLE": f"trolleysaver-{env}-retailer",
         "SUBMISSION_TABLE": f"trolleysaver-{env}-price-submission",
         "USER_TABLE": f"trolleysaver-{env}-user",
+        "RETAILER_PRICE_TABLE": f"trolleysaver-{env}-retailer-price",
         "PHOTO_BUCKET": outputs["PhotoBucketName"],
     })
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lambdas"))
-    module = __import__(f"handlers.{ROUTES[route][1]}", fromlist=["handler"])
+    module = __import__(f"handlers.{(ROUTES.get(route) or JOBS[route])[1]}", fromlist=["handler"])
 
     class Context:
-        aws_request_id = event["requestContext"]["requestId"]
+        aws_request_id = (event.get("requestContext") or {}).get("requestId", "local")
 
     return module.handler(event, Context())
 
@@ -168,13 +180,14 @@ def cleanup(env, region, user_ids):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("route", choices=[*ROUTES, "upload-photo", "cleanup"])
+    parser.add_argument("route", choices=[*ROUTES, *JOBS, "upload-photo", "cleanup"])
     parser.add_argument("--env", default=DEFAULT_ENV)
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--as", dest="role", choices=["user", "admin", "anonymous"], default="user")
     parser.add_argument("--user-id", help=f"Fake Cognito sub (default {DEFAULT_USER_ID} / {DEFAULT_ADMIN_ID})")
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="Body field (repeatable); builds the JSON for you")
     parser.add_argument("--body", help="Raw JSON request body (fields from --set are added on top)")
+    parser.add_argument("--body-file", help="Read the raw JSON request body from this file instead of --body")
     parser.add_argument("--query", action="append", default=[], metavar="KEY=VALUE", help="Query string parameter (repeatable)")
     parser.add_argument("--id", help="Submission id for the moderate route")
     parser.add_argument("--file", help="Image to upload (upload-photo route)")
@@ -189,10 +202,17 @@ def main():
         parser.error("moderate needs --id")
     if args.route == "upload-photo" and not args.file:
         parser.error("upload-photo needs --file")
+    if args.body_file:
+        if args.body:
+            parser.error("use --body or --body-file, not both")
+        try:
+            args.body = Path(args.body_file).read_text(encoding="utf-8-sig")
+        except OSError as error:
+            raise SystemExit(f"Can't read --body-file: {error}")
     try:
         body = request_body(args.body, args.set)
     except json.JSONDecodeError as error:
-        raise SystemExit(f"--body is not valid JSON ({error}). Tip: use --set KEY=VALUE instead.")
+        raise SystemExit(f"The request body is not valid JSON ({error}). Tip: use --set KEY=VALUE or --body-file instead.")
 
     user_id = None if args.role == "anonymous" else args.user_id or (DEFAULT_ADMIN_ID if args.role == "admin" else DEFAULT_USER_ID)
     groups = "admin" if args.role == "admin" else ("user" if user_id else None)
@@ -203,6 +223,9 @@ def main():
 
     if args.route == "upload-photo":
         upload_photo(call, args.file, user_id, groups)
+        return
+    if args.route in JOBS:
+        print(json.dumps(call(args.route, json.loads(body) if body else {}), indent=2))
         return
     query = dict(pair.split("=", 1) for pair in args.query)
     print_result(call(args.route, build_event(args.route, user_id, groups, body, query, args.id)))
