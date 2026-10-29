@@ -2,14 +2,16 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from conftest import ADMIN_ID, MILK_ID, OTHER_USER_ID, USER_ID, api_event, call
+from conftest import ADMIN_ID, MILK_ID, OTHER_USER_ID, USER_ID, api_event, call, put_photo
 from handlers import admin_submissions, catalog, create_submission, my_submissions
 
 SGT = timezone(timedelta(hours=8))
 
 
-def submit(price, user_id=USER_ID, retailer="fairprice"):
+def submit(price, user_id=USER_ID, retailer="fairprice", photo_key=None):
     body = {"productId": MILK_ID, "retailerId": retailer, "priceCents": price, "observedAt": datetime.now(SGT).strftime("%Y-%m-%d")}
+    if photo_key:
+        body["photoKey"] = photo_key
     status, record = call(create_submission.handler, api_event("POST", "/price-submissions", body, user_id=user_id))
     assert status == 201
     return record
@@ -66,6 +68,24 @@ def test_queue_lists_only_flagged_with_submitter(aws):
     assert body["items"][0]["submitterEmail"] == "alex@example.com"
 
 
+def test_evidence_photo_link_only_for_admins(aws):
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/shelf.png"
+    put_photo(key)
+    flagged = submit(9999, photo_key=key)
+
+    status, mine = call(my_submissions.handler, api_event("GET", "/price-submissions/mine"))
+    assert status == 200
+    assert mine["items"][0]["photoKey"] == key  # the contributor can see a photo is attached...
+    assert "photoUrl" not in mine["items"][0]   # ...but gets no link to view it
+
+    status, queue = admin_list()
+    assert status == 200 and queue["items"][0]["id"] == flagged["id"]
+    assert queue["items"][0]["photoUrl"].startswith("https://")
+
+    status, decided = moderate(flagged["id"], {"decision": "accepted"})
+    assert status == 200 and decided["photoUrl"].startswith("https://")
+
+
 def test_accept_flagged_then_conflict(aws):
     flagged = submit(9999)
     status, record = moderate(flagged["id"], {"decision": "accepted"})
@@ -108,5 +128,14 @@ def test_invalid_decision_and_status(aws):
 def test_catalog_routes(aws):
     status, body = call(catalog.handler, api_event("GET", "/products", user_id=None))
     assert status == 200 and body["items"][0]["id"] == MILK_ID and body["items"][0]["minCents"] == 181
+    assert "imageUrl" not in body["items"][0]  # catalog products without a picture keep their category icon
     status, body = call(catalog.handler, api_event("GET", "/retailers", user_id=None))
     assert status == 200 and [r["id"] for r in body["items"]] == ["coldstorage", "fairprice", "shengsiong"]
+
+
+def test_catalog_signs_product_pictures(aws):
+    aws.Table("unit-product").put_item(Item={"id": "p-1", "name": "Aardvark Oats", "imageKey": "product-images/p-1.png"})
+    status, body = call(catalog.handler, api_event("GET", "/products", user_id=None))
+    picture = next(p for p in body["items"] if p["id"] == "p-1")
+    assert status == 200
+    assert "product-images/p-1.png" in picture["imageUrl"] and "X-Amz-Expires=3600" in picture["imageUrl"]

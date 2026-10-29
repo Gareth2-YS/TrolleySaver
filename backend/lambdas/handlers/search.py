@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from common import db
 from common.http import api_handler, response
+from common.images import with_image_url
 from common.pricing import max_age_days, stored_prices
 from common.search import facets, search
 from common.validation import validate_search
@@ -16,7 +17,7 @@ from common.validation import validate_search
 @api_handler
 def handler(event, context):
     criteria = validate_search(event.get("queryStringParameters") or {})
-    products = sorted(db.scan_all(db.products()), key=lambda p: p.get("name", ""))
+    products = [with_image_url(p) for p in sorted(db.scan_all(db.products()), key=lambda p: p.get("name", ""))]
     retailers = {r["id"]: r for r in db.scan_all(db.retailers())}
 
     max_age = max_age_days()

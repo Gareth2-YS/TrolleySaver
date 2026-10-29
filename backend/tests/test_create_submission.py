@@ -77,6 +77,15 @@ def test_unknown_product_and_store_rejected(aws):
     assert status == 400 and "retailerId" in error["fieldErrors"]
 
 
+def test_unknown_product_rejected_even_with_a_valid_photo(aws):
+    # The product check at save time doesn't depend on the photo: nothing is stored for a fake product.
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.png"
+    put_photo(key)
+    status, error = submit(valid_body(productId="nope", photoKey=key))
+    assert status == 400 and error["fieldErrors"] == {"productId": "Unknown product"}
+    assert aws.Table("unit-price-submission").scan()["Items"] == []
+
+
 def test_invalid_json_body(aws):
     status, error = call(create_submission.handler, api_event("POST", "/price-submissions", "{not json"))
     assert status == 400 and error["code"] == "INVALID_BODY"
@@ -110,31 +119,46 @@ def test_rate_limit(aws, monkeypatch):
     assert status == 429 and error["code"] == "RATE_LIMITED"
 
 
-def test_photo_is_verified_and_recorded(aws):
-    key = f"price-evidence/{USER_ID}/abc.png"
+def test_photo_is_verified_and_recorded_but_not_shown_to_contributor(aws):
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.png"
     put_photo(key)
     status, record = submit(valid_body(photoKey=key))
     assert status == 201
     assert record["photoKey"] == key
     assert record["photoContentType"] == "image/png"
     assert record["photoSizeBytes"] == 1024
-    assert record["photoUrl"].startswith("https://")
+    assert "photoUrl" not in record  # evidence photos are for admins only
 
 
 def test_photo_from_another_users_prefix_rejected(aws):
-    key = f"price-evidence/{OTHER_USER_ID}/abc.png"
+    key = f"price-evidence/{OTHER_USER_ID}/{MILK_ID}/abc.png"
+    put_photo(key)
+    status, error = submit(valid_body(photoKey=key))
+    assert status == 400 and "photoKey" in error["fieldErrors"]
+
+
+def test_photo_uploaded_for_another_product_rejected(aws):
+    key = f"price-evidence/{USER_ID}/some-other-product/abc.png"
+    put_photo(key)
+    status, error = submit(valid_body(photoKey=key))
+    assert status == 400 and "photoKey" in error["fieldErrors"]
+
+
+def test_photo_without_a_product_folder_rejected(aws):
+    # Keys from before upload links were tied to a product.
+    key = f"price-evidence/{USER_ID}/abc.png"
     put_photo(key)
     status, error = submit(valid_body(photoKey=key))
     assert status == 400 and "photoKey" in error["fieldErrors"]
 
 
 def test_missing_photo_rejected(aws):
-    status, error = submit(valid_body(photoKey=f"price-evidence/{USER_ID}/missing.png"))
+    status, error = submit(valid_body(photoKey=f"price-evidence/{USER_ID}/{MILK_ID}/missing.png"))
     assert status == 400 and error["code"] == "PHOTO_NOT_FOUND"
 
 
 def test_wrong_photo_type_rejected(aws):
-    key = f"price-evidence/{USER_ID}/abc.png"
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.png"
     put_photo(key, content_type="application/pdf")
     status, error = submit(valid_body(photoKey=key))
     assert status == 400 and error["code"] == "INVALID_PHOTO"

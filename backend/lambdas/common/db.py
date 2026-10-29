@@ -6,11 +6,13 @@ import os
 from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.types import TypeSerializer
 from botocore.config import Config
 
 from common.http import ApiError
 
 _cache = {}
+_serializer = TypeSerializer()
 
 
 def reset():
@@ -26,6 +28,12 @@ def _dynamodb():
     if "dynamodb" not in _cache:
         _cache["dynamodb"] = boto3.resource("dynamodb", region_name=_region())
     return _cache["dynamodb"]
+
+
+def _dynamodb_client():
+    if "dynamodb_client" not in _cache:
+        _cache["dynamodb_client"] = boto3.client("dynamodb", region_name=_region())
+    return _cache["dynamodb_client"]
 
 
 def s3():
@@ -65,8 +73,39 @@ def retailer_prices():
     return _dynamodb().Table(os.environ["RETAILER_PRICE_TABLE"])
 
 
+def product_requests():
+    return _dynamodb().Table(os.environ["PRODUCT_REQUEST_TABLE"])
+
+
 def photo_bucket():
     return os.environ["PHOTO_BUCKET"]
+
+
+def require_item(table, key, field, message):
+    """Fetch an item the request refers to, or fail with a field error (DynamoDB has no foreign keys)."""
+    item = table.get_item(Key=key).get("Item")
+    if not item:
+        raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {field: message})
+    return item
+
+
+def serialize(values):
+    """Plain Python values -> DynamoDB attribute values, for the low-level client."""
+    return {name: _serializer.serialize(value) for name, value in values.items()}
+
+
+def transact_write(actions):
+    """All-or-nothing writes across tables. Each action is a TransactWriteItems entry with plain values
+    in Item / Key / ExpressionAttributeValues; they are serialised here."""
+    prepared = []
+    for action in actions:
+        (kind, spec), = action.items()
+        spec = dict(spec)
+        for part in ("Item", "Key", "ExpressionAttributeValues"):
+            if part in spec:
+                spec[part] = serialize(spec[part])
+        prepared.append({kind: spec})
+    _dynamodb_client().transact_write_items(TransactItems=prepared)
 
 
 def batch_get(table, key_name, keys, attributes=None):
