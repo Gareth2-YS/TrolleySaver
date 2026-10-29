@@ -11,14 +11,18 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 
 class ApiError(Exception):
-    """An error the client should see, rendered as {code, message, fieldErrors?, requestId}."""
+    """An error the client should see, rendered as {code, message, fieldErrors?, requestId}.
 
-    def __init__(self, status, code, message, field_errors=None):
+    `extra` adds fields the client can act on, e.g. the id of the existing product on a duplicate.
+    """
+
+    def __init__(self, status, code, message, field_errors=None, extra=None):
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
         self.field_errors = field_errors
+        self.extra = extra
 
 
 def _json_default(value):
@@ -49,6 +53,8 @@ def error_response(error, request_id):
     body = {"code": error.code, "message": error.message, "requestId": request_id}
     if error.field_errors:
         body["fieldErrors"] = error.field_errors
+    if error.extra:
+        body.update(error.extra)
     return response(error.status, body)
 
 

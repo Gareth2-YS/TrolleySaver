@@ -50,6 +50,26 @@ def validate_upload_request(body):
     return content_type, size
 
 
+def validate_evidence_upload_request(body):
+    """Return (productId, retailerId, contentType, sizeBytes) for an evidence-photo upload link."""
+    errors = {}
+    product_id, retailer_id = body.get("productId"), body.get("retailerId")
+    if not isinstance(product_id, str) or not product_id.strip():
+        errors["productId"] = "Choose a product"
+    if not isinstance(retailer_id, str) or not retailer_id.strip():
+        errors["retailerId"] = "Choose a store"
+    content_type = size = None
+    try:
+        content_type, size = validate_upload_request(body)
+    except ApiError as error:
+        if error.code != "VALIDATION_ERROR":
+            raise
+        errors.update(error.field_errors)
+    if errors:
+        _fail(errors)
+    return product_id.strip(), retailer_id.strip(), content_type, size
+
+
 def parse_observed_at(value, now):
     """Accept a date (YYYY-MM-DD, read as midnight SGT) or an ISO datetime; naive datetimes are SGT."""
     if not isinstance(value, str) or not value.strip():

@@ -1,6 +1,6 @@
 # TrolleySaver Architecture
 
-**Status:** Draft · **Last updated:** 25 Oct 2026
+**Status:** Draft · **Last updated:** 29 Oct 2026
 
 How TrolleySaver's cloud components fit together. It builds on the Preliminary Report's architecture.
 
@@ -26,8 +26,8 @@ flowchart TB
     end
 
     API["API Gateway (REST)<br/>Cognito authorizer:<br/>access tokens only"]
-    L["Lambda functions · Python 3.12<br/>catalog · search · basket · upload-url<br/>create-submission · my-submissions<br/>admin-submissions"]
-    D[("DynamoDB<br/>product · retailer · user<br/>price-submission · retailer-price")]
+    L["Lambda functions · Python 3.12<br/>catalog · search · basket · upload-url<br/>create-submission · my-submissions<br/>admin-submissions · product-requests<br/>admin-product-requests"]
+    D[("DynamoDB<br/>product · retailer · user<br/>price-submission · retailer-price<br/>product-request")]
     S["EventBridge Scheduler<br/>00:05 SGT daily"]
     AG["price-aggregator λ<br/>daily average price"]
     P[("S3 photo bucket<br/>private")]
@@ -57,11 +57,11 @@ flowchart TB
 | Frontend hosting | S3 + CloudFront | Serves the built React app via CDN | Decided (the frontend runs locally for now) |
 | Auth | Cognito User Pool + 2 trigger Lambdas | Sign-up (confirmed automatically), sign-in, `user`/`admin` groups. The user id (`sub`) is attached to every submission. | Built |
 | API | API Gateway (REST) | Routing, CORS, and a Cognito authorizer that accepts access tokens only | Built |
-| Backend | Lambda | Catalog, product search, photo upload URLs, price submissions, admin moderation, Smart Basket comparison | Built |
+| Backend | Lambda | Catalog, product search, photo upload URLs, price submissions, new product requests, admin moderation, Smart Basket comparison | Built |
 | Backend language | Python 3.12 on arm64 | Lambda runtime. Uses only the standard library and boto3. | Built |
-| Database | DynamoDB, on-demand | 5 tables + 3 GSIs: product, retailer, user, price-submission, and retailer-price (daily average price per product and store). See [database-design.md](database-design.md). | Built |
+| Database | DynamoDB, on-demand | 6 tables + 5 GSIs: product, retailer, user, price-submission, retailer-price (daily average price per product and store) and product-request (proposed products awaiting an admin). See [database-design.md](database-design.md). | Built |
 | Scheduled jobs | EventBridge Scheduler | Runs `price-aggregator` at 00:05 SGT every day | Built |
-| Photo storage | S3, private | Shelf-tag photos, uploaded and viewed only through 5-minute presigned URLs | Built |
+| Photo storage | S3, private | Shelf-tag evidence photos (admins only, 5-minute links) and product pictures (1-hour links on the catalog), uploaded and viewed only through presigned URLs | Built |
 | Infrastructure as code | AWS SAM (`backend/template.yaml`) | One CloudFormation stack per environment | Built |
 | Cost guard | AWS Budgets alarm | Cap spend before stress testing | Proposed (Xinpeng) |
 | Region | ap-southeast-1 | All users are in Singapore | Built |
@@ -72,14 +72,16 @@ Functions are named `trolleysaver-<env>-<name>`. All the code is in `backend/lam
 
 | Function | Triggered by | What it does |
 |---|---|---|
-| `catalog` | `GET /products`, `GET /retailers` (public) | Lists products and retailers |
-| `search` | `GET /products/search` (public) | Filters the catalog and attaches each product's current store prices from `retailer-price` |
+| `catalog` | `GET /products`, `GET /retailers` (public) | Lists products (with a signed `imageUrl` for products that have a picture) and retailers |
+| `search` | `GET /products/search` (public) | Filters the catalog and attaches each product's current store prices from `retailer-price`, and its `imageUrl` |
 | `basket` | `POST /basket/compare` (public) | Prices a basket and its healthier version at every store from `retailer-price`, ranks the stores and works out savings |
 | `price-aggregator` | EventBridge Scheduler, 00:05 SGT daily | Averages yesterday's accepted submissions per product and store into `retailer-price` |
-| `upload-url` | `POST /price-submissions/image-upload-url` | Issues a presigned POST for one photo under `price-evidence/<userId>/` |
-| `create-submission` | `POST /price-submissions` | Validates, rate-limits, rejects duplicates, checks the photo, and saves the price as `accepted` or `flagged` |
-| `my-submissions` | `GET /price-submissions/mine` | Lists the caller's own submissions |
-| `admin-submissions` | `GET` / `PATCH /admin/price-submissions` | Flagged queue and accept/reject decisions (`admin` group only) |
+| `upload-url` | `POST /price-submissions/image-upload-url` | Checks the product and store exist, then issues a presigned POST for one photo under `price-evidence/<userId>/<productId>/` |
+| `create-submission` | `POST /price-submissions` | Validates (product and store exist), rate-limits, rejects duplicates, checks the photo was uploaded for this product, and saves the price as `accepted` or `flagged` |
+| `my-submissions` | `GET /price-submissions/mine` | Lists the caller's own submissions (no evidence-photo links) |
+| `admin-submissions` | `GET` / `PATCH /admin/price-submissions` | Flagged queue with evidence-photo links, and accept/reject decisions (`admin` group only) |
+| `product-requests` | `POST /product-requests/image-upload-url`, `POST /product-requests`, `GET /product-requests/mine` | Upload links for a new product's picture and evidence, proposing a product with its first price (all fields and a picture required, duplicates and a daily limit enforced), and the caller's own requests |
+| `admin-product-requests` | `GET` / `PATCH /admin/product-requests` | Pending queue, and approve (publish the product, its picture and first price in one transaction) or reject (`admin` group only) |
 | `cognito-pre-signup` | Cognito PreSignUp | Auto-confirms public sign-ups |
 | `cognito-post-confirmation` | Cognito PostConfirmation | Adds the user to the `user` group and creates their profile row |
 
@@ -122,20 +124,23 @@ sequenceDiagram
     participant P as S3 photos
     participant D as DynamoDB
 
-    B->>A: POST /price-submissions/image-upload-url (token)
+    B->>A: POST /price-submissions/image-upload-url (token, productId, retailerId)
     A->>U: verified claims
-    U-->>B: presigned POST (key under price-evidence/<userId>/)
+    U->>D: product & retailer exist?
+    U-->>B: presigned POST (key under price-evidence/<userId>/<productId>/)
     B->>P: POST photo directly (S3 enforces JPEG/PNG ≤ 5 MiB)
     B->>A: POST /price-submissions (token, photoKey)
     A->>S: verified claims
     S->>D: product & retailer exist?
     S->>D: rate limit (ByUser), duplicate check (product partition)
-    S->>P: HeadObject: the photo exists and is valid
+    S->>P: HeadObject: the photo exists, is valid and was uploaded for this product
     S->>D: put submission (accepted or flagged), increment submissionCount
-    S-->>B: 201 submission record
+    S-->>B: 201 submission record (no photo link)
 ```
 
 - The photo goes **straight from the browser to S3**, so image bytes never pass through Lambda or DynamoDB.
+- **The product is checked at both ends.** At the upload link, a photo can't even be uploaded for a product that doesn't exist. When the price is saved, the check covers price-only submissions, which skip the upload link, and direct calls.
+- **Evidence photos are for admin verification only.** The contributor never gets a link to view them.
 - The price is `accepted` when it's within the product's `minCents`..`maxCents`, and `flagged` otherwise.
 
 ### 3.3 Admin moderates a flagged price (Built)
@@ -158,6 +163,41 @@ sequenceDiagram
 ```
 
 Moderation is **reactive**: admins only see prices that fall outside the believable range. Users flagging other users' prices is a possible future feature.
+
+### 3.3a Contributor proposes a new product (Built)
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as API Gateway
+    participant R as product-requests λ
+    participant M as admin-product-requests λ
+    participant P as S3 photos
+    participant D as DynamoDB
+
+    B->>A: POST /product-requests/image-upload-url {purpose: product-image}
+    A->>R: verified claims
+    R-->>B: presigned POST (key under product-images/pending/<userId>/)
+    B->>P: POST picture directly
+    B->>A: POST /product-requests (every product field, first price, productImageKey)
+    A->>R: verified claims
+    R->>D: store exists? daily limit (ByUser)? already in product / pending (ByStatus)?
+    R->>P: HeadObject: the picture exists and is valid
+    R->>D: put request (pending)
+    Note over B,D: hidden from catalog, search and basket while pending
+    B->>A: PATCH /admin/product-requests/{id} {decision: approved, changes?} (admin)
+    A->>M: verified claims (cognito:groups = admin)
+    M->>P: copy picture to product-images/<productId>.<ext>
+    M->>D: one transaction: request → approved, put product, put first price (accepted), +1 submissionCount
+    M->>P: delete the pending copy
+    M-->>B: 200 approved request with productId
+```
+
+- **Unapproved products stay out of the catalog.** Pending requests live in their own table, so the catalog, search and basket never see them, and none of that code had to change.
+- **The transaction makes approval all-or-nothing:**
+  - two admins approving at once publish the product only once; the second gets `409`
+  - if the transaction fails, the copied picture is removed
+- The first price counts in the daily average of the day it was approved.
 
 ### 3.4 Shopper plans a basket
 
@@ -229,16 +269,23 @@ sequenceDiagram
 - **Every write needs a Cognito login.** API Gateway rejects missing, invalid, expired and ID tokens before any Lambda runs.
 - **Identity comes from the verified token** (`sub`), never from the request body. Roles come from `cognito:groups`, and admin routes check for `admin` in the Lambda.
 - **Users can't choose their own role.** The `user` group is assigned by a trigger, and admins are created by script.
-- **The photo bucket is private:** public access is blocked, the bucket owner owns every object, data is encrypted at rest (SSE-S3), and a bucket policy denies plain HTTP. Photos are only reachable through 5-minute presigned URLs, and a user can only upload under `price-evidence/<their userId>/`.
-- **Uploads are limited** to JPEG/PNG of 5 MiB or less. The presigned POST policy enforces this, and it's checked again before a submission can reference a photo.
-- **Per-user rate limit** of 30 submissions per hour. Duplicate submissions are refused.
-- **Bad data is flagged, not trusted.** Out-of-range prices wait for an admin, and only `accepted` prices count.
+- **The photo bucket is private:** public access is blocked, the bucket owner owns every object, data is encrypted at rest (SSE-S3), and a bucket policy denies plain HTTP. Images are only reachable through presigned URLs:
+  - evidence photos: 5 minutes, admins only
+  - product pictures: 1 hour
+
+  A user can only upload under their own folders (`price-evidence/<their userId>/…`, `product-images/pending/<their userId>/`).
+- **Uploads are limited** to JPEG/PNG of 5 MiB or less. The presigned POST policy enforces this, and it's checked again before a submission or product request can reference an image.
+- **Evidence photos are tied to a product.** An upload link is only issued for an existing product and store, and a photo can only be attached to a price for that same product.
+- **Per-user rate limits:** 30 submissions per hour and 10 product requests per day. Duplicate submissions and duplicate products are refused.
+- **Bad data is flagged, not trusted:**
+  - out-of-range prices wait for an admin, and only `accepted` prices count
+  - new products wait for an admin before anyone sees them
 - **Least-privilege IAM:** each Lambda can only use the tables and bucket prefix it needs.
 - **CORS** only allows the frontend origin (`http://localhost:5173` for now).
 
 **Proposed:**
 - Scanning image content
-- Cleaning up uploads that are never used in a submission
+- Cleaning up uploads that are never used in a submission or product request
 - API throttling limits or AWS WAF before public launch
 
 ---
@@ -252,7 +299,9 @@ sequenceDiagram
 |---|---|
 | Price submission | 2 GetItem, 2 Query (rate limit, duplicate), 1 S3 HeadObject (with a photo), 1 PutItem, 1 UpdateItem |
 | "My submissions" page | 1 Query + 2 BatchGetItem |
-| Photo upload | 1 Lambda call to sign, then 1 direct S3 upload |
+| Photo upload | 1 Lambda call to sign (2 GetItem to check the product and store), then 1 direct S3 upload |
+| Product request | 1 GetItem, 1 Query (daily limit), 1 Scan of `product` + 1 Query of pending requests (duplicates), 1–2 S3 HeadObject, 1 PutItem |
+| Product approval | 1 GetItem, 1 Scan of `product` (duplicates), 1 S3 copy + 1 delete, 1 transaction of 4 writes |
 | Product search | 3 Scans (product, retailer and retailer-price tables) |
 | Basket comparison | 3 Scans (product, retailer and retailer-price tables, about 100 small items in all) |
 | Nightly daily-price job | 1 Query on `ByStatus` (accepted submissions) + 1 BatchWrite per 25 updated prices, once a day |

@@ -1,6 +1,6 @@
 # TrolleySaver Database Design (Draft)
 
-**Owner:** Yong Hsien · **Last updated:** 25 Oct 2026 · **Database:** Amazon DynamoDB
+**Owner:** Yong Hsien · **Last updated:** 29 Oct 2026 · **Database:** Amazon DynamoDB
 
 ## 1. Entity Relationship Diagram
 
@@ -13,6 +13,9 @@ erDiagram
     PRODUCT ||--o{ RETAILER_PRICE : "has a daily price"
     RETAILER ||--o{ RETAILER_PRICE : "at"
     PRICE_SUBMISSION }o--|| RETAILER_PRICE : "averaged nightly into"
+    USER ||--o{ PRODUCT_REQUEST : "proposes"
+    PRODUCT_REQUEST |o--o| PRODUCT : "published as (when approved)"
+    PRODUCT_REQUEST |o--o| PRICE_SUBMISSION : "first price (when approved)"
 
     PRODUCT {
         string id PK "UUID"
@@ -27,6 +30,9 @@ erDiagram
         list searchTerms "lowfat, lf, hcs, etc"
         number minCents "152 - lowest believable price per pack"
         number maxCents "645 - highest believable price per pack"
+        string imageKey "optional - product-images/<id>.png (products from a request)"
+        string createdFromRequest "optional - PRODUCT_REQUEST.requestId"
+        string createdAt "optional - when an admin published it"
     }
 
     RETAILER {
@@ -44,12 +50,39 @@ erDiagram
         string observedAt "2026-10-18T02:32:00.000Z"
         string submittedAt "2026-10-18T02:35:00.000Z"
         string status "accepted, flagged, rejected"
-        string photoKey "optional - S3 key"
+        string photoKey "optional - price-evidence/<userId>/<productId>/<uuid>.jpg"
         string photoContentType "optional - image/jpeg or image/png"
         number photoSizeBytes "optional - 1830042"
         string reviewedAt "optional - when an admin decided"
         string reviewedBy "optional - admin's USER.userId"
         string rejectionReason "optional - required when rejected"
+        string productRequestId "optional - set on a published product's first price"
+    }
+
+    PRODUCT_REQUEST {
+        string requestId PK "UUID"
+        string status "pending, approved, rejected"
+        string userId "reference to USER.userId - who proposed it"
+        string submittedAt "2026-10-29T03:12:44.120Z"
+        string name "Oatside Barista Oat Milk - every product field is required"
+        string brand "Oatside"
+        string category "milk"
+        number packQty "1"
+        string packUnit "L"
+        number packCount "1"
+        boolean hcs "false"
+        list dietary "vegan - may be empty"
+        string duplicateKey "name|brand|packQty|packUnit, normalised"
+        string retailerId "where the first price was seen"
+        number priceCents "545"
+        string observedAt "2026-10-28T16:00:00.000Z"
+        string productImageKey "required - product-images/pending/<userId>/<uuid>.png"
+        string photoKey "optional - price-evidence/<userId>/new-product/<uuid>.jpg"
+        string reviewedAt "optional - when an admin decided"
+        string reviewedBy "optional - admin's USER.userId"
+        string rejectionReason "optional - required when rejected"
+        string productId "when approved - the published PRODUCT.id"
+        string submissionId "when approved - its first PRICE_SUBMISSION"
     }
 
     USER {
@@ -72,10 +105,11 @@ erDiagram
 
 ## 2. DynamoDB Tables and Indexes
 
-There are **5 tables**, one per entity, named `trolleysaver-<env>-<entity>` (e.g. `trolleysaver-dev-price-submission`):
-- `product`, `retailer` and `user` hold reference data.
+There are **6 tables**, one per entity, named `trolleysaver-<env>-<entity>` (e.g. `trolleysaver-dev-price-submission`):
+- `product`, `retailer` and `user` hold reference data. `product` only ever holds **published** products.
 - `price-submission` holds every price a contributor (or the seed) reported.
 - `retailer-price` holds the **one price per product and store** that the Smart Basket uses. It is derived from `price-submission` by a nightly job (section 4).
+- `product-request` holds products contributors have proposed, until an admin approves or rejects them (section 5). Keeping them out of `product` means the catalog, search and basket never see an unapproved product.
 
 ```mermaid
 flowchart LR
@@ -88,6 +122,8 @@ flowchart LR
     Q8(["Nightly job:<br/>yesterday's accepted prices"]) --> G3
     Q9(["Smart Basket prices"]) --> RP
     Q5(["User profile"]) --> US
+    Q10(["Admin product queue,<br/>duplicate check"]) --> G4
+    Q11(["My product requests,<br/>daily limit"]) --> G5
 
     PR["<b>product</b><br/>PK: id<br/><i>24 items</i>"]
     RT["<b>retailer</b><br/>PK: id<br/><i>3 items</i>"]
@@ -97,18 +133,24 @@ flowchart LR
     G3["<b>GSI ByStatus</b><br/><i>auto-copy of price-submission</i><br/>PK: status<br/>SK: submittedAt"]
     US["<b>user</b><br/>PK: userId"]
     RP["<b>retailer-price</b><br/>PK: productId<br/>SK: retailerId<br/><i>≤ 72 items</i>"]
+    PQ["<b>product-request</b><br/>PK: requestId"]
+    G4["<b>GSI ByStatus</b><br/><i>auto-copy of product-request</i><br/>PK: status<br/>SK: submittedAt"]
+    G5["<b>GSI ByUser</b><br/><i>auto-copy of product-request</i><br/>PK: userId<br/>SK: submittedAt"]
 
     PS -.-> G1
     PS -.-> G2
     PS -.-> G3
     G3 == "averaged nightly" ==> RP
+    PQ -.-> G4
+    PQ -.-> G5
+    PQ == "approved: published as" ==> PR
 
     classDef table fill:#e8f1ff,stroke:#3b6fd8,color:#111
     classDef index fill:#fff4dd,stroke:#c98a00,color:#111
     classDef query fill:#f2f2f2,stroke:#888,color:#111
-    class PR,RT,PS,US,RP table
-    class G1,G2,G3 index
-    class Q1,Q2,Q3,Q4,Q5,Q6,Q7,Q8,Q9 query
+    class PR,RT,PS,US,RP,PQ table
+    class G1,G2,G3,G4,G5 index
+    class Q1,Q2,Q3,Q4,Q5,Q6,Q7,Q8,Q9,Q10,Q11 query
 ```
 
 **Notes:**
@@ -154,13 +196,50 @@ flowchart LR
 
 The table is small (at most products × stores rows, 72 today), so the basket reads it whole on each request.
 
-## 5. Other rules enforced by the backend
+## 5. New products (`product-request`)
 
-- `productId` and `retailerId` must exist before a submission is saved.
+A contributor who can't find a product proposes it with **every product field**, its first price (store, price, observed date), a **required picture** and an optional evidence photo. An admin decides.
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: contributor proposes
+    pending --> approved: admin approves (may correct fields and the price range)
+    pending --> rejected: admin rejects (reason required)
+```
+
+- **Pending requests are invisible to shoppers.** They live only in `product-request`.
+- **Approval publishes everything in one DynamoDB transaction:**
+  - the request becomes `approved`
+  - a new `product` row is created, with `minCents` / `maxCents` defaulting to half to one and a half times the first price, unless the admin sets them
+  - the first price is saved as an `accepted` `price-submission`, with `reviewedAt` set to the approval time so the nightly job counts it that day
+  - the contributor's `submissionCount` goes up by one
+
+  The product's picture is moved from `product-images/pending/…` to `product-images/<productId>.<ext>`, and the product's `imageKey` points at it.
+- **Rejection** keeps the request with its reason and deletes the pending picture.
+- **Duplicates are refused:**
+  - a request for a product already in `product`, matched on normalised name, brand and pack size (`duplicateKey`)
+  - a request matching one that is already pending
+  - an approval if the product appeared in the meantime
+- **Limit:** 10 product requests per user per 24 hours, counted with `ByUser`.
+
+## 6. Images in S3
+
+All images are in the private photo bucket `trolleysaver-<env>-photos-<account>` and are only reachable through short-lived signed links.
+
+| Folder | What | Who can view it |
+|---|---|---|
+| `price-evidence/<userId>/<productId>/<uuid>.<ext>` | Shelf-tag photo proving a price of an existing product | Admins only (5-minute link) |
+| `price-evidence/<userId>/new-product/<uuid>.<ext>` | The same, for the first price of a product request | Admins only (5-minute link) |
+| `product-images/pending/<userId>/<uuid>.<ext>` | A product request's picture until an admin decides | The contributor and admins (1-hour link) |
+| `product-images/<productId>.<ext>` | A published product's picture | Everyone, through `imageUrl` on the catalog and search (1-hour link) |
+
+## 7. Other rules enforced by the backend
+
+- `productId` and `retailerId` must exist before an evidence upload link is given, and again before a submission is saved (price-only submissions never ask for a link).
 - Rate limit: 30 submissions per user per hour, counted with the `ByUser` index.
 - Duplicates: the same user, product, retailer and price on the same Singapore calendar day is refused.
 - `observedAt` cannot be in the future or more than 30 days old.
-- `photoKey` must point at an object the same user uploaded (`price-evidence/<userId>/…`), which must be a JPEG or PNG of at most 5 MiB.
+- `photoKey` must point at an object the same user uploaded **for that product** (`price-evidence/<userId>/<productId>/…`), which must be a JPEG or PNG of at most 5 MiB. Photos uploaded before 29 Oct 2026 sit at `price-evidence/<userId>/<uuid>`; they stay attached to their submissions, but can't be attached to new ones.
 - The `user` row is created at sign-up. `submissionCount` goes up by one with each submission.
 - Seed prices loaded from the data spreadsheet use `userId = "seed-team"` and `status = "accepted"`.
 
@@ -175,5 +254,5 @@ The table is small (at most products × stores rows, 72 today), so the basket re
 | GSI | Global Secondary Index: an automatically kept copy of a table, organised by a different key so it can be searched another way |
 | HCS / `hcs` | Healthier Choice Symbol: the Health Promotion Board label for healthier products |
 | UUID | Universally Unique Identifier: a randomly generated id, e.g. `9f1c2b7e-…` |
-| S3 | Amazon Simple Storage Service: where shelf-tag photos are stored |
+| S3 | Amazon Simple Storage Service: where shelf-tag photos and product pictures are stored (section 6) |
 | L, ml, kg, g, pcs | Litres, millilitres, kilograms, grams, pieces (`packUnit` values) |

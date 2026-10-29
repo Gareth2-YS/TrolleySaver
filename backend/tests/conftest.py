@@ -32,6 +32,7 @@ ENV = {
     "SUBMISSION_TABLE": "unit-price-submission",
     "USER_TABLE": "unit-user",
     "RETAILER_PRICE_TABLE": "unit-retailer-price",
+    "PRODUCT_REQUEST_TABLE": "unit-product-request",
     "PHOTO_BUCKET": BUCKET,
     "ALLOWED_ORIGIN": "http://localhost:5173",
     "RATE_LIMIT_PER_HOUR": "30",
@@ -67,6 +68,20 @@ def create_tables(dynamodb, prefix="unit"):
         BillingMode="PAY_PER_REQUEST",
         AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("productId", "retailerId")],
         KeySchema=[{"AttributeName": "productId", "KeyType": "HASH"}, {"AttributeName": "retailerId", "KeyType": "RANGE"}],
+    )
+    dynamodb.create_table(
+        TableName=f"{prefix}-product-request",
+        BillingMode="PAY_PER_REQUEST",
+        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("requestId", "status", "userId", "submittedAt")],
+        KeySchema=[{"AttributeName": "requestId", "KeyType": "HASH"}],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": name,
+                "KeySchema": [{"AttributeName": pk, "KeyType": "HASH"}, {"AttributeName": "submittedAt", "KeyType": "RANGE"}],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+            for name, pk in (("ByStatus", "status"), ("ByUser", "userId"))
+        ],
     )
 
 
