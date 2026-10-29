@@ -37,9 +37,11 @@ Globals:
         SUBMISSION_TABLE: !Sub trolleysaver-${Env}-price-submission
         USER_TABLE: !Sub trolleysaver-${Env}-user
         RETAILER_PRICE_TABLE: !Sub trolleysaver-${Env}-retailer-price
+        PRODUCT_REQUEST_TABLE: !Sub trolleysaver-${Env}-product-request
         ALLOWED_ORIGIN: !Ref AllowedOrigin
         MAX_UPLOAD_BYTES: "5242880"
         RATE_LIMIT_PER_HOUR: "30"
+        PRODUCT_REQUESTS_PER_DAY: "10"
         LOG_LEVEL: INFO
 
 Resources:
@@ -304,6 +306,43 @@ Resources:
         - AttributeName: retailerId
           KeyType: RANGE
 
+  # New products proposed by contributors, waiting for (or decided by) an admin.
+  ProductRequestTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldCreateTables
+    Properties:
+      TableName: !Sub trolleysaver-${Env}-product-request
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: requestId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: submittedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requestId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByStatus
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: submittedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ByUser
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: submittedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   # ---------- API ----------
   Api:
     Type: AWS::Serverless::Api
@@ -342,11 +381,18 @@ Resources:
     Properties:
       FunctionName: !Sub trolleysaver-${Env}-catalog
       Handler: handlers.catalog.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-product
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-retailer
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/product-images/*
       Events:
         ListProducts:
           Type: Api
@@ -398,6 +444,7 @@ Resources:
       Environment:
         Variables:
           PRICE_MAX_AGE_DAYS: "30"
+          PHOTO_BUCKET: !Ref PhotoBucket
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-product
@@ -405,6 +452,10 @@ Resources:
             TableName: !Sub trolleysaver-${Env}-retailer
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-retailer-price
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/product-images/*
       Events:
         SearchProducts:
           Type: Api
@@ -444,6 +495,10 @@ Resources:
         Variables:
           PHOTO_BUCKET: !Ref PhotoBucket
       Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
         - Statement:
             - Effect: Allow
               Action: s3:PutObject
@@ -490,9 +545,7 @@ Resources:
     Properties:
       FunctionName: !Sub trolleysaver-${Env}-my-submissions
       Handler: handlers.my_submissions.handler
-      Environment:
-        Variables:
-          PHOTO_BUCKET: !Ref PhotoBucket
+      # No photo-bucket access: contributors don't get links to evidence photos (admins only).
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-price-submission
@@ -500,10 +553,6 @@ Resources:
             TableName: !Sub trolleysaver-${Env}-product
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-retailer
-        - Statement:
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
       Events:
         ListMine:
           Type: Api
@@ -545,6 +594,94 @@ Resources:
           Properties:
             RestApiId: !Ref Api
             Path: /admin/price-submissions/{id}
+            Method: PATCH
+
+  ProductRequestsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-product-requests
+      Handler: handlers.product_requests.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-product-request
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource:
+                - !Sub ${PhotoBucket.Arn}/product-images/pending/*
+                - !Sub ${PhotoBucket.Arn}/price-evidence/*
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource:
+                - !Sub ${PhotoBucket.Arn}/product-images/*
+                - !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        RequestImageUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /product-requests/image-upload-url
+            Method: POST
+        CreateRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /product-requests
+            Method: POST
+        ListMine:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /product-requests/mine
+            Method: GET
+
+  AdminProductRequestsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-admin-product-requests
+      Handler: handlers.admin_product_requests.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        # Approval writes the request, the new product, its first price and the contributor's count
+        # in one DynamoDB transaction.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-product-request
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-product
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-price-submission
+        - DynamoDBCrudPolicy:
+            TableName: !Sub trolleysaver-${Env}-user
+        - DynamoDBReadPolicy:
+            TableName: !Sub trolleysaver-${Env}-retailer
+        - Statement:
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+              Resource: !Sub ${PhotoBucket.Arn}/product-images/*
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        ListForReview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /admin/product-requests
+            Method: GET
+        Decide:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /admin/product-requests/{id}
             Method: PATCH
 
 Outputs:

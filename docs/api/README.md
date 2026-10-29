@@ -1,10 +1,14 @@
 # TrolleySaver API reference
 
-**Owner:** Gareth (backend) · **Last updated:** 26 Oct 2026 · **Covers:** login, catalog, product search, price & photo submissions, admin moderation, Smart Basket
+**Owner:** Gareth (backend) · **Last updated:** 29 Oct 2026 · **Covers:** login, catalog, product search, price & photo submissions, new product requests, admin moderation, Smart Basket
 
-This is the contract between the frontend and the backend. It covers login, the product catalog and search, price and photo submissions, admin moderation and the Smart Basket comparison.
+This is the contract between the frontend and the backend. It covers login, the product catalog and search, price and photo submissions, proposing new products, admin moderation and the Smart Basket comparison.
 
-How the frontend should adopt it is described in the feature handoffs: [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md), [price upload](../handoffs/2026-10-24-price-upload-backend-to-frontend.md) and [Smart Basket](../handoffs/2026-10-24-smart-basket-backend-to-frontend.md).
+How the frontend should adopt it is described in the feature handoffs:
+- [auth](../handoffs/2026-10-24-auth-backend-to-frontend.md)
+- price upload: [first version](../handoffs/2026-10-24-price-upload-backend-to-frontend.md), then [29 Oct changes](../handoffs/2026-10-29-price-upload-backend-to-frontend.md)
+- [new product requests](../handoffs/2026-10-29-new-product-backend-to-frontend.md)
+- [Smart Basket](../handoffs/2026-10-24-smart-basket-backend-to-frontend.md)
 
 - [1. Basics](#1-basics)
 - [2. Authentication](#2-authentication)
@@ -63,12 +67,17 @@ The server always takes the caller's identity from the verified token. Fields li
 | [`GET /products`](#get-products) | public | Product catalog |
 | [`GET /retailers`](#get-retailers) | public | Store list |
 | [`GET /products/search`](#get-productssearch) | public | Search and filter products, with each one's current store prices |
-| [`POST /price-submissions/image-upload-url`](#post-price-submissionsimage-upload-url) | user | Get a one-time URL to upload a shelf-tag photo |
+| [`POST /price-submissions/image-upload-url`](#post-price-submissionsimage-upload-url) | user | Get a one-time URL to upload a shelf-tag photo for one existing product |
 | [`POST {uploadUrl}`](#uploading-the-photo-to-s3) | none (signed URL) | Upload the photo directly to S3 |
 | [`POST /price-submissions`](#post-price-submissions) | user | Submit a price |
 | [`GET /price-submissions/mine`](#get-price-submissionsmine) | user | The caller's own submissions |
 | [`GET /admin/price-submissions`](#get-adminprice-submissions) | admin | Review queue (flagged prices) |
 | [`PATCH /admin/price-submissions/{id}`](#patch-adminprice-submissionsid) | admin | Accept or reject a flagged price |
+| [`POST /product-requests/image-upload-url`](#post-product-requestsimage-upload-url) | user | Get a one-time URL to upload a new product's picture, or an evidence photo for its price |
+| [`POST /product-requests`](#post-product-requests) | user | Propose a product that isn't in the catalog, with its first price |
+| [`GET /product-requests/mine`](#get-product-requestsmine) | user | The caller's own product requests |
+| [`GET /admin/product-requests`](#get-adminproduct-requests) | admin | Review queue (pending product requests) |
+| [`PATCH /admin/product-requests/{id}`](#patch-adminproduct-requestsid) | admin | Approve (publish) or reject a product request |
 | [`POST /basket/compare`](#post-basketcompare) | public | Price a basket at every store, plus a healthier version of it |
 
 "user" means any signed-in account, including admins.
@@ -99,7 +108,7 @@ Returns every product, sorted by name.
 }
 ```
 
-See [Product](#product) for field details.
+See [Product](#product) for field details. Products added through an approved [product request](#post-product-requests) also have a picture: an `imageKey` and a signed **`imageUrl`** that works for 1 hour. The products the team loaded have no picture, so keep showing their category icon. The same applies to `GET /products/search`.
 
 ### `GET /retailers`
 
@@ -158,13 +167,20 @@ Errors: `400 VALIDATION_ERROR` (`q`, `hcs`, `minPriceCents`, `maxPriceCents`; `m
 
 ### `POST /price-submissions/image-upload-url`
 
-Step 1 of 3 for a submission with a photo. It returns a one-time, 5-minute upload form for **one** JPEG or PNG of up to 5 MiB.
+Step 1 of 3 for a submission with a photo. It returns a one-time, 5-minute upload form for **one** JPEG or PNG of up to 5 MiB. The photo is evidence for a price of **one existing product at one existing store**, so both must be named, and no upload form is given for a product or store that doesn't exist.
 
 | Body field | Type | Required | Rules |
 |---|---|---|---|
+| `productId` | string | yes | Must be an id from `GET /products` |
+| `retailerId` | string | yes | Must be an id from `GET /retailers` |
 | `contentType` | string | yes | `image/jpeg` or `image/png` |
 | `sizeBytes` | integer | yes | 1 – 5,242,880 |
 | `fileName` | string | no | Ignored (the server generates the object name) |
+
+```json
+POST /price-submissions/image-upload-url
+{ "productId": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f", "retailerId": "fairprice", "contentType": "image/png", "sizeBytes": 183004 }
+```
 
 ```json
 200 OK
@@ -173,7 +189,7 @@ Step 1 of 3 for a submission with a photo. It returns a one-time, 5-minute uploa
   "uploadUrl": "https://trolleysaver-dev-photos-<account>.s3.ap-southeast-1.amazonaws.com/",
   "fields": {
     "Content-Type": "image/png",
-    "key": "price-evidence/<your-user-id>/2b0f….png",
+    "key": "price-evidence/<your-user-id>/<product-id>/2b0f….png",
     "x-amz-algorithm": "AWS4-HMAC-SHA256",
     "x-amz-credential": "…",
     "x-amz-date": "…",
@@ -181,15 +197,18 @@ Step 1 of 3 for a submission with a photo. It returns a one-time, 5-minute uploa
     "policy": "…",
     "x-amz-signature": "…"
   },
-  "photoKey": "price-evidence/<your-user-id>/2b0f….png",
   "expiresAt": "2026-10-24T08:20:02.120Z",
-  "maxSizeBytes": 5242880
+  "maxSizeBytes": 5242880,
+  "photoKey": "price-evidence/<your-user-id>/<product-id>/2b0f….png"
 }
 ```
 
-Treat `fields` as opaque and send all of them. Keep `photoKey` for step 3.
+Treat `fields` as opaque and send all of them. Keep `photoKey` for step 3, which must be for **the same product**.
 
-Errors: `400 VALIDATION_ERROR` (`contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`.
+Errors:
+- `400 VALIDATION_ERROR` naming each bad field together: `productId`, `retailerId`, `contentType`, `sizeBytes`. An unknown id gives `"productId": "Unknown product"` or `"retailerId": "Unknown store"`.
+- `400 IMAGE_TOO_LARGE`
+- `401`
 
 ### Uploading the photo to S3
 
@@ -223,12 +242,14 @@ Step 3 of 3, and the only step when there's no photo.
 | `retailerId` | string | yes | Must be an id from `GET /retailers` |
 | `priceCents` | integer | yes | 1 – 100000 ($0.01 – $1,000). Price of **one pack** at regular shelf price. |
 | `observedAt` | string | yes | `YYYY-MM-DD` (read as midnight Singapore time) or an ISO 8601 datetime. Not in the future, at most 30 days ago. |
-| `photoKey` | string | no | The `photoKey` from step 1, after a successful upload in step 2 |
+| `photoKey` | string | no | The `photoKey` from step 1 for **this same product**, after a successful upload in step 2 |
+
+The product and store are checked here too, with or without a photo, because a price without a photo never goes through step 1.
 
 ```json
 POST /price-submissions
 { "productId": "e0bbb251-86fc-5f79-ae73-afb84fa2e54f", "retailerId": "fairprice", "priceCents": 363,
-  "observedAt": "2026-10-24", "photoKey": "price-evidence/<your-user-id>/2b0f….png" }
+  "observedAt": "2026-10-24", "photoKey": "price-evidence/<your-user-id>/e0bbb251-…/2b0f….png" }
 ```
 
 ```json
@@ -245,12 +266,13 @@ POST /price-submissions
   "observedAt": "2026-10-23T16:00:00.000Z",
   "submittedAt": "2026-10-24T08:15:02.120Z",
   "status": "accepted",
-  "photoKey": "price-evidence/196ae5bc-…/2b0f….png",
+  "photoKey": "price-evidence/196ae5bc-…/e0bbb251-…/2b0f….png",
   "photoContentType": "image/png",
-  "photoSizeBytes": 183004,
-  "photoUrl": "https://…"
+  "photoSizeBytes": 183004
 }
 ```
+
+**Evidence photos are for admin verification only.** Contributors see that a photo is attached (`photoKey`, type and size) but never get a `photoUrl` to view it; only the admin endpoints include one.
 
 **`status` is decided by the server:**
 
@@ -267,13 +289,13 @@ Errors, in the order they're checked:
 | 400 | `VALIDATION_ERROR` | `fieldErrors` names the bad fields (`productId`, `retailerId`, `priceCents`, `observedAt`, `photoKey`), including unknown product or store ids |
 | 429 | `RATE_LIMITED` | Over 30 submissions in the past hour |
 | 409 | `DUPLICATE_SUBMISSION` | This user already submitted the same product, store and price for the same Singapore day |
-| 400 | `VALIDATION_ERROR` | `photoKey` isn't one of the caller's own uploads |
+| 400 | `VALIDATION_ERROR` | `photoKey` isn't one of the caller's own uploads **for this product** |
 | 400 | `PHOTO_NOT_FOUND` | Nothing was uploaded for that `photoKey` |
 | 400 | `INVALID_PHOTO` | The uploaded object isn't a JPEG/PNG of 5 MiB or less |
 
 ### `GET /price-submissions/mine`
 
-The caller's own submissions in every status, newest first.
+The caller's own submissions in every status, newest first. There's no `photoUrl`; evidence photos are for admins only.
 
 | Query | Default | Notes |
 |---|---|---|
@@ -289,7 +311,7 @@ Errors: `400 VALIDATION_ERROR` (`limit`), `400 INVALID_PAGE_TOKEN`, `401`.
 
 ### `GET /admin/price-submissions`
 
-Admin only. Lists submissions by status, newest first. Records also include `submitterName` and `submitterEmail`.
+Admin only. Lists submissions by status, newest first. Records also include `submitterName`, `submitterEmail` and, when a photo is attached, a 5-minute `photoUrl` to check the evidence.
 
 | Query | Default | Notes |
 |---|---|---|
@@ -320,6 +342,142 @@ PATCH /admin/price-submissions/ZTBiYmIyNTEtODZm…
 ```
 
 Errors: `400 VALIDATION_ERROR` (`decision`, `reason`), `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 ALREADY_MODERATED`. A 409 means the submission isn't flagged: either another admin got there first, or it was accepted automatically.
+
+### Proposing a new product
+
+When a shopper finds a product that isn't in the catalog, they can propose it with its first price. A **product picture is required**; an evidence photo of the price is optional.
+
+1. Upload the picture, and optionally an evidence photo, with [`POST /product-requests/image-upload-url`](#post-product-requestsimage-upload-url), then send each file to S3 [as in step 2 above](#uploading-the-photo-to-s3).
+2. Send the request with [`POST /product-requests`](#post-product-requests).
+
+The request stays **`pending`** and is hidden from the catalog, search and the basket until an admin approves it ([`PATCH /admin/product-requests/{id}`](#patch-adminproduct-requestsid)). Approving publishes the product, with its picture, and its first price as an accepted submission. The price reaches the Smart Basket after that night's price job.
+
+### `POST /product-requests/image-upload-url`
+
+User. Returns a one-time, 5-minute upload form, exactly like the [evidence upload link](#post-price-submissionsimage-upload-url), for one JPEG or PNG of up to 5 MiB.
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `purpose` | string | yes | `product-image` for the product's picture, or `evidence` for a shelf-tag photo of its price |
+| `contentType` | string | yes | `image/jpeg` or `image/png` |
+| `sizeBytes` | integer | yes | 1 – 5,242,880 |
+
+The response is the same as the evidence upload link's. It carries `productImageKey` when `purpose` is `product-image`, or `photoKey` when it is `evidence`. Keep the key for `POST /product-requests`.
+
+Errors: `400 VALIDATION_ERROR` (`purpose`, `contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`.
+
+### `POST /product-requests`
+
+User. Proposes the product and its first price. **Every field is required** except `photoKey`.
+
+| Body field | Type | Rules |
+|---|---|---|
+| `name` | string | 2–120 characters |
+| `brand` | string | 1–60 characters |
+| `category` | string | 1–40 characters, stored lower-case like the existing categories (`milk`, `bread`, …) |
+| `packQty` | number | Size of one unit, more than 0 and at most 100000 (decimals allowed, e.g. `32.5`) |
+| `packUnit` | string | `ml`, `L`, `g`, `kg`, `pcs` or `rolls` (any capitalisation) |
+| `packCount` | integer | Units per pack, 1–100 |
+| `hcs` | boolean | Has the Healthier Choice Symbol |
+| `dietary` | string[] | At most 5 tags of 1–30 characters, e.g. `["halal"]`; `[]` for none |
+| `retailerId` | string | Store where the price was seen; must be an id from `GET /retailers` |
+| `priceCents` | integer | 1 – 100000, the regular shelf price of one pack |
+| `observedAt` | string | Same rules as for a price submission |
+| `productImageKey` | string | **Required.** From the upload link with `purpose: "product-image"`, after a successful upload |
+| `photoKey` | string, optional | From the upload link with `purpose: "evidence"`, after a successful upload |
+
+```json
+POST /product-requests
+{ "name": "Oatside Barista Oat Milk", "brand": "Oatside", "category": "milk", "packQty": 1, "packUnit": "L",
+  "packCount": 1, "hcs": false, "dietary": ["vegan"], "retailerId": "fairprice", "priceCents": 545,
+  "observedAt": "2026-10-29", "productImageKey": "product-images/pending/<your-user-id>/9c1e….png" }
+```
+
+```json
+201 Created
+{
+  "id": "2f4b7a10-…", "requestId": "2f4b7a10-…", "status": "pending", "userId": "<your-user-id>",
+  "submittedAt": "2026-10-29T03:12:44.120Z",
+  "name": "Oatside Barista Oat Milk", "brand": "Oatside", "category": "milk", "packQty": 1, "packUnit": "L",
+  "packCount": 1, "hcs": false, "dietary": ["vegan"],
+  "retailerId": "fairprice", "retailerName": "FairPrice", "priceCents": 545, "observedAt": "2026-10-28T16:00:00.000Z",
+  "productImageKey": "product-images/pending/<your-user-id>/9c1e….png", "productImageContentType": "image/png",
+  "productImageSizeBytes": 48210, "productImageUrl": "https://…"
+}
+```
+
+Errors, in the order they're checked:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `INVALID_BODY` | Body isn't a JSON object |
+| 400 | `VALIDATION_ERROR` | `fieldErrors` names every missing or bad field, including `"productImageKey": "Upload a picture of the product"` and an unknown store |
+| 429 | `RATE_LIMITED` | More than 10 product requests in the past 24 hours |
+| 409 | `PRODUCT_EXISTS` | The catalog already has this product (same name, brand and pack size, ignoring case and spacing). The response includes **`productId`** so the user can submit a price for it instead. |
+| 409 | `PRODUCT_ALREADY_REQUESTED` | Someone has already proposed this product and it's waiting for an admin |
+| 400 | `VALIDATION_ERROR` | `productImageKey` or `photoKey` isn't one of the caller's own uploads for a product request |
+| 400 | `PHOTO_NOT_FOUND` / `INVALID_PHOTO` | Nothing was uploaded for that key, or it isn't a JPEG/PNG of 5 MiB or less |
+
+### `GET /product-requests/mine`
+
+User. The caller's own product requests in every status, newest first, paginated like `GET /price-submissions/mine`. Each one shows:
+- its `status` and `productImageUrl`
+- `rejectionReason` when rejected
+- `productId` once approved, the id of the published product
+
+There's no evidence `photoUrl`.
+
+### `GET /admin/product-requests`
+
+Admin only. Lists product requests by status, newest first.
+
+| Query | Default | Notes |
+|---|---|---|
+| `status` | `pending` | `pending`, `approved` or `rejected` |
+| `limit` | 50 | 1–100 |
+| `nextToken` | — | From the previous page |
+
+Each record also has these fields:
+- `submitterName` and `submitterEmail`
+- `productImageUrl`
+- the evidence `photoUrl`, when there is one
+- for pending requests, `suggestedMinCents` and `suggestedMaxCents`: the believable price range the product gets unless the admin changes it. That's half to one and a half times the first price; for 545 it's 272–818.
+
+Errors: `400 VALIDATION_ERROR` (`status`, `limit`), `400 INVALID_PAGE_TOKEN`, `401`, `403 FORBIDDEN`.
+
+### `PATCH /admin/product-requests/{id}`
+
+Admin only. Decides a **pending** product request. Each one can be decided once.
+
+| Body field | Type | Required | Rules |
+|---|---|---|---|
+| `decision` | string | yes | `approved` or `rejected` |
+| `reason` | string | when rejecting | 1–500 characters, shown to the contributor |
+| `changes` | object | no | Corrections to publish instead of what the contributor typed. It can contain any product field (same rules as above), plus `minCents` / `maxCents` (the believable price range, defaulting to the suggested one) and `searchTerms` (at most 10 extra search words). |
+
+```json
+PATCH /admin/product-requests/2f4b7a10-…
+{ "decision": "approved", "changes": { "category": "plant milk", "searchTerms": ["oat", "barista"] } }
+```
+
+- **Approving publishes in one step:**
+  - the product, under a new `productId`
+  - its picture, moved to `product-images/<productId>.<ext>`
+  - its first price, as an **accepted** submission by the contributor
+
+  The response is the updated request, with `status: "approved"`, `productId` and the published values. The product then appears in `GET /products` and search, with an `imageUrl`.
+- **Rejecting** stores the reason and deletes the pending picture.
+
+Errors:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | `decision`, `reason`, or a field in `changes` (including `maxCents` below `minCents`, or an unknown field) |
+| 401 / 403 | `FORBIDDEN` | Not an admin |
+| 404 | `NOT_FOUND` | No such request |
+| 409 | `ALREADY_MODERATED` | The request isn't pending any more; another admin may have got there first |
+| 409 | `PRODUCT_EXISTS` | The product was added to the catalog meanwhile (includes `productId`). Reject the request instead. |
+| 409 | `PRODUCT_IMAGE_MISSING` | The request's picture is gone from storage. Reject the request instead. |
 
 ### `POST /basket/compare`
 
@@ -425,6 +583,8 @@ Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[
 | `dietary` | string[], optional | e.g. `["halal", "vegetarian"]` |
 | `searchTerms` | string[], optional | Extra words to match in search |
 | `minCents`, `maxCents` | integer | Believable price range. Prices outside it are flagged. |
+| `imageKey`, `imageUrl` | string, optional | Only on products published from a product request. `imageUrl` is a signed link to the product's picture that works for **1 hour**. Products without it keep their category icon. |
+| `createdFromRequest`, `createdAt` | string, optional | Only on products published from a product request |
 
 ### Retailer
 
@@ -446,8 +606,9 @@ Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[
 | `observedAt`, `submittedAt` | string (ISO 8601 UTC) | Always |
 | `status` | `accepted` \| `flagged` \| `rejected` | Always |
 | `photoKey`, `photoContentType`, `photoSizeBytes` | string, string, integer | When a photo was attached |
-| `photoUrl` | string | When a photo was attached. A signed link that **expires 5 minutes** after the response; if the image fails to load, fetch the list again. |
-| `reviewedAt`, `reviewedBy` | string | After an admin decision |
+| `photoUrl` | string | **Admin endpoints only**, when a photo was attached. A signed link that **expires 5 minutes** after the response; if the image fails to load, fetch the list again. |
+| `productRequestId` | string | Only on the first price of a product published from a product request |
+| `reviewedAt`, `reviewedBy` | string | After an admin decision (also on a published product's first price) |
 | `rejectionReason` | string | When rejected |
 | `submitterName`, `submitterEmail` | string \| null | Admin endpoints only |
 
@@ -469,12 +630,58 @@ export interface ApiSubmission {
   photoKey?: string
   photoContentType?: "image/jpeg" | "image/png"
   photoSizeBytes?: number
-  photoUrl?: string
+  photoUrl?: string                   // admin endpoints only
+  productRequestId?: string
   reviewedAt?: string
   reviewedBy?: string
   rejectionReason?: string
   submitterName?: string | null
   submitterEmail?: string | null
+}
+```
+
+### Product request
+
+```ts
+export type ApiProductRequestStatus = "pending" | "approved" | "rejected"
+
+export interface ApiProductRequest {
+  id: string                          // same as requestId; use it in PATCH
+  requestId: string
+  status: ApiProductRequestStatus
+  userId: string
+  submittedAt: string
+  name: string
+  brand: string
+  category: string
+  packQty: number
+  packUnit: "ml" | "L" | "g" | "kg" | "pcs" | "rolls"
+  packCount: number
+  hcs: boolean
+  dietary: string[]
+  retailerId: string
+  retailerName: string | null
+  priceCents: number
+  observedAt: string
+  productImageKey: string
+  productImageContentType: "image/jpeg" | "image/png"
+  productImageSizeBytes: number
+  productImageUrl: string             // signed, 1 hour
+  photoKey?: string                   // evidence photo, if one was sent
+  photoContentType?: "image/jpeg" | "image/png"
+  photoSizeBytes?: number
+  photoUrl?: string                   // admin endpoints only, 5 minutes
+  submitterName?: string | null       // admin endpoints only
+  submitterEmail?: string | null      // admin endpoints only
+  suggestedMinCents?: number          // admin endpoints, pending requests only
+  suggestedMaxCents?: number
+  reviewedAt?: string
+  reviewedBy?: string
+  rejectionReason?: string            // when rejected
+  productId?: string                  // when approved: the published product
+  submissionId?: string               // when approved: its first price
+  minCents?: number                   // when approved: the published price range
+  maxCents?: number
 }
 ```
 
@@ -578,22 +785,25 @@ Errors from the backend always have this shape:
   "fieldErrors": { "priceCents": "Price must be a whole number of cents greater than 0" }, "requestId": "3f1c…" }
 ```
 
-`message` and the `fieldErrors` values are user-readable. `fieldErrors` only appears on validation errors.
+`message` and the `fieldErrors` values are user-readable. `fieldErrors` only appears on validation errors. A few errors add a field the client can act on, such as `productId` on `PRODUCT_EXISTS`.
 
 | Status | `code` | Meaning |
 |---|---|---|
 | 400 | `INVALID_BODY` | Body missing, not JSON, or not an object |
 | 400 | `VALIDATION_ERROR` | See `fieldErrors` |
 | 400 | `IMAGE_TOO_LARGE` | Upload request over 5 MiB |
-| 400 | `PHOTO_NOT_FOUND` | `photoKey` has no uploaded file |
+| 400 | `PHOTO_NOT_FOUND` | `photoKey` or `productImageKey` has no uploaded file |
 | 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less |
 | 400 | `INVALID_PAGE_TOKEN` | `nextToken` was altered |
 | 401 | `UNAUTHENTICATED` | Token missing its user (rare, see below) |
 | 403 | `FORBIDDEN` | Admin route called by a non-admin |
-| 404 | `NOT_FOUND` | Submission doesn't exist |
+| 404 | `NOT_FOUND` | Submission or product request doesn't exist |
 | 409 | `DUPLICATE_SUBMISSION` | Same product, store and price already submitted today |
-| 409 | `ALREADY_MODERATED` | Submission isn't flagged any more |
-| 429 | `RATE_LIMITED` | Too many submissions this hour |
+| 409 | `ALREADY_MODERATED` | Submission isn't flagged, or product request isn't pending, any more |
+| 409 | `PRODUCT_EXISTS` | The proposed product is already in the catalog; `productId` says which |
+| 409 | `PRODUCT_ALREADY_REQUESTED` | The proposed product is already waiting for an admin |
+| 409 | `PRODUCT_IMAGE_MISSING` | A pending request's picture is gone; the admin should reject it |
+| 429 | `RATE_LIMITED` | Too many submissions this hour, or product requests today |
 | 500 | `INTERNAL_ERROR` | Backend bug. Report the `requestId` to Gareth. |
 
 **API Gateway errors don't use that shape.** They come before the backend runs and contain only `{"message": "…"}`:
@@ -609,12 +819,14 @@ Errors from the backend always have this shape:
 | Limit | Value |
 |---|---|
 | Image types | `image/jpeg`, `image/png` |
-| Image size | 5 MiB (5,242,880 bytes), one image per submission |
+| Image size | 5 MiB (5,242,880 bytes), one image per upload link |
 | Upload URL lifetime | 5 minutes |
-| `photoUrl` lifetime | 5 minutes |
+| `photoUrl` lifetime (evidence, admins only) | 5 minutes |
+| `imageUrl` / `productImageUrl` lifetime (product pictures) | 1 hour |
 | Price | 1 – 100000 cents |
 | `observedAt` | Not in the future (5-minute clock tolerance), at most 30 days old |
 | Submissions per user | 30 per rolling hour (counts every status) |
+| Product requests per user | 10 per rolling 24 hours (counts every status) |
 | Duplicate rule | One submission per user, product, store, price and Singapore day |
 | Rejection reason | 500 characters |
 | Page size | Default 50, max 100 |
@@ -654,7 +866,8 @@ export async function api<T>(path: string, options: { method?: string; body?: un
 // A contributor submitting a price with a photo
 const token = await getAccessToken()
 const target = await api<{ uploadUrl: string; fields: Record<string, string>; photoKey: string }>(
-  "/price-submissions/image-upload-url", { method: "POST", token, body: { contentType: file.type, sizeBytes: file.size } })
+  "/price-submissions/image-upload-url",
+  { method: "POST", token, body: { productId, retailerId, contentType: file.type, sizeBytes: file.size } })
 const form = new FormData()
 Object.entries(target.fields).forEach(([k, v]) => form.append(k, v))
 form.append("file", file)

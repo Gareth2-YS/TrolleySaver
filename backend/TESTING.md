@@ -1,6 +1,6 @@
 # Testing the backend
 
-A step-by-step guide to checking that the backend works: before a handoff, after changing code, or when something looks wrong. Every step shows the command to type and what you should see. All commands and outputs here come from real runs against dev on 24 Oct 2026.
+A step-by-step guide to checking that the backend works: before a handoff, after changing code, or when something looks wrong. Every step shows the command to type and what you should see. All commands and outputs here come from real runs against dev, on 24 Oct 2026, and on 29 Oct 2026 for the photo changes and part 10.
 
 - **Environment:** dev (CloudFormation stack `trolleysaver-dev`). The tests create data in the shared dev tables and remove it again.
 - **You need:** this repository, Python 3, the AWS CLI, and working credentials for the team's AWS account.
@@ -14,7 +14,7 @@ A step-by-step guide to checking that the backend works: before a handoff, after
 |---|---|
 | [0. Set up your terminal](#0-set-up-your-terminal) | Folder, Python environment, AWS credentials, test variables. **Do this first, in every new terminal.** |
 | [Common problems](#common-problems) | Error messages and fixes |
-| [1. Automated checks](#1-automated-checks-5-min) | Unit tests, template, a 27-step end-to-end run |
+| [1. Automated checks](#1-automated-checks-5-min) | Unit tests, template, a 52-step end-to-end run |
 | [2. Load the product catalog](#2-load-the-product-catalog-once) | Adds the spreadsheet's products and prices to dev (once) |
 | [3. Call each Lambda directly](#3-call-each-lambda-directly-no-login) | Every endpoint's success and failure cases, without logging in |
 | [4. Use the real API with a real login](#4-use-the-real-api-with-a-real-login) | Cognito sign-up and sign-in, tokens and real HTTP responses |
@@ -23,6 +23,7 @@ A step-by-step guide to checking that the backend works: before a handoff, after
 | [7. Pre-handoff checklist](#7-pre-handoff-checklist) | Everything above in one list |
 | [8. Smart Basket](#8-smart-basket) | What the basket comparison covers and which test checks each part, then unit tests, direct calls, a hand-worked example, the spreadsheet evaluation and real HTTP |
 | [9. Search](#9-search) | What product search and filters cover and which test checks each part, then unit tests, direct calls, field errors and real HTTP |
+| [10. New product requests](#10-new-product-requests) | Proposing a product with a picture, the admin approving or rejecting it, and the product appearing in the catalog |
 
 ---
 
@@ -134,8 +135,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 132 tests of the Lambda code (including the Smart Basket, its daily prices and Search) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `132 passed in …s`.
+**What it checks:** 193 tests of the Lambda code (including the Smart Basket, its daily prices, Search and new product requests) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `193 passed in …s`.
 
 ### 1.2 Template check
 
@@ -151,12 +152,14 @@ sam validate --lint
 .venv\Scripts\python scripts\smoke_test.py
 ```
 
-**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in, compares a basket, uploads a photo, submits prices and moderates as a throwaway admin, then deletes everything it created. Takes about a minute.
-**You should see:** 32 lines starting with `PASS`, then:
+**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. Finally it proposes a new product with a picture, approves it and finds it in the catalog. Everything it created is deleted at the end, including the published product. Takes about a minute.
+**You should see:** 52 lines starting with `PASS`, then:
 
 ```
-PASS  CORS preflight allowed
+PASS  second product decision -> 409
 Cleaning up...
+<user id>: deleted 2 submission(s), 1 product request(s) (1 published product(s)), 1 image(s) and the profile row
+<user id>: deleted 0 submission(s), 0 product request(s) (0 published product(s)), 0 image(s) and the profile row
 
 All checks passed
 ```
@@ -206,6 +209,7 @@ Type `dev` and press Enter. **You should see:** `Added 22 products, 0 retailers 
 Normally API Gateway checks the user's Cognito login, then passes the Lambda an event describing who the user is. `scripts/invoke.py` builds that event itself and calls the Lambda directly, so you can test as any user without an account or a token. It works because your AWS credentials are allowed to call the Lambdas directly; people outside the AWS account still have to log in through the API.
 
 - **Who you are:** by default the fake user `invoke-test-user`. Use `--as admin` for the fake admin `invoke-test-admin`, `--as anonymous` for a logged-out caller, or `--user-id <anything>` for another user.
+- **The fake user is shared.** Everyone following this guide is `invoke-test-user`, and `cleanup` deletes **all** of its data, including anything another tester left behind or is still using. To keep your test data separate, add `--user-id <your-name>-test` to every command, then run `cleanup --user-id <your-name>-test`.
 - **Request body:** `--set name=value` builds the JSON for you. Whole numbers become numbers; everything else is text.
 - **Output:** the first line is `HTTP <status code>`, followed by the JSON the frontend would receive. The codes you'll see:
   - `200` OK
@@ -340,19 +344,23 @@ $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bmp.D
 
 **You should see:** `image saved: C:\Users\<you>\AppData\Local\Temp\trolleysaver-test.png (1621 bytes)`.
 
-**b. Upload it.** The script does what the browser does: it asks the upload Lambda for a one-time upload form, then sends the file straight to S3. The second line saves the returned `photoKey` in `$photoKey` for step c.
+**b. Upload it.** The script does what the browser does:
+1. It asks the upload Lambda for a one-time upload form **for one product at one store**. The Lambda refuses if either doesn't exist.
+2. It sends the file straight to S3.
+
+The second line saves the returned `photoKey` in `$photoKey` for step c.
 
 ```powershell
-$up = .venv\Scripts\python scripts\invoke.py upload-photo --file $png; $up;
+$up = .venv\Scripts\python scripts\invoke.py upload-photo --file $png --product $milk --retailer shengsiong; $up;
 $photoKey = [string](($up -match '^photoKey: ') -replace '^photoKey: ', ''); "saved photoKey=$photoKey"
 ```
 
-**You should see:**
+**You should see** (the key contains the product id, so the photo can only be used for this product):
 
 ```
 Uploaded trolleysaver-test.png (image/png, 1621 bytes) to S3 (HTTP 204)
-photoKey: price-evidence/invoke-test-user/5e7d40d0-….png
-saved photoKey=price-evidence/invoke-test-user/5e7d40d0-….png
+photoKey: price-evidence/invoke-test-user/a2210900-d837-5e6d-bbbc-73dea4f80ea1/4b0f6d9d-….png
+saved photoKey=price-evidence/invoke-test-user/a2210900-d837-5e6d-bbbc-73dea4f80ea1/4b0f6d9d-….png
 ```
 
 **c. Submit a price with the photo:**
@@ -361,15 +369,27 @@ saved photoKey=price-evidence/invoke-test-user/5e7d40d0-….png
 .venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=shengsiong --set priceCents=365 --set observedAt=$today --set photoKey=$photoKey
 ```
 
-**You should see:** `HTTP 201` and `"status": "accepted"`, plus `"photoKey"`, `"photoContentType": "image/png"`, `"photoSizeBytes"` and a long `"photoUrl": "https://trolleysaver-dev-photos-…"`. Copy the `photoUrl` into a browser **within 5 minutes** and you should see the "Test price $3.65" image. After 5 minutes the link stops working on purpose: photos are private.
+**You should see:** `HTTP 201` and `"status": "accepted"`, plus `"photoKey"`, `"photoContentType": "image/png"` and `"photoSizeBytes": 1621`. There's **no `photoUrl`**: evidence photos are for admin verification only, so contributors never get a link to view them.
 
-**d. Things that must be refused:**
+**d. See the photo as an admin.** The price above was accepted, so it's in the admin list of accepted prices (newest first):
+
+```powershell
+.venv\Scripts\python scripts\invoke.py review-queue --as admin --query status=accepted --query limit=1
+```
+
+**You should see:** `HTTP 200`, the 365-cent price by `invoke-test-user`, and a long `"photoUrl": "https://trolleysaver-dev-photos-…"`. Copy the `photoUrl` into a browser **within 5 minutes** and you should see the "Test price $3.65" image. After 5 minutes the link stops working on purpose, because photos are private.
+
+**e. Things that must be refused:**
 
 | Try | Command | You should see |
 |---|---|---|
-| Wrong file type | `Copy-Item $png "$env:TEMP\trolleysaver-test.gif"; .venv\Scripts\python scripts\invoke.py upload-photo --file "$env:TEMP\trolleysaver-test.gif"` | `upload-url Lambda refused the request:`, `HTTP 400`, `"contentType": "Must be image/jpeg or image/png"` |
-| File over 5 MB | `[IO.File]::WriteAllBytes("$env:TEMP\trolleysaver-big.png", (New-Object byte[] (6MB))); .venv\Scripts\python scripts\invoke.py upload-photo --file "$env:TEMP\trolleysaver-big.png"` | `HTTP 400`, `"code": "IMAGE_TOO_LARGE"`, `"message": "Image must be 5 MB or smaller."` |
+| Upload link for a product that doesn't exist | `.venv\Scripts\python scripts\invoke.py upload-photo --file $png --product not-a-product` | `upload-url Lambda refused the request:`, `HTTP 400`, `"productId": "Unknown product"` |
+| Wrong file type | `Copy-Item $png "$env:TEMP\trolleysaver-test.gif"; .venv\Scripts\python scripts\invoke.py upload-photo --file "$env:TEMP\trolleysaver-test.gif" --product $milk` | `upload-url Lambda refused the request:`, `HTTP 400`, `"contentType": "Must be image/jpeg or image/png"` |
+| File over 5 MB | `[IO.File]::WriteAllBytes("$env:TEMP\trolleysaver-big.png", (New-Object byte[] (6MB))); .venv\Scripts\python scripts\invoke.py upload-photo --file "$env:TEMP\trolleysaver-big.png" --product $milk` | `HTTP 400`, `"code": "IMAGE_TOO_LARGE"`, `"message": "Image must be 5 MB or smaller."` |
+| Using the milk photo for another product (Marigold milk) | `.venv\Scripts\python scripts\invoke.py submit --set productId=1220bf01-0ec4-5200-9f83-90792fc6b0b3 --set retailerId=shengsiong --set priceCents=356 --set observedAt=$today --set photoKey=$photoKey` | `HTTP 400`, `"photoKey": "Use the photoKey returned by your upload URL request"` |
 | Using someone else's photo | `.venv\Scripts\python scripts\invoke.py submit --user-id someone-else --set productId=$milk --set retailerId=coldstorage --set priceCents=366 --set observedAt=$today --set photoKey=$photoKey` | `HTTP 400`, `"photoKey": "Use the photoKey returned by your upload URL request"` |
+
+`upload-photo` without `--product` stops before calling anything: `upload-photo needs --product (evidence photos are tied to a product)`.
 
 ### 3.7 My submissions
 
@@ -377,10 +397,10 @@ saved photoKey=price-evidence/invoke-test-user/5e7d40d0-….png
 .venv\Scripts\python scripts\invoke.py mine
 ```
 
-**You should see** `HTTP 200` and your three submissions, newest first (shortened here):
+**You should see** `HTTP 200` and your three submissions, newest first (shortened here). The 365-cent one still shows its `photoKey`, so a page can say "evidence attached", but there's no `photoUrl`:
 
 ```
-"priceCents": 365,  "status": "accepted", "retailerName": "Sheng Siong", "photoUrl": "https://…"
+"priceCents": 365,  "status": "accepted", "retailerName": "Sheng Siong", "photoKey": "price-evidence/invoke-test-user/a2210900-…/4b0f6d9d-….png"
 "priceCents": 2000, "status": "flagged",  "retailerName": "FairPrice"
 "priceCents": 363,  "status": "accepted", "retailerName": "FairPrice"
 ```
@@ -463,8 +483,8 @@ Dev is shared, so remove what you created:
 **You should see:**
 
 ```
-invoke-test-user: deleted 3 submission(s), 1 photo(s) and the profile row      ← 30 if you did 3.10
-invoke-test-admin: deleted 0 submission(s), 0 photo(s) and the profile row
+invoke-test-user: deleted 3 submission(s), 0 product request(s) (0 published product(s)), 1 image(s) and the profile row      ← 30 submissions if you did 3.10
+invoke-test-admin: deleted 0 submission(s), 0 product request(s) (0 published product(s)), 0 image(s) and the profile row
 ```
 
 …and then `HTTP 200` with `"items": []`.
@@ -558,7 +578,7 @@ Call PATCH "/admin/price-submissions/$flaggedId" @{ decision = "rejected"; reaso
 aws cognito-idp admin-delete-user --user-pool-id $poolId --username $email
 ```
 
-**You should see:** `<user id>: deleted 2 submission(s), 0 photo(s) and the profile row`. The second command prints nothing when it succeeds.
+**You should see:** `<user id>: deleted 2 submission(s), 0 product request(s) (0 published product(s)), 0 image(s) and the profile row`. The second command prints nothing when it succeeds.
 
 ## 5. Create an admin account
 
@@ -638,7 +658,7 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `132 passed`
+- [ ] 1.1: `pytest` shows `193 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products
@@ -646,8 +666,9 @@ Check [Common problems](#common-problems) first. Then:
 - [ ] 4: real-login walkthrough done (4.3 is optional)
 - [ ] 8.4: `basket_eval.py` says `0 failed`
 - [ ] 9.2–9.4: search returns the two milks for `q=milk&maxPriceCents=500`, and bad parameters give `400` with the field named
+- [ ] 10: a product request with a picture goes `pending` → `approved`, the product appears in search with an `imageUrl`, and a rejection deletes the pending picture
 - [ ] Cleanup done:
-  - `invoke.py mine` shows `"items": []`
+  - `invoke.py mine` and `invoke.py my-product-requests` both show `"items": []`
   - no `tester-…@example.com` accounts remain: `aws cognito-idp list-users --user-pool-id $poolId --query "Users[].Username"`
 - [ ] The frontend developer:
   - has the dev values (`ApiUrl`, `UserPoolId`, `UserPoolClientId`)
@@ -972,7 +993,7 @@ $j = ((.venv\Scripts\python scripts\invoke.py basket --body-file baskets\weekly-
 $j.basket.stores | Select-Object rank, retailerName, totalCents
 ```
 
-**You should see:** `basket-test-user: deleted 3 submission(s), 0 photo(s) and the profile row`, then Sheng Siong 3750, FairPrice 3970 and Cold Storage 4370 again.
+**You should see:** `basket-test-user: deleted 3 submission(s), 0 product request(s) (0 published product(s)), 0 image(s) and the profile row`, then Sheng Siong 3750, FairPrice 3970 and Cold Storage 4370 again.
 
 ## 9. Search
 
@@ -1233,3 +1254,149 @@ try { Invoke-RestMethod -Uri "$api/products/search?hcs=yes" } catch { "HTTP $([i
 ```
 
 **You should see:** `HTTP 400`, then `{"code": "VALIDATION_ERROR", … "fieldErrors": {"hcs": "Must be true or false"}}`.
+
+## 10. New product requests
+
+**Before you start:** part 0 done in this terminal, including the variables in 0.5, and the test image from [3.6a](#36-photo-upload) saved as `$png`. If you skipped 3.6, run 3.6a now. The commands and outputs in this part come from runs against dev on 29 Oct 2026.
+
+### What new product requests cover
+
+A shopper who can't find a product proposes it, with every product field, its first price and a **required picture**. An evidence photo of the price is optional. The request stays `pending`, hidden from the catalog, search and basket, until an admin approves it (publishing the product, its picture and its first price) or rejects it. The rules are in [docs/api → Proposing a new product](../docs/api/README.md#proposing-a-new-product).
+
+| Rule | Checked by |
+|---|---|
+| Picture required, from the caller's own upload | `test_product_requests.py`, 10.2, smoke test |
+| Every product field required and valid | `test_product_requests.py` (`test_every_field_is_required`, `test_field_rules`) |
+| Already in the catalog → 409 with its `productId`; already pending → 409 | `test_product_requests.py`, 10.2 |
+| At most 10 requests per user per day | `test_product_requests.py` (`test_daily_limit`) |
+| Pending requests are hidden from the catalog and search | `test_product_requests.py`, 10.3, smoke test |
+| Approval publishes product, picture and first price in one transaction; a second decision is 409 | `test_product_requests.py` (including two admins at once), 10.6, smoke test |
+| The first price reaches the daily average the night it's approved | `test_product_requests.py` (`test_approved_price_reaches_the_daily_average_today`) |
+| Rejection deletes the pending picture | `test_product_requests.py`, 10.8 |
+
+### 10.1 Upload the product's picture
+
+```powershell
+$up = .venv\Scripts\python scripts\invoke.py upload-request-image --file $png; $up;
+$imageKey = [string](($up -match '^productImageKey: ') -replace '^productImageKey: ', ''); "saved imageKey=$imageKey"
+```
+
+**You should see:**
+
+```
+Uploaded trolleysaver-test.png (image/png, 1621 bytes) to S3 (HTTP 204)
+productImageKey: product-images/pending/invoke-test-user/231c3047-….png
+saved imageKey=product-images/pending/invoke-test-user/231c3047-….png
+```
+
+For an evidence photo of the price, add `--purpose evidence`. It prints a `photoKey` to send as `--set photoKey=…`.
+
+### 10.2 Requests that must be refused
+
+| Try | Command | You should see |
+|---|---|---|
+| No picture | `.venv\Scripts\python scripts\invoke.py request-product --set name="Test Oat Milk" --set brand="TrolleySaver Test" --set category=milk --set packQty=1 --set packUnit=L --set packCount=1 --set hcs=false --set dietary=[vegan] --set retailerId=fairprice --set priceCents=545 --set observedAt=$today` | `HTTP 400`, `"code": "VALIDATION_ERROR"`, `"productImageKey": "Upload a picture of the product"` |
+| A product already in the catalog | `.venv\Scripts\python scripts\invoke.py request-product --set name="Magnolia Fresh Milk" --set brand=Magnolia --set category=milk --set packQty=946 --set packUnit=ml --set packCount=1 --set hcs=false --set dietary=[halal] --set retailerId=fairprice --set priceCents=363 --set observedAt=$today --set productImageKey=$imageKey` | `HTTP 409`, `"code": "PRODUCT_EXISTS"`, `"productId": "a2210900-d837-5e6d-bbbc-73dea4f80ea1"` |
+| Missing fields | `.venv\Scripts\python scripts\invoke.py request-product --set name="Test Oat Milk"` | `HTTP 400`, with `fieldErrors` naming every missing field |
+
+`--set dietary=[vegan]` sends a list; `--set dietary=[]` sends an empty one.
+
+### 10.3 Propose a product
+
+```powershell
+.venv\Scripts\python scripts\invoke.py request-product --set name="Test Oat Milk" --set brand="TrolleySaver Test" --set category=milk --set packQty=1 --set packUnit=L --set packCount=1 --set hcs=false --set dietary=[vegan] --set retailerId=fairprice --set priceCents=545 --set observedAt=$today --set productImageKey=$imageKey
+```
+
+**You should see:** `HTTP 201`, `"status": "pending"`, `"packUnit": "L"`, `"dietary": ["vegan"]` and a long `"productImageUrl"`. Open it in a browser (it works for 1 hour) to see the picture.
+
+It isn't in the catalog yet:
+
+```powershell
+"search results for 'test oat': " + ((.venv\Scripts\python scripts\invoke.py search --query "q=test oat" | Select-Object -Skip 1 | Out-String | ConvertFrom-Json).total)
+```
+
+**You should see:** `search results for 'test oat': 0`.
+
+### 10.4 My product requests
+
+```powershell
+.venv\Scripts\python scripts\invoke.py my-product-requests
+```
+
+**You should see:** `HTTP 200`, with "Test Oat Milk" as `"status": "pending"`.
+
+### 10.5 The admin queue
+
+```powershell
+.venv\Scripts\python scripts\invoke.py product-queue
+```
+
+→ `HTTP 403`, `"code": "FORBIDDEN"`. Normal users can't see the queue.
+
+```powershell
+.venv\Scripts\python scripts\invoke.py product-queue --as admin
+```
+
+→ `HTTP 200`, with "Test Oat Milk", the submitter's name and email, and `"suggestedMinCents": 272`, `"suggestedMaxCents": 818`. That's the believable price range the product gets unless the admin changes it: half to one and a half times its first price of 545. Save the request's id:
+
+```powershell
+$reqId = ((.venv\Scripts\python scripts\invoke.py product-queue --as admin | Select-Object -Skip 1) | Out-String | ConvertFrom-Json).items[0].id; "saved reqId=$reqId"
+```
+
+### 10.6 Approve it, with corrections
+
+`--set changes.category=…` sends `{"changes": {"category": …}}`: the admin's corrections to what the contributor typed.
+
+```powershell
+.venv\Scripts\python scripts\invoke.py moderate-product --as admin --id $reqId --set decision=approved --set changes.category="plant milk" --set changes.searchTerms=[oat,barista]
+```
+
+**You should see:** `HTTP 200`, `"status": "approved"`, `"category": "plant milk"`, `"minCents": 272`, `"maxCents": 818` and the new `"productId"`.
+
+Decide it again:
+
+```powershell
+.venv\Scripts\python scripts\invoke.py moderate-product --as admin --id $reqId --set decision=rejected --set reason="Too late"
+```
+
+→ `HTTP 409`, `"code": "ALREADY_MODERATED"`, `"message": "This product request is already approved."`
+
+### 10.7 It's in the catalog now, with its picture
+
+```powershell
+(.venv\Scripts\python scripts\invoke.py search --query "q=test oat" | Select-Object -Skip 1 | Out-String | ConvertFrom-Json).items | Select-Object name, category, imageUrl
+```
+
+**You should see:** "Test Oat Milk", `plant milk` and a long `imageUrl`. Open it in a browser to see the picture, now stored at `product-images/<productId>.png`. Its price of 545 at FairPrice reaches the Smart Basket after tonight's price job, or straight away if you run `invoke.py aggregate --set date=<today>`.
+
+### 10.8 Reject a request
+
+```powershell
+$up = .venv\Scripts\python scripts\invoke.py upload-request-image --file $png; $imageKey2 = [string](($up -match '^productImageKey: ') -replace '^productImageKey: ', '');
+.venv\Scripts\python scripts\invoke.py request-product --set name="Test Rice Crackers" --set brand="TrolleySaver Test" --set category=cookies --set packQty=150 --set packUnit=g --set packCount=1 --set hcs=true --set dietary=[] --set retailerId=shengsiong --set priceCents=289 --set observedAt=$today --set productImageKey=$imageKey2;
+$reqId2 = ((.venv\Scripts\python scripts\invoke.py product-queue --as admin | Select-Object -Skip 1) | Out-String | ConvertFrom-Json).items[0].id;
+.venv\Scripts\python scripts\invoke.py moderate-product --as admin --id $reqId2 --set decision=rejected --set reason="Not a real product"
+```
+
+**You should see:** `HTTP 201` for the request, then `HTTP 200`, `"status": "rejected"`, `"rejectionReason": "Not a real product"`. The pending picture is deleted:
+
+```powershell
+aws s3api head-object --bucket trolleysaver-dev-photos-158670174505 --key $imageKey2
+```
+
+→ `An error occurred (404) when calling the HeadObject operation: Not Found`.
+
+### 10.9 Clean up (always)
+
+This removes the requests, the published "Test Oat Milk" product with its price and picture, and anything else `invoke-test-user` created:
+
+```powershell
+.venv\Scripts\python scripts\invoke.py cleanup
+```
+
+**You should see** (more submissions if you also did part 3 without cleaning up):
+
+```
+invoke-test-user: deleted 0 submission(s), 2 product request(s) (1 published product(s)), 0 image(s) and the profile row
+invoke-test-admin: deleted 0 submission(s), 0 product request(s) (0 published product(s)), 0 image(s) and the profile row
+```

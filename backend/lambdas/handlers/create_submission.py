@@ -1,5 +1,9 @@
 """POST /price-submissions: record a price a contributor saw on the shelf.
 
+The product and store must exist, whether or not a photo is attached: price-only submissions never
+ask for an upload link, so this is where non-existent products are always refused. An attached photo
+must have been uploaded for this same product (its key starts with price-evidence/<user>/<product>/).
+
 In-range prices are accepted immediately; prices outside the product's believable range are
 flagged for an administrator to accept or reject.
 """
@@ -9,14 +13,13 @@ import uuid
 from datetime import datetime, time, timedelta, timezone
 
 from boto3.dynamodb.conditions import Attr, Key
-from botocore.exceptions import ClientError
 
 from common import db
 from common.auth import get_caller
 from common.http import ApiError, api_handler, parse_json_body, response
+from common.images import check_upload, evidence_prefix
 from common.submissions import to_record
-from common.validation import IMAGE_EXTENSIONS, SGT, max_upload_bytes, to_iso, validate_submission
-from handlers.upload_url import photo_prefix
+from common.validation import SGT, to_iso, validate_submission
 
 STATUS_ACCEPTED = "accepted"
 STATUS_FLAGGED = "flagged"
@@ -24,13 +27,6 @@ STATUS_FLAGGED = "flagged"
 
 def _rate_limit():
     return int(os.environ.get("RATE_LIMIT_PER_HOUR", 30))
-
-
-def _require_item(table, key, field, message):
-    item = table.get_item(Key=key).get("Item")
-    if not item:
-        raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {field: message})
-    return item
 
 
 def _check_rate_limit(user_id, now):
@@ -57,21 +53,6 @@ def _check_duplicate(user_id, product_id, retailer_id, price_cents, observed):
         raise ApiError(409, "DUPLICATE_SUBMISSION", "You have already submitted this price for this product and store today.")
 
 
-def _check_photo(user_id, photo_key):
-    if not photo_key.startswith(photo_prefix(user_id)):
-        raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"photoKey": "Use the photoKey returned by your upload URL request"})
-    try:
-        head = db.s3().head_object(Bucket=db.photo_bucket(), Key=photo_key)
-    except ClientError as error:
-        if error.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
-            raise ApiError(400, "PHOTO_NOT_FOUND", "The photo upload was not found. Upload the image again.", {"photo": "Upload not found"})
-        raise
-    content_type, size = head.get("ContentType"), head.get("ContentLength", 0)
-    if content_type not in IMAGE_EXTENSIONS or size > max_upload_bytes():
-        raise ApiError(400, "INVALID_PHOTO", "The uploaded photo must be a JPG or PNG of 5 MB or less.", {"photo": "Invalid image"})
-    return content_type, size
-
-
 def _status_for(product, price_cents):
     low, high = product.get("minCents"), product.get("maxCents")
     if (low is not None and price_cents < low) or (high is not None and price_cents > high):
@@ -85,8 +66,8 @@ def handler(event, context):
     now = datetime.now(timezone.utc)
     product_id, retailer_id, price_cents, observed, photo_key = validate_submission(parse_json_body(event), now)
 
-    product = _require_item(db.products(), {"id": product_id}, "productId", "Unknown product")
-    retailer = _require_item(db.retailers(), {"id": retailer_id}, "retailerId", "Unknown store")
+    product = db.require_item(db.products(), {"id": product_id}, "productId", "Unknown product")
+    retailer = db.require_item(db.retailers(), {"id": retailer_id}, "retailerId", "Unknown store")
     _check_rate_limit(caller.user_id, now)
     _check_duplicate(caller.user_id, product_id, retailer_id, price_cents, observed)
 
@@ -104,7 +85,7 @@ def handler(event, context):
         "status": _status_for(product, price_cents),
     }
     if photo_key:
-        content_type, size = _check_photo(caller.user_id, photo_key)
+        content_type, size = check_upload(photo_key, evidence_prefix(caller.user_id, product_id), "photoKey")
         item.update(photoKey=photo_key, photoContentType=content_type, photoSizeBytes=size)
 
     db.submissions().put_item(Item=item, ConditionExpression="attribute_not_exists(sk)")

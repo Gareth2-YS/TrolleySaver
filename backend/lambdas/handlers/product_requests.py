@@ -1,0 +1,128 @@
+"""Contributors proposing a product that isn't in the catalog yet, with its first price.
+
+POST /product-requests/image-upload-url   {purpose: "product-image" | "evidence", contentType, sizeBytes}
+POST /product-requests                    every product field, retailerId, priceCents, observedAt,
+                                          productImageKey (required), photoKey (optional evidence)
+GET  /product-requests/mine               the caller's requests, newest first
+
+A request stays `pending`, hidden from the catalog, search and basket, until an admin approves or
+rejects it (handlers/admin_product_requests.py).
+"""
+
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from boto3.dynamodb.conditions import Key
+
+from common import db
+from common.auth import get_caller
+from common.http import ApiError, api_handler, parse_json_body, response
+from common.images import NEW_PRODUCT, check_upload, evidence_prefix, new_key, pending_product_image_prefix, presigned_upload
+from common.product_requests import PRODUCT_FIELDS, duplicate_key, find_existing_product, to_record, to_records, validate_request
+from common.validation import to_iso, validate_upload_request
+
+PURPOSES = ("product-image", "evidence")
+
+
+def _daily_limit():
+    return int(os.environ.get("PRODUCT_REQUESTS_PER_DAY", 10))
+
+
+def upload_url(event, caller):
+    body = parse_json_body(event)
+    purpose = body.get("purpose")
+    if purpose not in PURPOSES:
+        raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"purpose": "Must be product-image or evidence"})
+    content_type, _ = validate_upload_request(body)
+    if purpose == "product-image":
+        key = new_key(pending_product_image_prefix(caller.user_id), content_type)
+        return response(200, {**presigned_upload(key, content_type), "productImageKey": key})
+    key = new_key(evidence_prefix(caller.user_id, NEW_PRODUCT), content_type)
+    return response(200, {**presigned_upload(key, content_type), "photoKey": key})
+
+
+def _check_rate_limit(user_id, now):
+    recent = db.count_query(
+        db.product_requests(),
+        IndexName="ByUser",
+        KeyConditionExpression=Key("userId").eq(user_id) & Key("submittedAt").gte(to_iso(now - timedelta(days=1))),
+    )
+    if recent >= _daily_limit():
+        raise ApiError(429, "RATE_LIMITED", f"You can propose up to {_daily_limit()} new products a day. Please try again tomorrow.")
+
+
+def _check_duplicates(fields):
+    existing = find_existing_product(fields)
+    if existing:
+        raise ApiError(409, "PRODUCT_EXISTS", "This product is already in the catalog. Submit a price for it instead.",
+                       extra={"productId": existing["id"]})
+    key = duplicate_key(fields)
+    kwargs = {"IndexName": "ByStatus", "KeyConditionExpression": Key("status").eq("pending")}
+    while True:
+        page = db.product_requests().query(**kwargs)
+        if any(item.get("duplicateKey") == key for item in page["Items"]):
+            raise ApiError(409, "PRODUCT_ALREADY_REQUESTED", "Someone has already proposed this product. It is waiting for an admin.")
+        if "LastEvaluatedKey" not in page:
+            return
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def create(event, caller):
+    now = datetime.now(timezone.utc)
+    request = validate_request(parse_json_body(event), now)
+    retailer = db.require_item(db.retailers(), {"id": request["retailerId"]}, "retailerId", "Unknown store")
+    _check_rate_limit(caller.user_id, now)
+    _check_duplicates(request)
+    image_type, image_size = check_upload(request["productImageKey"], pending_product_image_prefix(caller.user_id), "productImageKey")
+
+    item = {
+        "requestId": str(uuid.uuid4()),
+        "status": "pending",
+        "userId": caller.user_id,
+        "submittedAt": to_iso(now),
+        **{field: request[field] for field in PRODUCT_FIELDS},
+        "duplicateKey": duplicate_key(request),
+        "retailerId": request["retailerId"],
+        "priceCents": request["priceCents"],
+        "observedAt": to_iso(request["observed"]),
+        "productImageKey": request["productImageKey"],
+        "productImageContentType": image_type,
+        "productImageSizeBytes": image_size,
+    }
+    if request["photoKey"]:
+        photo_type, photo_size = check_upload(request["photoKey"], evidence_prefix(caller.user_id, NEW_PRODUCT), "photoKey")
+        item.update(photoKey=request["photoKey"], photoContentType=photo_type, photoSizeBytes=photo_size)
+
+    db.product_requests().put_item(Item=item, ConditionExpression="attribute_not_exists(requestId)")
+    return response(201, to_record(item, {retailer["id"]: retailer}))
+
+
+def mine(event, caller):
+    query = {
+        "IndexName": "ByUser",
+        "KeyConditionExpression": Key("userId").eq(caller.user_id),
+        "ScanIndexForward": False,
+        "Limit": db.page_limit(event),
+    }
+    start_key = db.decode_page_token((event.get("queryStringParameters") or {}).get("nextToken"))
+    if start_key:
+        query["ExclusiveStartKey"] = start_key
+    page = db.product_requests().query(**query)
+    return response(200, {
+        "items": to_records(page["Items"]),
+        "nextToken": db.encode_page_token(page.get("LastEvaluatedKey")),
+    })
+
+
+@api_handler
+def handler(event, context):
+    caller = get_caller(event)
+    resource = event.get("resource") or event.get("path")
+    if resource == "/product-requests/image-upload-url":
+        return upload_url(event, caller)
+    if resource == "/product-requests/mine":
+        return mine(event, caller)
+    if resource == "/product-requests" and event.get("httpMethod") == "POST":
+        return create(event, caller)
+    raise ApiError(404, "NOT_FOUND", "Route not found.")

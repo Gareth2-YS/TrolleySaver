@@ -4,8 +4,8 @@ Usage (from backend/):
     .venv/Scripts/python scripts/smoke_test.py --env dev
 
 Creates a throwaway contributor (through public sign-up) and a throwaway admin, exercises auth,
-photo upload, submissions, moderation and the Smart Basket over real HTTP, then deletes everything
-it created.
+photo upload, submissions, moderation, product requests and the Smart Basket over real HTTP, then
+deletes everything it created (including any product it published).
 """
 
 import argparse
@@ -16,9 +16,9 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
-from boto3.dynamodb.conditions import Key
 
 from create_admin import create_admin
+from invoke import cleanup as delete_user_data
 from stack import DEFAULT_REGION, stack_outputs
 
 # 1x1 transparent PNG
@@ -61,14 +61,12 @@ def main():
     cognito = boto3.client("cognito-idp", region_name=args.region)
     dynamodb = boto3.resource("dynamodb", region_name=args.region)
     users_table = dynamodb.Table(f"trolleysaver-{args.env}-user")
-    submissions_table = dynamodb.Table(f"trolleysaver-{args.env}-price-submission")
-    s3 = boto3.client("s3", region_name=args.region)
 
     t = Checks()
     suffix = secrets.token_hex(4)
     user_email, admin_email = f"smoke-user-{suffix}@example.com", f"smoke-admin-{suffix}@example.com"
     user_password, admin_password = strong_password(), strong_password()
-    created = {"users": [], "subs": [], "photos": []}
+    created = {"users": [], "subs": []}
 
     def call(method, path, token=None, **kwargs):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -124,24 +122,28 @@ def main():
         t.check("basket CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173", r.headers)
 
         # --- Authorizer ---
-        upload_body = {"fileName": "shelf.png", "contentType": "image/png", "sizeBytes": len(PNG)}
+        upload_body = {"productId": product["id"], "retailerId": "fairprice", "fileName": "shelf.png",
+                       "contentType": "image/png", "sizeBytes": len(PNG)}
         t.check("no token -> 401", call("POST", "/price-submissions/image-upload-url", json=upload_body).status_code == 401)
         t.check("ID token -> 401", call("POST", "/price-submissions/image-upload-url", id_token, json=upload_body).status_code == 401)
         t.check("garbage token -> 401", call("POST", "/price-submissions/image-upload-url", "not.a.jwt", json=upload_body).status_code == 401)
 
-        # --- Photo upload ---
+        # --- Evidence photo upload (step 1 needs an existing product and store) ---
+        r = call("POST", "/price-submissions/image-upload-url", access, json={"contentType": "image/png", "sizeBytes": len(PNG)})
+        t.check("upload URL without product/store -> 400",
+                r.status_code == 400 and {"productId", "retailerId"} <= set(r.json().get("fieldErrors", {})), r.text[:300])
+        r = call("POST", "/price-submissions/image-upload-url", access, json={**upload_body, "productId": "not-a-product"})
+        t.check("upload URL for a fake product -> 400",
+                r.status_code == 400 and r.json().get("fieldErrors") == {"productId": "Unknown product"}, r.text[:300])
         r = call("POST", "/price-submissions/image-upload-url", access, json=upload_body)
         t.check("upload URL issued", r.status_code == 200, r.text[:300])
         target = r.json()
         photo_key = target["photoKey"]
-        created["photos"].append(photo_key)
-        t.check("photo key is scoped to caller", photo_key.startswith(f"price-evidence/{user_sub}/"), photo_key)
+        t.check("photo key is scoped to caller and product", photo_key.startswith(f"price-evidence/{user_sub}/{product['id']}/"), photo_key)
         up = requests.post(target["uploadUrl"], data=target["fields"], files={"file": ("shelf.png", PNG, "image/png")}, timeout=TIMEOUT)
         t.check("browser-style POST to S3 succeeds", up.status_code in (200, 204), f"{up.status_code} {up.text[:300]}")
 
-        r = call("POST", "/price-submissions/image-upload-url", access, json=upload_body)
-        big = r.json()
-        created["photos"].append(big["photoKey"])
+        big = call("POST", "/price-submissions/image-upload-url", access, json=upload_body).json()
         too_big = requests.post(big["uploadUrl"], data=big["fields"],
                                 files={"file": ("big.png", b"0" * (5 * 1024 * 1024 + 1), "image/png")}, timeout=120)
         t.check("S3 rejects uploads over 5 MiB", too_big.status_code == 400 and "EntityTooLarge" in too_big.text, too_big.status_code)
@@ -150,12 +152,20 @@ def main():
         mid = (int(product["minCents"]) + int(product["maxCents"])) // 2
         today_sgt = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
         base = {"productId": product["id"], "retailerId": "fairprice", "observedAt": today_sgt}
-        r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid, "photoKey": photo_key})
+        r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid})
         accepted = r.json()
         t.check("in-range price -> 201 accepted", r.status_code == 201 and accepted.get("status") == "accepted", r.text[:300])
-        r = call("POST", "/price-submissions", access, json={**base, "priceCents": min(int(product["maxCents"]) + 1000, 100000)})
+        r = call("POST", "/price-submissions", access,
+                 json={**base, "priceCents": min(int(product["maxCents"]) + 1000, 100000), "photoKey": photo_key})
         flagged = r.json()
-        t.check("out-of-range price -> 201 flagged", r.status_code == 201 and flagged.get("status") == "flagged", r.text[:300])
+        t.check("out-of-range price with photo -> 201 flagged", r.status_code == 201 and flagged.get("status") == "flagged", r.text[:300])
+        t.check("contributor gets no evidence photo link", "photoUrl" not in flagged and flagged.get("photoKey") == photo_key, r.text[:300])
+        other = next((p for p in products if p["id"] != product["id"]), None)
+        if other:
+            r = call("POST", "/price-submissions", access, json={**base, "productId": other["id"], "priceCents": mid, "photoKey": photo_key})
+            t.check("photo uploaded for another product -> 400", r.status_code == 400 and "photoKey" in r.json().get("fieldErrors", {}), r.text[:300])
+        r = call("POST", "/price-submissions", access, json={**base, "productId": "not-a-product", "priceCents": mid})
+        t.check("price for a fake product -> 400", r.status_code == 400 and "productId" in r.json().get("fieldErrors", {}), r.text[:300])
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid})
         t.check("duplicate -> 409", r.status_code == 409, r.status_code)
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": "3.50"})
@@ -164,9 +174,7 @@ def main():
         r = call("GET", "/price-submissions/mine", access)
         mine = r.json().get("items", []) if r.ok else []
         t.check("GET /mine returns both submissions", {i["id"] for i in mine} == {accepted["id"], flagged["id"]}, r.text[:300])
-        with_photo = next((i for i in mine if i.get("photoUrl")), None)
-        photo = requests.get(with_photo["photoUrl"], timeout=TIMEOUT) if with_photo else None
-        t.check("presigned photoUrl serves the image", photo is not None and photo.status_code == 200 and photo.content == PNG)
+        t.check("GET /mine has no evidence photo links", all("photoUrl" not in i for i in mine), r.text[:300])
         t.check("photo is not publicly readable",
                 requests.get(f"https://{bucket}.s3.{args.region}.amazonaws.com/{photo_key}", timeout=TIMEOUT).status_code == 403)
 
@@ -182,8 +190,11 @@ def main():
 
         r = call("GET", "/admin/price-submissions?status=flagged", admin_access)
         queue = r.json().get("items", []) if r.ok else []
-        t.check("admin sees flagged submission", any(i["id"] == flagged["id"] for i in queue), r.text[:300])
+        queued = next((i for i in queue if i["id"] == flagged["id"]), None)
+        t.check("admin sees flagged submission", queued is not None, r.text[:300])
         t.check("accepted submission not in flagged queue", all(i["id"] != accepted["id"] for i in queue))
+        photo = requests.get(queued["photoUrl"], timeout=TIMEOUT) if queued and queued.get("photoUrl") else None
+        t.check("admin's photoUrl serves the evidence image", photo is not None and photo.status_code == 200 and photo.content == PNG)
         r = call("PATCH", f"/admin/price-submissions/{flagged['id']}", admin_access, json={"decision": "accepted"})
         t.check("admin accepts flagged -> 200", r.status_code == 200 and r.json().get("status") == "accepted", r.text[:300])
         r = call("PATCH", f"/admin/price-submissions/{flagged['id']}", admin_access, json={"decision": "rejected", "reason": "late"})
@@ -191,15 +202,52 @@ def main():
         r = requests.options(f"{api}/price-submissions", timeout=TIMEOUT,
                              headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
         t.check("CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173", r.headers)
+
+        # --- New product request ---
+        image_body = {"purpose": "product-image", "contentType": "image/png", "sizeBytes": len(PNG)}
+        r = call("POST", "/product-requests/image-upload-url", access, json=image_body)
+        t.check("product-image upload URL issued", r.status_code == 200, r.text[:300])
+        image_target = r.json()
+        image_key = image_target["productImageKey"]
+        t.check("product image goes to the caller's pending folder", image_key.startswith(f"product-images/pending/{user_sub}/"), image_key)
+        up = requests.post(image_target["uploadUrl"], data=image_target["fields"], files={"file": ("oat.png", PNG, "image/png")}, timeout=TIMEOUT)
+        t.check("product image uploaded to S3", up.status_code in (200, 204), up.status_code)
+        new_product = {"name": f"Smoke Test Oat Milk {suffix}", "brand": "Smoke Test", "category": "milk", "packQty": 1,
+                       "packUnit": "L", "packCount": 1, "hcs": False, "dietary": [], "retailerId": "fairprice",
+                       "priceCents": 545, "observedAt": today_sgt}
+        r = call("POST", "/product-requests", access, json=new_product)
+        t.check("product request without a picture -> 400",
+                r.status_code == 400 and "productImageKey" in r.json().get("fieldErrors", {}), r.text[:300])
+        r = call("POST", "/product-requests", access, json={**new_product, "productImageKey": image_key})
+        request = r.json()
+        t.check("product request -> 201 pending", r.status_code == 201 and request.get("status") == "pending", r.text[:300])
+        catalog_names = {p["name"] for p in call("GET", "/products").json().get("items", [])}
+        t.check("pending product is hidden from the catalog", new_product["name"] not in catalog_names)
+        r = call("GET", "/product-requests/mine", access)
+        mine_requests = r.json().get("items", []) if r.ok else []
+        t.check("GET /product-requests/mine shows it with its picture",
+                any(i["id"] == request.get("id") and i.get("productImageUrl") for i in mine_requests), r.text[:300])
+        t.check("user token on product queue -> 403", call("GET", "/admin/product-requests", access).status_code == 403)
+        r = call("GET", "/admin/product-requests", admin_access)
+        queued_request = next((i for i in r.json().get("items", []) if i["id"] == request.get("id")), None) if r.ok else None
+        t.check("admin sees the product request with submitter and suggested range",
+                bool(queued_request) and queued_request.get("submitterEmail") == user_email
+                and (queued_request.get("suggestedMinCents"), queued_request.get("suggestedMaxCents")) == (272, 818), r.text[:300])
+        r = call("PATCH", f"/admin/product-requests/{request.get('id')}", admin_access,
+                 json={"decision": "approved", "changes": {"category": "smoke test"}})
+        approved = r.json()
+        t.check("admin approves -> 200 with a productId", r.status_code == 200 and approved.get("status") == "approved"
+                and approved.get("productId"), r.text[:300])
+        listed = next((p for p in call("GET", "/products").json().get("items", []) if p["id"] == approved.get("productId")), None)
+        t.check("approved product is in the catalog with the admin's correction", bool(listed) and listed.get("category") == "smoke test")
+        picture = requests.get(listed["imageUrl"], timeout=TIMEOUT) if listed and listed.get("imageUrl") else None
+        t.check("product imageUrl serves the picture", picture is not None and picture.status_code == 200 and picture.content == PNG)
+        r = call("PATCH", f"/admin/product-requests/{request.get('id')}", admin_access, json={"decision": "approved"})
+        t.check("second product decision -> 409", r.status_code == 409, r.status_code)
     finally:
         print("Cleaning up...")
-        for sub in created["subs"]:
-            items = submissions_table.query(IndexName="ByUser", KeyConditionExpression=Key("userId").eq(sub))["Items"]
-            for item in items:
-                submissions_table.delete_item(Key={"productId": item["productId"], "sk": item["sk"]})
-            users_table.delete_item(Key={"userId": sub})
-        for key in created["photos"]:
-            s3.delete_object(Bucket=bucket, Key=key)
+        if created["subs"]:
+            delete_user_data(args.env, args.region, created["subs"])
         for email in created["users"]:
             try:
                 cognito.admin_delete_user(UserPoolId=pool_id, Username=email)

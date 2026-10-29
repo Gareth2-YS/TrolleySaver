@@ -36,7 +36,7 @@ def list_submissions(event):
         query["ExclusiveStartKey"] = start_key
     page = db.submissions().query(**query)
     return response(200, {
-        "items": to_records(page["Items"], include_submitter=True),
+        "items": to_records(page["Items"], admin=True),
         "nextToken": db.encode_page_token(page.get("LastEvaluatedKey")),
     })
 
@@ -75,7 +75,7 @@ def moderate(event, admin):
         if not current:
             raise ApiError(404, "NOT_FOUND", "This submission could not be found.")
         raise ApiError(409, "ALREADY_MODERATED", f"This submission is already {current['status']}.")
-    return response(200, to_records([result["Attributes"]], include_submitter=True)[0])
+    return response(200, to_records([result["Attributes"]], admin=True)[0])
 
 
 @api_handler
