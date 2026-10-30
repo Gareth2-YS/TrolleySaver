@@ -22,7 +22,7 @@ Serverless backend for **login** (Cognito), **product search**, **community pric
 | `scripts/create_admin.py` | Creates an admin account |
 | `scripts/invoke.py` | Calls any Lambda directly as any user, without Cognito |
 | `scripts/basket_eval.py` | Smart Basket evaluation: checks the backend's totals and savings against figures worked out from the spreadsheet, for the baskets in `scripts/basket_cases.json` |
-| `scripts/smoke_test.py` | 52 end-to-end checks over real HTTP, including the Smart Basket and a product request from proposal to approval; cleans up after itself |
+| `scripts/smoke_test.py` | 58 end-to-end checks over real HTTP, including the Smart Basket, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
 | `tests/` | Unit tests (pytest + moto, no AWS needed) |
 
 ## Setup

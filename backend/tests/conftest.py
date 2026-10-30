@@ -131,7 +131,7 @@ class Context:
 
 def call(handler, event):
     result = handler(event, Context())
-    return result["statusCode"], json.loads(result["body"])
+    return result["statusCode"], json.loads(result["body"]) if result["body"] else None
 
 
 def put_photo(key, content_type="image/png", size=1024):

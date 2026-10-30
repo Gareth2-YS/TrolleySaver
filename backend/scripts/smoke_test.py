@@ -227,6 +227,24 @@ def main():
         mine_requests = r.json().get("items", []) if r.ok else []
         t.check("GET /product-requests/mine shows it with its picture",
                 any(i["id"] == request.get("id") and i.get("productImageUrl") for i in mine_requests), r.text[:300])
+
+        # --- Deleting a pending product request ---
+        spare_target = call("POST", "/product-requests/image-upload-url", access, json=image_body).json()
+        requests.post(spare_target["uploadUrl"], data=spare_target["fields"], files={"file": ("rice.png", PNG, "image/png")}, timeout=TIMEOUT)
+        r = call("POST", "/product-requests", access,
+                 json={**new_product, "name": f"Smoke Test Rice {suffix}", "productImageKey": spare_target["productImageKey"]})
+        spare = r.json()
+        t.check("second product request -> 201 pending", r.status_code == 201 and spare.get("status") == "pending", r.text[:300])
+        t.check("someone else deleting it -> 404", call("DELETE", f"/product-requests/{spare.get('id')}", admin_access).status_code == 404)
+        r = call("DELETE", f"/product-requests/{spare.get('id')}", access)
+        t.check("owner deletes a pending request -> 204", r.status_code == 204, r.text[:300])
+        mine_ids = {i["id"] for i in call("GET", "/product-requests/mine", access).json().get("items", [])}
+        t.check("deleted request is gone from /mine", spare.get("id") not in mine_ids and request.get("id") in mine_ids)
+        t.check("deleting it again -> 404", call("DELETE", f"/product-requests/{spare.get('id')}", access).status_code == 404)
+        r = requests.options(f"{api}/product-requests/{spare.get('id')}", timeout=TIMEOUT,
+                             headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "DELETE"})
+        t.check("DELETE CORS preflight allowed",
+                r.status_code == 200 and "DELETE" in r.headers.get("Access-Control-Allow-Methods", ""), r.headers)
         t.check("user token on product queue -> 403", call("GET", "/admin/product-requests", access).status_code == 403)
         r = call("GET", "/admin/product-requests", admin_access)
         queued_request = next((i for i in r.json().get("items", []) if i["id"] == request.get("id")), None) if r.ok else None
@@ -244,6 +262,9 @@ def main():
         t.check("product imageUrl serves the picture", picture is not None and picture.status_code == 200 and picture.content == PNG)
         r = call("PATCH", f"/admin/product-requests/{request.get('id')}", admin_access, json={"decision": "approved"})
         t.check("second product decision -> 409", r.status_code == 409, r.status_code)
+        r = call("DELETE", f"/product-requests/{request.get('id')}", access)
+        t.check("deleting an approved request -> 409",
+                r.status_code == 409 and r.json().get("code") == "ALREADY_MODERATED", r.text[:300])
     finally:
         print("Cleaning up...")
         if created["subs"]:

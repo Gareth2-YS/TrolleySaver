@@ -352,7 +352,7 @@ Resources:
       Cors:
         AllowOrigin: !Sub "'${AllowedOrigin}'"
         AllowHeaders: "'Authorization,Content-Type'"
-        AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
         MaxAge: "'600'"
       Auth:
         DefaultAuthorizer: CognitoAuth
@@ -622,6 +622,12 @@ Resources:
               Resource:
                 - !Sub ${PhotoBucket.Arn}/product-images/*
                 - !Sub ${PhotoBucket.Arn}/price-evidence/*
+            # A contributor deleting a pending request removes its picture and evidence photo.
+            - Effect: Allow
+              Action: s3:DeleteObject
+              Resource:
+                - !Sub ${PhotoBucket.Arn}/product-images/pending/*
+                - !Sub ${PhotoBucket.Arn}/price-evidence/*/new-product/*
       Events:
         RequestImageUploadUrl:
           Type: Api
@@ -641,6 +647,12 @@ Resources:
             RestApiId: !Ref Api
             Path: /product-requests/mine
             Method: GET
+        DeleteRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /product-requests/{id}
+            Method: DELETE
 
   AdminProductRequestsFunction:
     Type: AWS::Serverless::Function

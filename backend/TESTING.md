@@ -135,8 +135,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 193 tests of the Lambda code (including the Smart Basket, its daily prices, Search and new product requests) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `193 passed in …s`.
+**What it checks:** 203 tests of the Lambda code (including the Smart Basket, its daily prices, Search and new product requests) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `203 passed in …s`.
 
 ### 1.2 Template check
 
@@ -152,11 +152,11 @@ sam validate --lint
 .venv\Scripts\python scripts\smoke_test.py
 ```
 
-**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. Finally it proposes a new product with a picture, approves it and finds it in the catalog. Everything it created is deleted at the end, including the published product. Takes about a minute.
-**You should see:** 52 lines starting with `PASS`, then:
+**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. Finally it proposes a new product with a picture, approves it and finds it in the catalog, and proposes a second one that its owner deletes while it's pending. Everything it created is deleted at the end, including the published product. Takes about a minute.
+**You should see:** 58 lines starting with `PASS`, then:
 
 ```
-PASS  second product decision -> 409
+PASS  deleting an approved request -> 409
 Cleaning up...
 <user id>: deleted 2 submission(s), 1 product request(s) (1 published product(s)), 1 image(s) and the profile row
 <user id>: deleted 0 submission(s), 0 product request(s) (0 published product(s)), 0 image(s) and the profile row
@@ -658,7 +658,7 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `193 passed`
+- [ ] 1.1: `pytest` shows `203 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products
@@ -666,7 +666,7 @@ Check [Common problems](#common-problems) first. Then:
 - [ ] 4: real-login walkthrough done (4.3 is optional)
 - [ ] 8.4: `basket_eval.py` says `0 failed`
 - [ ] 9.2–9.4: search returns the two milks for `q=milk&maxPriceCents=500`, and bad parameters give `400` with the field named
-- [ ] 10: a product request with a picture goes `pending` → `approved`, the product appears in search with an `imageUrl`, and a rejection deletes the pending picture
+- [ ] 10: a product request with a picture goes `pending` → `approved`, the product appears in search with an `imageUrl`, a rejection deletes the pending picture, and the owner can delete a pending request (but not a decided one)
 - [ ] Cleanup done:
   - `invoke.py mine` and `invoke.py my-product-requests` both show `"items": []`
   - no `tester-…@example.com` accounts remain: `aws cognito-idp list-users --user-pool-id $poolId --query "Users[].Username"`
@@ -1273,6 +1273,7 @@ A shopper who can't find a product proposes it, with every product field, its fi
 | Approval publishes product, picture and first price in one transaction; a second decision is 409 | `test_product_requests.py` (including two admins at once), 10.6, smoke test |
 | The first price reaches the daily average the night it's approved | `test_product_requests.py` (`test_approved_price_reaches_the_daily_average_today`) |
 | Rejection deletes the pending picture | `test_product_requests.py`, 10.8 |
+| The owner can delete a pending request, with its pictures; someone else's is 404, a decided one 409 | `test_product_requests.py` (including a delete racing an approval), 10.9, smoke test |
 
 ### 10.1 Upload the product's picture
 
@@ -1386,7 +1387,26 @@ aws s3api head-object --bucket trolleysaver-dev-photos-158670174505 --key $image
 
 → `An error occurred (404) when calling the HeadObject operation: Not Found`.
 
-### 10.9 Clean up (always)
+### 10.9 Delete a pending request
+
+The contributor changes their mind before an admin decides:
+
+```powershell
+$up = .venv\Scripts\python scripts\invoke.py upload-request-image --file $png; $imageKey3 = [string](($up -match '^productImageKey: ') -replace '^productImageKey: ', '');
+.venv\Scripts\python scripts\invoke.py request-product --set name="Test Soy Sauce" --set brand="TrolleySaver Test" --set category=sauce --set packQty=500 --set packUnit=ml --set packCount=1 --set hcs=false --set dietary=[] --set retailerId=fairprice --set priceCents=319 --set observedAt=$today --set productImageKey=$imageKey3;
+$reqId3 = ((.venv\Scripts\python scripts\invoke.py my-product-requests | Select-Object -Skip 1) | Out-String | ConvertFrom-Json).items[0].id; "saved reqId3=$reqId3"
+.venv\Scripts\python scripts\invoke.py delete-product-request --id $reqId3
+```
+
+**You should see:** `HTTP 201` for the request, then `HTTP 204` with nothing after it. The request is gone from `invoke.py my-product-requests`, and its picture is deleted (`aws s3api head-object … --key $imageKey3` gives `404`).
+
+| Try | Command | You should see |
+|---|---|---|
+| Delete it again | `.venv\Scripts\python scripts\invoke.py delete-product-request --id $reqId3` | `HTTP 404`, `"code": "NOT_FOUND"` |
+| Delete someone else's | `.venv\Scripts\python scripts\invoke.py delete-product-request --as admin --id $reqId2` | `HTTP 404`: other people's requests look missing, even to an admin |
+| Delete the approved one | `.venv\Scripts\python scripts\invoke.py delete-product-request --id $reqId` | `HTTP 409`, `"code": "ALREADY_MODERATED"`, `"message": "This product request is already approved."` |
+
+### 10.10 Clean up (always)
 
 This removes the requests, the published "Test Oat Milk" product with its price and picture, and anything else `invoke-test-user` created:
 
