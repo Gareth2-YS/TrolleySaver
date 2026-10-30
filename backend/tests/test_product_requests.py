@@ -27,6 +27,11 @@ def mine(user_id=USER_ID):
     return call(product_requests.handler, api_event("GET", "/product-requests/mine", user_id=user_id))
 
 
+def delete_request(request_id, user_id=USER_ID):
+    event = api_event("DELETE", "/product-requests/{id}", user_id=user_id, path_params={"id": request_id})
+    return call(product_requests.handler, event)
+
+
 def admin_list(status=None, groups="admin"):
     query = {"status": status} if status else None
     return call(admin_product_requests.handler, api_event("GET", "/admin/product-requests", user_id=ADMIN_ID, groups=groups, query=query))
@@ -373,3 +378,78 @@ def test_unknown_request_and_bad_decision(aws, pending):
     assert decide("no-such-request", {"decision": "approved"})[0] == 404
     status, error = decide(pending["id"], {"decision": "accepted"})
     assert status == 400 and "decision" in error["fieldErrors"]
+
+
+# ---------- deleting a request ----------
+
+def test_owner_deletes_pending_request_and_its_images(aws):
+    put_photo(IMAGE_KEY)
+    evidence = f"price-evidence/{USER_ID}/new-product/shelf.png"
+    put_photo(evidence)
+    created = create(valid_request(photoKey=evidence))[1]
+    assert delete_request(created["id"]) == (204, None)
+    assert "Item" not in aws.Table("unit-product-request").get_item(Key={"requestId": created["id"]})
+    assert not object_exists(IMAGE_KEY) and not object_exists(evidence)
+    assert mine()[1]["items"] == [] and admin_list()[1]["items"] == []
+
+
+def test_deleted_product_can_be_proposed_again(aws, pending):
+    assert delete_request(pending["id"])[0] == 204
+    put_photo(IMAGE_KEY)
+    assert create(valid_request())[0] == 201
+
+
+def test_cannot_delete_someone_elses_request(aws, pending):
+    status, error = delete_request(pending["id"], user_id=OTHER_USER_ID)
+    assert status == 404 and error["code"] == "NOT_FOUND"
+    assert "Item" in aws.Table("unit-product-request").get_item(Key={"requestId": pending["id"]})
+    assert object_exists(IMAGE_KEY)
+
+
+def test_delete_unknown_request_is_404(aws):
+    assert delete_request("no-such-request")[0] == 404
+
+
+def test_delete_needs_login(aws, pending):
+    assert delete_request(pending["id"], user_id=None)[0] == 401
+
+
+@pytest.mark.parametrize("decision", [{"decision": "approved"}, {"decision": "rejected", "reason": "Not a grocery item"}])
+def test_decided_request_cannot_be_deleted(aws, pending, decision):
+    decided = decide(pending["id"], decision)[1]
+    status, error = delete_request(pending["id"])
+    assert status == 409 and error["code"] == "ALREADY_MODERATED" and decision["decision"] in error["message"]
+    assert aws.Table("unit-product-request").get_item(Key={"requestId": pending["id"]})["Item"]["status"] == decision["decision"]
+    if decision["decision"] == "approved":
+        assert object_exists(decided["productImageKey"])
+
+
+def test_admin_deciding_a_deleted_request_gets_404(aws, pending):
+    assert delete_request(pending["id"])[0] == 204
+    assert decide(pending["id"], {"decision": "approved"})[0] == 404
+    assert decide(pending["id"], {"decision": "rejected", "reason": "late"})[0] == 404
+
+
+def test_approval_racing_a_delete_publishes_nothing(aws, pending):
+    """The admin loaded the request just before its owner deleted it."""
+    from common.auth import Caller
+    from common.http import ApiError
+
+    stale = aws.Table("unit-product-request").get_item(Key={"requestId": pending["id"]})["Item"]
+    assert delete_request(pending["id"])[0] == 204
+    with pytest.raises(ApiError) as raised:
+        admin_product_requests.approve(stale, None, Caller(user_id=ADMIN_ID, groups=("admin",)), "2026-10-30T01:00:00.000Z")
+    assert raised.value.status == 404
+    assert aws.Table("unit-product").scan()["Count"] == 1  # still only the milk
+
+
+def test_delete_racing_an_approval_is_409(aws, pending, monkeypatch):
+    """The owner loaded the request just before an admin approved it: the conditional delete refuses."""
+    stale = aws.Table("unit-product-request").get_item(Key={"requestId": pending["id"]})["Item"]
+    assert decide(pending["id"], {"decision": "approved"})[0] == 200
+    real_load = product_requests._load_own
+    loads = iter([lambda request_id, caller: stale])
+    monkeypatch.setattr(product_requests, "_load_own", lambda request_id, caller: next(loads, real_load)(request_id, caller))
+    status, error = delete_request(pending["id"])
+    assert status == 409 and error["message"] == "This product request is already approved."
+    assert aws.Table("unit-product-request").get_item(Key={"requestId": pending["id"]})["Item"]["status"] == "approved"

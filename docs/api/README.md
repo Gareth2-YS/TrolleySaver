@@ -29,7 +29,7 @@ How the frontend should adopt it is described in the feature handoffs:
 | **Environment** | `dev` is the only deployed environment. Build the frontend against it. |
 | **Format** | JSON request and response bodies (`Content-Type: application/json`) |
 | **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog and the basket comparison |
-| **CORS** | Allowed origin is `http://localhost:5173` (the Vite dev server). Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH`. Other origins can be added on request. |
+| **CORS** | Allowed origin is `http://localhost:5173` (the Vite dev server). Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH, DELETE`. Other origins can be added on request. |
 | **Money** | Integer cents: `363` means $3.63 |
 | **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
 | **Ids** | Product ids are UUIDs. Retailer ids are `fairprice`, `shengsiong` and `coldstorage`. A submission `id` is an opaque string: store it and pass it back, never build or parse it. |
@@ -76,6 +76,7 @@ The server always takes the caller's identity from the verified token. Fields li
 | [`POST /product-requests/image-upload-url`](#post-product-requestsimage-upload-url) | user | Get a one-time URL to upload a new product's picture, or an evidence photo for its price |
 | [`POST /product-requests`](#post-product-requests) | user | Propose a product that isn't in the catalog, with its first price |
 | [`GET /product-requests/mine`](#get-product-requestsmine) | user | The caller's own product requests |
+| [`DELETE /product-requests/{id}`](#delete-product-requestsid) | user | Delete one of the caller's own requests while it's still pending |
 | [`GET /admin/product-requests`](#get-adminproduct-requests) | admin | Review queue (pending product requests) |
 | [`PATCH /admin/product-requests/{id}`](#patch-adminproduct-requestsid) | admin | Approve (publish) or reject a product request |
 | [`POST /basket/compare`](#post-basketcompare) | public | Price a basket at every store, plus a healthier version of it |
@@ -350,7 +351,7 @@ When a shopper finds a product that isn't in the catalog, they can propose it wi
 1. Upload the picture, and optionally an evidence photo, with [`POST /product-requests/image-upload-url`](#post-product-requestsimage-upload-url), then send each file to S3 [as in step 2 above](#uploading-the-photo-to-s3).
 2. Send the request with [`POST /product-requests`](#post-product-requests).
 
-The request stays **`pending`** and is hidden from the catalog, search and the basket until an admin approves it ([`PATCH /admin/product-requests/{id}`](#patch-adminproduct-requestsid)). Approving publishes the product, with its picture, and its first price as an accepted submission. The price reaches the Smart Basket after that night's price job.
+The request stays **`pending`** and is hidden from the catalog, search and the basket until an admin approves it ([`PATCH /admin/product-requests/{id}`](#patch-adminproduct-requestsid)). Approving publishes the product, with its picture, and its first price as an accepted submission. The price reaches the Smart Basket after that night's price job. Until an admin decides, the contributor can take the request back with [`DELETE /product-requests/{id}`](#delete-product-requestsid).
 
 ### `POST /product-requests/image-upload-url`
 
@@ -426,6 +427,27 @@ User. The caller's own product requests in every status, newest first, paginated
 - `productId` once approved, the id of the published product
 
 There's no evidence `photoUrl`.
+
+### `DELETE /product-requests/{id}`
+
+User. Deletes one of the caller's own requests **while it is still `pending`**. Once an admin has approved or rejected it, it can't be deleted. No body.
+
+The request is removed for good, along with its product picture and evidence photo. It disappears from `GET /product-requests/mine` and the admin queue, and the same product can be proposed again. A deleted request no longer counts toward the daily limit of 10.
+
+```
+DELETE /product-requests/2f4b7a10-…
+204 No Content
+```
+
+Errors:
+
+| Status | `code` | When |
+|---|---|---|
+| 401 | — | No or invalid token |
+| 404 | `NOT_FOUND` | No such request, or it belongs to someone else (other people's requests always look missing, even to admins) |
+| 409 | `ALREADY_MODERATED` | It's already approved or rejected. `message` says which, e.g. "This product request is already approved." |
+
+If an admin is deciding the request at the same moment, only one of them wins. Either the delete gets `409`, or the admin gets `404 NOT_FOUND` and nothing is published.
 
 ### `GET /admin/product-requests`
 
@@ -646,7 +668,7 @@ export interface ApiSubmission {
 export type ApiProductRequestStatus = "pending" | "approved" | "rejected"
 
 export interface ApiProductRequest {
-  id: string                          // same as requestId; use it in PATCH
+  id: string                          // same as requestId; use it in PATCH and DELETE
   requestId: string
   status: ApiProductRequestStatus
   userId: string

@@ -16,6 +16,7 @@ Usage (from backend/; see TESTING.md for a full walkthrough):
     .venv/Scripts/python scripts/invoke.py upload-request-image --file oat.png                              # prints a productImageKey
     .venv/Scripts/python scripts/invoke.py request-product --set name="Oat Milk" ... --set dietary=[vegan,halal]
     .venv/Scripts/python scripts/invoke.py my-product-requests
+    .venv/Scripts/python scripts/invoke.py delete-product-request --id <id>    # only while it's pending
     .venv/Scripts/python scripts/invoke.py product-queue --as admin
     .venv/Scripts/python scripts/invoke.py moderate-product --as admin --id <id> --set decision=approved --set changes.category=milk
     .venv/Scripts/python scripts/invoke.py basket --body-file baskets/weekly-staples.json
@@ -64,6 +65,7 @@ ROUTES = {
     "request-upload-url": ("product-requests", "product_requests", "POST", "/product-requests/image-upload-url", True),
     "request-product": ("product-requests", "product_requests", "POST", "/product-requests", True),
     "my-product-requests": ("product-requests", "product_requests", "GET", "/product-requests/mine", True),
+    "delete-product-request": ("product-requests", "product_requests", "DELETE", "/product-requests/{id}", True),
     "product-queue": ("admin-product-requests", "admin_product_requests", "GET", "/admin/product-requests", True),
     "moderate-product": ("admin-product-requests", "admin_product_requests", "PATCH", "/admin/product-requests/{id}", True),
 }
@@ -154,7 +156,8 @@ def request_body(raw_json, pairs):
 
 def print_result(result):
     print(f"HTTP {result['statusCode']}")
-    print(json.dumps(json.loads(result["body"]), indent=2, ensure_ascii=False))
+    if result["body"]:
+        print(json.dumps(json.loads(result["body"]), indent=2, ensure_ascii=False))
 
 
 def upload_file(call, route, request, file_path, user_id, groups):
@@ -236,7 +239,7 @@ def main():
     parser.add_argument("--body", help="Raw JSON request body (fields from --set are added on top)")
     parser.add_argument("--body-file", help="Read the raw JSON request body from this file instead of --body")
     parser.add_argument("--query", action="append", default=[], metavar="KEY=VALUE", help="Query string parameter (repeatable)")
-    parser.add_argument("--id", help="Submission or product-request id (moderate, moderate-product)")
+    parser.add_argument("--id", help="Submission or product-request id (moderate, moderate-product, delete-product-request)")
     parser.add_argument("--file", help="Image to upload (upload-photo, upload-request-image)")
     parser.add_argument("--product", help="Product id the evidence photo is for (upload-photo)")
     parser.add_argument("--retailer", default="fairprice", help="Store id the evidence photo is for (upload-photo; default fairprice)")
@@ -249,7 +252,7 @@ def main():
     if args.route == "cleanup":
         cleanup(args.env, args.region, [args.user_id] if args.user_id else [DEFAULT_USER_ID, DEFAULT_ADMIN_ID])
         return
-    if args.route in ("moderate", "moderate-product") and not args.id:
+    if args.route in ("moderate", "moderate-product", "delete-product-request") and not args.id:
         parser.error(f"{args.route} needs --id")
     if args.route in ("upload-photo", "upload-request-image") and not args.file:
         parser.error(f"{args.route} needs --file")

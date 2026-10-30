@@ -205,6 +205,7 @@ stateDiagram-v2
     [*] --> pending: contributor proposes
     pending --> approved: admin approves (may correct fields and the price range)
     pending --> rejected: admin rejects (reason required)
+    pending --> [*]: contributor deletes it
 ```
 
 - **Pending requests are invisible to shoppers.** They live only in `product-request`.
@@ -216,6 +217,7 @@ stateDiagram-v2
 
   The product's picture is moved from `product-images/pending/…` to `product-images/<productId>.<ext>`, and the product's `imageKey` points at it.
 - **Rejection** keeps the request with its reason and deletes the pending picture.
+- **Deletion:** while a request is still pending, its contributor can delete it. The row is removed, along with its pending picture and evidence photo. Approved and rejected requests can't be deleted. A deleted request no longer counts toward the daily limit.
 - **Duplicates are refused:**
   - a request for a product already in `product`, matched on normalised name, brand and pack size (`duplicateKey`)
   - a request matching one that is already pending

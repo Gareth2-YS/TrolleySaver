@@ -80,7 +80,7 @@ Functions are named `trolleysaver-<env>-<name>`. All the code is in `backend/lam
 | `create-submission` | `POST /price-submissions` | Validates (product and store exist), rate-limits, rejects duplicates, checks the photo was uploaded for this product, and saves the price as `accepted` or `flagged` |
 | `my-submissions` | `GET /price-submissions/mine` | Lists the caller's own submissions (no evidence-photo links) |
 | `admin-submissions` | `GET` / `PATCH /admin/price-submissions` | Flagged queue with evidence-photo links, and accept/reject decisions (`admin` group only) |
-| `product-requests` | `POST /product-requests/image-upload-url`, `POST /product-requests`, `GET /product-requests/mine` | Upload links for a new product's picture and evidence, proposing a product with its first price (all fields and a picture required, duplicates and a daily limit enforced), and the caller's own requests |
+| `product-requests` | `POST /product-requests/image-upload-url`, `POST /product-requests`, `GET /product-requests/mine`, `DELETE /product-requests/{id}` | Upload links for a new product's picture and evidence, proposing a product with its first price (all fields and a picture required, duplicates and a daily limit enforced), the caller's own requests, and deleting one of them while it's still pending |
 | `admin-product-requests` | `GET` / `PATCH /admin/product-requests` | Pending queue, and approve (publish the product, its picture and first price in one transaction) or reject (`admin` group only) |
 | `cognito-pre-signup` | Cognito PreSignUp | Auto-confirms public sign-ups |
 | `cognito-post-confirmation` | Cognito PostConfirmation | Adds the user to the `user` group and creates their profile row |
