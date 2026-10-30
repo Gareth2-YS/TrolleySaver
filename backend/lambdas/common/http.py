@@ -37,7 +37,7 @@ def cors_headers():
     return {
         "Access-Control-Allow-Origin": os.environ.get("ALLOWED_ORIGIN", "*"),
         "Access-Control-Allow-Headers": "Authorization,Content-Type",
-        "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
+        "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     }
 
 
@@ -47,6 +47,10 @@ def response(status, body):
         "headers": {"Content-Type": "application/json", **cors_headers()},
         "body": json.dumps(body, default=_json_default),
     }
+
+
+def no_content():
+    return {"statusCode": 204, "headers": cors_headers(), "body": ""}
 
 
 def error_response(error, request_id):

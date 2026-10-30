@@ -16,5 +16,6 @@ Notes passed between team members when one person's work becomes someone else's 
 | 27 Oct 2026 | Search & filter | backend → frontend | [2026-10-27-search-backend-to-frontend.md](2026-10-27-search-backend-to-frontend.md) | **Open**: Search page in progress, moving to `GET /products/search` |
 | 29 Oct 2026 | Price & image upload (changes) | backend → frontend | [2026-10-29-price-upload-backend-to-frontend.md](2026-10-29-price-upload-backend-to-frontend.md) | **Open, action needed**: photo uploads on `/contribute` fail until the upload-link call sends `productId` and `retailerId` |
 | 29 Oct 2026 | New product requests | backend → frontend | [2026-10-29-new-product-backend-to-frontend.md](2026-10-29-new-product-backend-to-frontend.md) | **Open**: backend done; contributor form and admin queue to build |
+| 30 Oct 2026 | Deleting a pending product request | backend → frontend | [2026-10-30-new-product-delete-backend-to-frontend.md](2026-10-30-new-product-delete-backend-to-frontend.md) | **Open**: backend done; Delete action in the contributor's list to build |
 
 The API contract that the backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).
