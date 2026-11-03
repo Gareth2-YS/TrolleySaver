@@ -9,3 +9,4 @@
 - [UX references](./ux/README.md)
 - Backend code and deployment: [backend/README.md](../backend/README.md)
 - Testing the backend step by step: [backend/TESTING.md](../backend/TESTING.md)
+- Test case tracker (every test, key tests, done / not done): [qa/test-cases.md](./qa/test-cases.md)
