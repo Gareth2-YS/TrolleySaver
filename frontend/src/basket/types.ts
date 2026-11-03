@@ -1,6 +1,7 @@
 // Shapes follow the backend contract for GET /products, GET /retailers and POST /basket/compare.
 
 export interface Product {
+  imageUrl?: string
   id: string
   name: string
   brand: string

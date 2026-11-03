@@ -15,7 +15,8 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react"
+import { ProductRequestForm, ProductRequestHistory, ProductRequestReview } from "./product-requests"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
@@ -60,7 +61,7 @@ function StatusBadge({ status }: { status: SubmissionStatus }) {
       status === "rejected" && "border-destructive/25 bg-destructive/10 text-destructive",
       status === "flagged" && "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     )}>
-      <Icon className="size-3.5" />{status}
+      <Icon className="size-3.5" />{status === "flagged" ? "Pending review" : status}
     </span>
   )
 }
@@ -73,20 +74,31 @@ function PhotoView({ submission, large = false, onExpired }: { submission: Price
       </div>
     )
   }
-  if (!submission.photo.previewUrl) {
+  if (!large || !submission.photo.previewUrl) {
     return (
       <div className={cn("grid place-items-center rounded-xl border border-dashed bg-secondary/50 p-3 text-center text-muted-foreground", large ? "min-h-52" : "size-20 shrink-0")}>
-        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">Private image</span></div>
+        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">Photo attached · visible to administrators</span></div>
       </div>
     )
   }
   return (
-    <img
+    <figure className={large ? "min-w-0 space-y-3" : "size-20 shrink-0"}>
+      <figcaption className={large ? "text-sm font-semibold" : "sr-only"}>
+        Price evidence
+      </figcaption>
+      <img
       src={submission.photo.previewUrl}
-      alt={`Shelf-tag evidence for ${submission.productName}`}
-      className={cn("rounded-xl border object-cover", large ? "max-h-80 w-full bg-secondary/40" : "size-20 shrink-0")}
+      alt={`$Price evidence for ${submission.productName}`}
+      className={cn("rounded-xl border", large ? "max-h-96 w-full bg-secondary/40 object-contain" : "size-20 object-cover")}
       onError={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }}
-    />
+      />
+      {large && <div className="rounded-xl border border-primary/20 bg-accent/50 p-4">
+        <p className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-5 shrink-0 text-primary" />Help shoppers trust this price</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        Match the product name and price on the shelf label or receipt to the details beside it.
+        </p>
+      </div>}
+    </figure>
   )
 }
 
@@ -132,6 +144,15 @@ function ReviewPathCard() {
   )
 }
 
+function NewProductDialog({ service, onClose, onExisting }: { service: SubmissionService; onClose: () => void; onExisting: (id: string) => Promise<void> }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => { dialog.current?.showModal() }, [])
+  return <dialog ref={dialog} onClose={onClose} aria-labelledby="new-product-title" className="m-auto max-h-[90vh] w-[min(1280px,95vw)] overflow-y-auto rounded-2xl border bg-background p-5 text-foreground shadow-xl backdrop:bg-black/50">
+    <div className="mb-5 flex items-center justify-between"><h2 id="new-product-title" className="text-xl font-semibold">Upload a new product</h2><Button variant="ghost" onClick={() => dialog.current?.close()} aria-label="Close new product upload"><X className="size-4" /></Button></div>
+    <ProductRequestForm service={service} onDone={() => dialog.current?.close()} onExisting={onExisting} />
+  </dialog>
+}
+
 function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const { user, getAccessToken } = useAuth()
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
@@ -147,6 +168,9 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
+  const photoInput = useRef<HTMLInputElement>(null)
+  const [showNewProduct, setShowNewProduct] = useState(false)
+  const fieldId = (name: string) => name
   const today = singaporeDateString()
   const earliestDate = earliestObservedDate()
   const {
@@ -264,7 +288,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
       let photo
       if (file) {
-        const target = await service.requestImageUpload(file, token)
+        const target = await service.requestImageUpload(file, values.productId, values.storeId, token)
         photo = await service.uploadImage(target, file, setProgress)
       }
       const product = products.find((item) => item.id === values.productId)
@@ -283,7 +307,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       }, token)
       setSubmissions((current) => [created, ...current])
       clearForm()
-      toast.success(created.status === "accepted" ? "Price accepted and published" : "Unusual price sent for review")
+      toast.success(created.status === "accepted" ? "Price accepted; public prices update after nightly aggregation" : "Submission sent for administrator review")
     } catch (error) {
       if (error instanceof SubmissionServiceError && error.fieldErrors) {
         const fieldMap = { productId: "productId", retailerId: "storeId", priceCents: "price", observedAt: "observedDate" } as const
@@ -306,22 +330,29 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
         <div className="pb-1">
           <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Contributor workspace</span>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Share a price you spotted</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Add the essential price details and optional shelf-label evidence. Prices in the usual range are published straight away; unusual prices are checked by an administrator.
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+            Found a price worth sharing? Pass it on and help another shopper make their next grocery trip a little easier.
           </p>
         </div>
         <ReviewPathCard />
       </header>
-
+      <div className="glass-panel flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"><div><h2 className="text-lg font-semibold">Found something new?</h2><p className="mt-1 text-sm text-muted-foreground">Help fellow shoppers discover it. Add a product we don’t have yet.</p></div><Button variant="outline" onClick={() => setShowNewProduct(true)}><ImageUp className="size-4" />Upload a new product</Button></div>
+      {showNewProduct && <NewProductDialog onExisting={async (id) => {
+        const catalog = await service.listProducts()
+        const canonical = catalog.find((p) => p.id === id)
+        if (!canonical) throw new Error("The canonical product is not available yet. Reload the catalog and retry.")
+        setProducts(catalog); chooseProduct(canonical); setShowNewProduct(false)
+      }} service={service} onClose={() => { setShowNewProduct(false); void loadMine().catch(() => setLoadError("Could not refresh submissions.")) }} />}
       <FormAlert message={loadError} />
-
       <form onSubmit={handleSubmit(submit)} noValidate className="grid items-stretch gap-5 lg:grid-cols-12">
+        <div className="contents">
         <section className="glass-panel p-5 sm:p-7 lg:col-span-7">
           <div className="flex items-center gap-3 border-b border-border/70 pb-5">
             <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Store className="size-5" /></span>
-            <div><h2 className="text-xl font-semibold">Price details</h2><p className="text-xs text-muted-foreground">Tell us what you saw and where</p></div>
+            <div><h2 className="text-xl font-semibold">Price details</h2><p className="mt-1 text-sm text-muted-foreground">What did you spot, and where?</p></div>
           </div>
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
+
             <div
               className="space-y-2 sm:col-span-2"
               onBlur={(event) => {
@@ -442,56 +473,69 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
               {errors.productId && <p id="product-error" role="alert" className="text-xs font-medium text-destructive">{errors.productId.message}</p>}
             </div>
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="store">Store</Label>
-              <select id="store" className={selectClass} disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
+              <Label htmlFor={fieldId("store")}>Store</Label>
+              <select id={fieldId("store")} className={selectClass} disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
                 <option value="">{loading ? "Loading stores…" : "Select a store"}</option>
                 {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
               </select>
               <FieldError>{errors.storeId?.message}</FieldError>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="price">Price (SGD)</Label>
+              <Label htmlFor={fieldId("price")}>Price (SGD)</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                <Input id="price" type="number" min="0.01" max="1000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...register("price")} />
+                <Input id={fieldId("price")} type="number" min="0.01" max="1000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...register("price")} />
               </div>
               <FieldError>{errors.price?.message}</FieldError>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="observedDate">Observed date</Label>
-              <Input id="observedDate" type="date" min={earliestDate} max={today} aria-invalid={Boolean(errors.observedDate)} {...register("observedDate")} />
+              <Label htmlFor={fieldId("observedDate")}>Observed date</Label>
+              <Input id={fieldId("observedDate")} type="date" min={earliestDate} max={today} aria-invalid={Boolean(errors.observedDate)} {...register("observedDate")} />
               <FieldError>{errors.observedDate?.message}</FieldError>
             </div>
           </div>
         </section>
 
-        <section className="glass-panel flex flex-col p-5 sm:p-7 lg:col-span-5">
+
+        </div>
+
+        <section className="glass-panel flex min-w-0 flex-col p-5 sm:p-7 lg:col-span-5">
           <div className="flex items-start justify-between gap-4 border-b border-border/70 pb-5">
             <div className="flex items-center gap-3">
               <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Camera className="size-5" /></span>
-              <div><h2 className="text-xl font-semibold">Shelf evidence</h2><p className="text-xs text-muted-foreground">Optional · JPG or PNG · 5 MB max</p></div>
+              <div><h2 className="text-xl font-semibold">Show the price you spotted</h2><p className="mt-2 inline-flex rounded-full bg-accent px-3 py-1 text-sm font-medium text-primary">Photo optional</p></div>
             </div>
             {file && <Button type="button" variant="ghost" size="sm" onClick={clearImage}><X className="size-4" />Remove</Button>}
           </div>
-          <Label htmlFor="evidence" className="sr-only">Shelf-tag photo</Label>
+          <div id={fieldId("evidence-help")} className="mt-5 rounded-xl border border-primary/20 bg-accent/40 p-4">
+            <h3 className="text-lg font-semibold">A clear price helps everyone.</h3>
+            <p className="mt-2 text-base leading-relaxed text-muted-foreground">Share a shelf label or receipt with the product name and price in focus, so the next shopper can buy with confidence.</p>
+            <ul className="mt-4 flex flex-wrap gap-2" aria-label="Photo reminders">
+              {["Product name", "Readable price"].map((reminder) => <li key={reminder} className="inline-flex items-center gap-1.5 rounded-lg bg-card/65 px-2.5 py-2 text-sm font-medium"><Check className="size-4 shrink-0 text-primary" />{reminder}</li>)}
+            </ul>
+          </div>
+          <Label htmlFor={fieldId("evidence")} className="sr-only">Price evidence photo</Label>
           <label
-            htmlFor="evidence"
+            htmlFor={fieldId("evidence")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); photoInput.current?.click() } }}
             className={cn(
-              "mt-6 grid min-h-64 flex-1 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed bg-secondary/35 text-center transition-colors hover:border-primary/50 hover:bg-accent/50",
+              "mt-5 grid min-h-56 flex-1 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed bg-secondary/35 text-center transition-colors hover:border-primary/50 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               imageError ? "border-destructive/50" : "border-border",
             )}
           >
             {previewUrl ? (
-              <img src={previewUrl} alt="Selected shelf-tag preview" className="max-h-80 w-full object-contain" />
+              <img src={previewUrl} alt="Selected price evidence preview" className="max-h-80 w-full object-contain" />
             ) : (
               <span className="p-6">
                 <span className="mx-auto grid size-14 place-items-center rounded-full bg-accent text-primary"><ImageUp className="size-7" /></span>
-                <strong className="mt-4 block text-sm">Choose a clear shelf-label photo</strong>
-                <span className="mt-1 block text-xs text-muted-foreground">Click to browse your device</span>
+                <strong className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-3 text-base font-semibold text-primary-foreground"><ImageUp className="size-5" />Add a price photo</strong>
+                <span className="mt-3 block text-sm text-muted-foreground">Choose from your device · JPG or PNG · Up to 5 MB</span>
               </span>
             )}
           </label>
-          <input id="evidence" className="sr-only" type="file" accept="image/jpeg,image/png" onChange={onImageChange} />
+          <input ref={photoInput} id={fieldId("evidence")} aria-describedby={fieldId("evidence-help")} className="sr-only" type="file" accept="image/jpeg,image/png" onChange={onImageChange} />
           <FieldError>{imageError}</FieldError>
           {progress !== null && (
             <div className="mt-4" aria-live="polite">
@@ -504,27 +548,29 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
         <div className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-12">
           <div className="flex items-center gap-3 text-sm">
             <span className="grid size-9 place-items-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="size-4" /></span>
-            <span><strong className="block">Reactive moderation</strong><span className="text-xs text-muted-foreground">Usual prices publish immediately; unusual prices are flagged for review.</span></span>
+            <span><strong className="block text-base">Small contribution. Shared savings.</strong><span className="mt-1 block text-sm text-muted-foreground">Usual prices are accepted automatically. Unusual prices get an administrator review. Public prices update after nightly aggregation.</span></span>
           </div>
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="outline" onClick={clearForm}>Clear</Button>
             <Button type="submit" disabled={isSubmitting || Boolean(imageError)}>
               {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <ImageUp className="size-4" />}
-              {isSubmitting ? "Saving…" : "Submit price"}
+              {isSubmitting ? "Saving..." : "Submit price"}
             </Button>
           </div>
         </div>
       </form>
 
-      <section className="glass-panel p-5 sm:p-7">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+      <ProductRequestHistory service={service} refreshKey={showNewProduct} />
+      <section className="glass-panel min-w-0 p-5 sm:p-7">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Clock3 className="size-5" /></span>
-            <div><h2 className="text-xl font-semibold">Your submissions</h2><p className="text-xs text-muted-foreground">Track every contribution from newest to oldest</p></div>
+            <div><h2 className="text-xl font-semibold">Your price submissions</h2><p className="text-xs text-muted-foreground">Track every price contribution from newest to oldest</p></div>
           </div>
           <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">{submissions.length} total</span>
         </div>
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-live="polite">
+        <div className="mt-6 grid gap-4" aria-live="polite">
           {loading ? (
             <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading your submissions…</div>
           ) : submissions.length === 0 ? (
@@ -541,6 +587,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           ))}
         </div>
       </section>
+      </div>
     </div>
   )
 }
@@ -616,8 +663,8 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
         <div className="pb-1">
           <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Administrator workspace</span>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Review price evidence</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Review only unusual prices that the backend has flagged, then accept or reject them using the shelf evidence.
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+            Help the community shop with confidence. Match each price to its photo, and give new finds a careful first look.
           </p>
         </div>
         <aside className="glass-panel flex items-center justify-between p-5">
@@ -627,10 +674,11 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
       </header>
 
       <FormAlert message={error} />
+      <ProductRequestReview service={service} />
 
       <section className="glass-panel p-5 sm:p-7">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h2 className="text-xl font-semibold">Flagged prices</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
+          <div><h2 className="text-xl font-semibold">Products and prices awaiting review</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
           <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">Administrator only</span>
         </div>
         <div className="mt-6 space-y-5" aria-live="polite">
@@ -658,6 +706,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
                     <textarea
                       id={`reason-${submission.id}`}
                       value={reason}
+                      maxLength={500}
                       onChange={(event) => setReason(event.target.value)}
                       className="mt-2 min-h-24 w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       placeholder="Explain what needs to be corrected"

@@ -1,9 +1,10 @@
 import { localProducts, localRetailers } from "./catalog"
-import type { CatalogProduct, CatalogRetailer, CreateSubmissionInput, PriceSubmission, SubmissionActor, SubmissionPhoto, SubmissionService, SubmissionStatus, UploadTarget } from "./types"
+import { contributionSchema, productCorrectionsSchema, productFieldsSchema, validateImage } from "./schema"
+import type { CatalogProduct, CatalogRetailer, CreateSubmissionInput, PriceSubmission, SubmissionActor, SubmissionPhoto, SubmissionService, SubmissionStatus, UploadTarget, CreateProductRequestInput, ProductRequest, ProductRequestStatus, ProductCorrections } from "./types"
 
 const STORAGE_KEY = "trolleysaver.local.price-submissions.v1"
 
-interface ApiErrorBody { code?: string; message?: string; fieldErrors?: Record<string, string>; requestId?: string }
+interface ApiErrorBody { code?: string; message?: string; fieldErrors?: Record<string, string>; requestId?: string; productId?: string }
 interface ApiPage<T> { items: T[]; nextToken: string | null }
 interface ApiServiceOptions { refreshAccessToken?: () => Promise<string | null>; onSessionEnded?: () => Promise<void> | void }
 interface ApiSubmission {
@@ -29,7 +30,7 @@ interface ApiSubmission {
 }
 
 export class SubmissionServiceError extends Error {
-  constructor(message: string, readonly status?: number, readonly code?: string, readonly fieldErrors?: Record<string, string>, readonly requestId?: string) {
+  constructor(message: string, readonly status?: number, readonly code?: string, readonly fieldErrors?: Record<string, string>, readonly requestId?: string, readonly productId?: string) {
     super(requestId ? `${message} (Reference: ${requestId})` : message)
     this.name = "SubmissionServiceError"
   }
@@ -50,6 +51,15 @@ function readSubmissions(): PriceSubmission[] {
 }
 
 function writeSubmissions(submissions: PriceSubmission[]) { localStorage.setItem(STORAGE_KEY, JSON.stringify(submissions)) }
+const REQUESTS_KEY = "trolleysaver.local.product-requests.v1"
+function readRequests(): ProductRequest[] {
+  try { return JSON.parse(localStorage.getItem(REQUESTS_KEY) ?? "[]") as ProductRequest[] } catch { return [] }
+}
+function writeRequests(items: ProductRequest[]) { localStorage.setItem(REQUESTS_KEY, JSON.stringify(items)) }
+function requireAdmin(actor: SubmissionActor) {
+  if (actor.role !== "admin") throw new Error("Administrator permission is required.")
+}
+
 function pause(milliseconds: number) { return new Promise((resolve) => setTimeout(resolve, milliseconds)) }
 
 function singaporeDate(value: string) {
@@ -92,11 +102,53 @@ function mapSubmission(record: ApiSubmission): PriceSubmission {
 
 export class LocalSubmissionService implements SubmissionService {
   readonly mode = "local" as const
-  async listProducts() { return localProducts }
+  private readonly pictures = new Map<string, string>()
+  async listProducts() {
+    const approved = readRequests().filter((item) => item.status === "approved")
+    return [...localProducts, ...approved.map((item) => ({ ...item, id: item.productId! }))]
+  }
   async listRetailers() { return localRetailers }
 
-  async requestImageUpload(file: File, accessToken: string): Promise<UploadTarget> {
+  async listFacets() { return { categories: [...new Set(localProducts.map((p) => p.category).filter((v): v is string => Boolean(v)))], dietary: ["halal", "vegetarian"] } }
+  async requestProductImageUpload(file: File, purpose: "product-image" | "evidence", token: string) {
+    return this.requestImageUpload(file, purpose, "", token)
+  }
+  async createProductRequest(input: CreateProductRequestInput, userId: string, token: string) {
+    requireToken(token)
+    const fields = productFieldsSchema.parse(input)
+    contributionSchema.parse({ productId: "new", storeId: input.retailerId, price: input.priceCents / 100, observedDate: input.observedAt })
+    if (!input.productImageKey) throw new Error("Upload a picture of the product.")
+    const item: ProductRequest = { ...input, ...fields, id: crypto.randomUUID(), userId, status: "pending", submittedAt: new Date().toISOString(), productImageUrl: this.pictures.get(input.productImageKey), retailerName: localRetailers.find((r) => r.id === input.retailerId)?.name }
+    writeRequests([item, ...readRequests()]); return item
+  }
+  async listMyProductRequests(userId: string, token: string) { requireToken(token); return readRequests().filter((r) => r.userId === userId) }
+  async deleteProductRequest(id: string, actor: SubmissionActor, token: string) {
+    requireToken(token)
+    const items = readRequests()
+    const item = items.find((r) => r.id === id && r.userId === actor.id)
+    if (!item) throw new SubmissionServiceError("Product request not found.", 404, "NOT_FOUND")
+    if (item.status !== "pending") throw new SubmissionServiceError("Only pending requests can be deleted.", 409, "ALREADY_MODERATED")
+    writeRequests(items.filter((r) => r.id !== id))
+  }
+  async listProductRequests(status: ProductRequestStatus, actor: SubmissionActor, token: string) {
+    requireToken(token); requireAdmin(actor)
+    return readRequests().filter((r) => r.status === status).map((r) => ({ ...r, suggestedMinCents: Math.max(1, Math.floor(r.priceCents / 2)), suggestedMaxCents: Math.min(100000, Math.ceil(r.priceCents * 1.5)) }))
+  }
+  async moderateProductRequest(id: string, decision: "approved" | "rejected", reason: string | undefined, changes: ProductCorrections | undefined, actor: SubmissionActor, token: string) {
+    requireToken(token); requireAdmin(actor)
+    if (decision === "rejected" && (!reason?.trim() || reason.trim().length > 500)) throw new Error("Enter a reason of 1–500 characters.")
+    const items = readRequests(); const item = items.find((r) => r.id === id)
+    if (!item) throw new Error("Product request not found.")
+    if (item.status !== "pending") throw new SubmissionServiceError("Already decided. Refresh the queue.", 409, "ALREADY_MODERATED")
+    const corrected = decision === "approved" ? productCorrectionsSchema.parse({ ...item, minCents: Math.max(1, Math.floor(item.priceCents / 2)), maxCents: Math.min(100000, Math.ceil(item.priceCents * 1.5)), searchTerms: [], ...changes }) : {}
+    const updated = { ...item, ...corrected, status: decision, productId: decision === "approved" ? crypto.randomUUID() : undefined, rejectionReason: decision === "rejected" ? reason?.trim() : undefined, reviewedAt: new Date().toISOString(), reviewedBy: actor.id }
+    writeRequests(items.map((r) => r.id === id ? updated : r)); return updated
+  }
+
+  async requestImageUpload(file: File, _productId: string, _retailerId: string, accessToken: string): Promise<UploadTarget> {
     requireToken(accessToken)
+    const invalid = validateImage(file)
+    if (invalid) throw new Error(invalid)
     await pause(120)
     const photoKey = `local-evidence/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`
     return { uploadUrl: `browser-object-url://${photoKey}`, fields: {}, photoKey, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() }
@@ -105,18 +157,28 @@ export class LocalSubmissionService implements SubmissionService {
   async uploadImage(target: UploadTarget, file: File, onProgress?: (percent: number) => void): Promise<SubmissionPhoto> {
     onProgress?.(15); await pause(120); onProgress?.(65); await pause(120)
     const previewUrl = URL.createObjectURL(file)
+    this.pictures.set(target.photoKey, previewUrl)
     onProgress?.(100)
     return { fileName: file.name, contentType: file.type as SubmissionPhoto["contentType"], sizeBytes: file.size, photoKey: target.photoKey, previewUrl, storage: "browser-object-url" }
   }
 
   async createSubmission(input: CreateSubmissionInput, accessToken: string): Promise<PriceSubmission> {
     requireToken(accessToken); await pause(140)
-    const product = localProducts.find((item) => item.id === input.productId)
+    const product = (await this.listProducts()).find((item) => item.id === input.productId)
     const cents = Math.round(input.price * 100)
     const outOfRange = product && ((product.minCents !== undefined && cents < product.minCents) || (product.maxCents !== undefined && cents > product.maxCents))
-    const submission: PriceSubmission = { ...input, id: crypto.randomUUID(), status: outOfRange ? "flagged" : "accepted", submittedAt: new Date().toISOString() }
+    const submission: PriceSubmission = { ...input, id: crypto.randomUUID(), productId: input.productId, status: outOfRange ? "flagged" : "accepted", submittedAt: new Date().toISOString() }
     writeSubmissions([submission, ...readSubmissions()])
     return submission
+  }
+
+  async deleteSubmission(id: string, actor: SubmissionActor, accessToken: string) {
+    requireToken(accessToken)
+    const submissions = readSubmissions()
+    const item = submissions.find((entry) => entry.id === id && entry.submitterId === actor.id)
+    if (!item) throw new SubmissionServiceError("This submission could not be found.", 404, "NOT_FOUND")
+    if (item.status !== "flagged") throw new SubmissionServiceError("Only pending submissions can be deleted.", 409, "ALREADY_MODERATED")
+    writeSubmissions(submissions.filter((entry) => entry.id !== id))
   }
 
   async listMySubmissions(userId: string, accessToken: string) { requireToken(accessToken); return readSubmissions().filter((item) => item.submitterId === userId) }
@@ -155,7 +217,7 @@ export class ApiSubmissionService implements SubmissionService {
     try { body = await response.json() as ApiErrorBody } catch { /* Gateway and S3 failures may not be JSON. */ }
     const code = body.code ?? (response.status === 401 ? "SESSION_ENDED" : `HTTP_${response.status}`)
     const message = response.status === 401 ? "Your session has ended. Sign in again and retry." : body.message ?? (response.status >= 500 ? "The service could not complete the request. Please retry." : "The request could not be completed.")
-    return new SubmissionServiceError(message, response.status, code, body.fieldErrors, body.requestId)
+    return new SubmissionServiceError(message, response.status, code, body.fieldErrors, body.requestId, body.productId)
   }
 
   private async request<T>(path: string, init: RequestInit = {}, token?: string, mayRetry = true): Promise<T> {
@@ -173,15 +235,39 @@ export class ApiSubmissionService implements SubmissionService {
       if (response.status === 401) await this.options.onSessionEnded?.()
       throw await this.parseError(response)
     }
-    return await response.json() as T
+    return response.status === 204 ? undefined as T : await response.json() as T
   }
 
   async listProducts() { return (await this.request<{ items: CatalogProduct[] }>("/products")).items }
   async listRetailers() { return (await this.request<{ items: CatalogRetailer[] }>("/retailers")).items }
 
-  async requestImageUpload(file: File, accessToken: string): Promise<UploadTarget> {
+  async listFacets() { return (await this.request<{ facets: { categories: string[]; dietary: string[] } }>("/products/search")).facets }
+  async requestProductImageUpload(file: File, purpose: "product-image" | "evidence", token: string): Promise<UploadTarget> {
+    requireToken(token)
+    const target = await this.request<UploadTarget & { productImageKey?: string }>("/product-requests/image-upload-url", { method: "POST", body: JSON.stringify({ purpose, contentType: file.type, sizeBytes: file.size }) }, token)
+    return { ...target, photoKey: target.productImageKey ?? target.photoKey }
+  }
+  async createProductRequest(input: CreateProductRequestInput, _userId: string, token: string) {
+    requireToken(token)
+    const record = await this.request<ProductRequest>("/product-requests", { method: "POST", body: JSON.stringify(input) }, token)
+    return { ...record, photoUrl: undefined }
+  }
+  async listMyProductRequests(_userId: string, token: string) {
+    return (await this.listAll<ProductRequest>("/product-requests/mine", token)).map((record) => ({ ...record, photoUrl: undefined }))
+  }
+  async deleteProductRequest(id: string, _actor: SubmissionActor, token: string) {
+    requireToken(token)
+    await this.request<void>(`/product-requests/${encodeURIComponent(id)}`, { method: "DELETE" }, token)
+  }
+  async listProductRequests(status: ProductRequestStatus, _actor: SubmissionActor, token: string) { return this.listAll<ProductRequest>(`/admin/product-requests?status=${status}`, token) }
+  async moderateProductRequest(id: string, decision: "approved" | "rejected", reason: string | undefined, changes: ProductCorrections | undefined, _actor: SubmissionActor, token: string) {
+    requireToken(token)
+    return this.request<ProductRequest>(`/admin/product-requests/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(decision === "approved" ? { decision, changes } : { decision, reason: reason?.trim() }) }, token)
+  }
+
+  async requestImageUpload(file: File, productId: string, retailerId: string, accessToken: string): Promise<UploadTarget> {
     requireToken(accessToken)
-    return this.request("/price-submissions/image-upload-url", { method: "POST", body: JSON.stringify({ contentType: file.type, sizeBytes: file.size }) }, accessToken)
+    return this.request("/price-submissions/image-upload-url", { method: "POST", body: JSON.stringify({ productId, retailerId, contentType: file.type, sizeBytes: file.size }) }, accessToken)
   }
 
   async uploadImage(target: UploadTarget, file: File, onProgress?: (percent: number) => void): Promise<SubmissionPhoto> {
@@ -198,30 +284,36 @@ export class ApiSubmissionService implements SubmissionService {
       xhr.send(form)
     })
     onProgress?.(100)
-    return { fileName: file.name, contentType: file.type as SubmissionPhoto["contentType"], sizeBytes: file.size, photoKey: target.photoKey, previewUrl: URL.createObjectURL(file), storage: "private-s3" }
+    return { fileName: file.name, contentType: file.type as SubmissionPhoto["contentType"], sizeBytes: file.size, photoKey: target.photoKey, storage: "private-s3" }
   }
 
   async createSubmission(input: CreateSubmissionInput, accessToken: string) {
     requireToken(accessToken)
     const body = { productId: input.productId, retailerId: input.storeId, priceCents: Math.round(input.price * 100), observedAt: input.observedDate, ...(input.photo?.photoKey ? { photoKey: input.photo.photoKey } : {}) }
-    return mapSubmission(await this.request<ApiSubmission>("/price-submissions", { method: "POST", body: JSON.stringify(body) }, accessToken))
+    const record = await this.request<ApiSubmission>("/price-submissions", { method: "POST", body: JSON.stringify(body) }, accessToken)
+    return mapSubmission({ ...record, photoUrl: undefined })
   }
 
-  private async listAll(path: string, accessToken: string) {
+  private async listAll<T>(path: string, accessToken: string) {
     requireToken(accessToken)
-    const records: ApiSubmission[] = []
+    const records: T[] = []
     let nextToken: string | null = null
     do {
       const separator = path.includes("?") ? "&" : "?"
       const pagePath = nextToken ? `${path}${separator}nextToken=${encodeURIComponent(nextToken)}` : path
-      const page: ApiPage<ApiSubmission> = await this.request(pagePath, {}, accessToken)
+      const page: ApiPage<T> = await this.request(pagePath, {}, accessToken)
       records.push(...page.items); nextToken = page.nextToken
     } while (nextToken)
-    return records.map(mapSubmission)
+    return records
   }
 
-  async listMySubmissions(_userId: string, accessToken: string) { return this.listAll("/price-submissions/mine", accessToken) }
-  async listPendingSubmissions(_actor: SubmissionActor, accessToken: string) { return this.listAll("/admin/price-submissions?status=flagged", accessToken) }
+  async deleteSubmission(_id: string, _actor: SubmissionActor, accessToken: string) {
+    requireToken(accessToken)
+    throw new SubmissionServiceError("Withdrawal is not supported by the backend. Contact the team for removal.", undefined, "UNSUPPORTED")
+  }
+
+  async listMySubmissions(_userId: string, accessToken: string) { return (await this.listAll<ApiSubmission>("/price-submissions/mine", accessToken)).map((record) => mapSubmission({ ...record, photoUrl: undefined })) }
+  async listPendingSubmissions(_actor: SubmissionActor, accessToken: string) { return (await this.listAll<ApiSubmission>("/admin/price-submissions?status=flagged", accessToken)).map(mapSubmission) }
   async moderateSubmission(id: string, decision: "accepted" | "rejected", reason: string | undefined, _actor: SubmissionActor, accessToken: string) {
     requireToken(accessToken)
     const body = { decision, ...(decision === "rejected" ? { reason: reason?.trim() } : {}) }
