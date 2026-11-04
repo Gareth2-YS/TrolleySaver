@@ -79,9 +79,6 @@ export function LoginPage() {
           <FormAlert message={error} />
           <FormField id="email" label="Email address" type="email" autoComplete="email" placeholder="you@example.com" registration={register("email")} error={errors.email} />
           <PasswordField id="password" label="Password" registration={register("password")} error={errors.password} />
-          <div className="flex items-center gap-3 text-sm">
-            <label className="flex items-center gap-2 text-muted-foreground"><input type="checkbox" className="size-4 rounded border-border accent-primary" />Remember me</label>
-          </div>
           <Button className="h-12 w-full text-base" type="submit" disabled={isSubmitting}>{isSubmitting && <LoaderCircle className="size-4 animate-spin" />}{role === "admin" ? "Log in to review" : "Log in & start sharing"}<ArrowRight className="size-4" /></Button>
           <p className="pt-2 text-center text-sm text-muted-foreground">New here? <Link to="/register" className="font-semibold text-primary underline-offset-4 hover:underline">Join the community</Link></p>
         </form>

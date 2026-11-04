@@ -33,6 +33,7 @@ erDiagram
         string imageKey "optional - product-images/<id>.png (products from a request)"
         string createdFromRequest "optional - PRODUCT_REQUEST.requestId"
         string createdAt "optional - when an admin published it"
+        string priceUpdatedAt "optional - UTC time the nightly price job last recomputed any of its store prices"
     }
 
     RETAILER {
@@ -72,7 +73,7 @@ erDiagram
         number packCount "1"
         boolean hcs "false"
         list dietary "vegan - may be empty"
-        string duplicateKey "name|brand|packQty|packUnit, normalised"
+        string duplicateKey "name|brand|packQty|packUnit|packCount, normalised"
         string retailerId "where the first price was seen"
         number priceCents "545"
         string observedAt "2026-10-28T16:00:00.000Z"
@@ -193,6 +194,7 @@ flowchart LR
 | **No submissions that day** | The row isn't touched, so the pair keeps its last average and its `priceDate`. |
 | **Stale** | The basket ignores a row whose `priceDate` is more than 30 days old (`PRICE_MAX_AGE_DAYS`), and shows the product as unpriced at that store. |
 | **When** | 00:05 SGT daily (EventBridge Scheduler). A price submitted today reaches the basket after tonight's run. The job can also be run for one date, or to backfill the last N days. |
+| **Product timestamp** | Each product whose price changed at any store gets `priceUpdatedAt` set to the run's `computedAt` (UTC). It isn't touched when nothing new came in, and a deleted product is never recreated. `GET /products` returns it, as `null` for a product never priced. A one-off `syncProductTimestamps` run fills it in from the newest `computedAt` in `retailer-price`. |
 
 The table is small (at most products × stores rows, 72 today), so the basket reads it whole on each request.
 
@@ -219,7 +221,7 @@ stateDiagram-v2
 - **Rejection** keeps the request with its reason and deletes the pending picture.
 - **Deletion:** while a request is still pending, its contributor can delete it. The row is removed, along with its pending picture and evidence photo. Approved and rejected requests can't be deleted. A deleted request no longer counts toward the daily limit.
 - **Duplicates are refused:**
-  - a request for a product already in `product`, matched on normalised name, brand and pack size (`duplicateKey`)
+  - a request for a product already in `product`, matched on normalised name, brand, pack size and units per pack (`duplicateKey`; a missing `packCount` counts as 1, so 6 × 1 L is not a duplicate of 1 L)
   - a request matching one that is already pending
   - an approval if the product appeared in the meantime
 - **Limit:** 10 product requests per user per 24 hours, counted with `ByUser`.

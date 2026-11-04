@@ -88,7 +88,7 @@ function PhotoView({ submission, large = false, onExpired }: { submission: Price
       </figcaption>
       <img
       src={submission.photo.previewUrl}
-      alt={`$Price evidence for ${submission.productName}`}
+      alt={`Price evidence for ${submission.productName}`}
       className={cn("rounded-xl border", large ? "max-h-96 w-full bg-secondary/40 object-contain" : "size-20 object-cover")}
       onError={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }}
       />
@@ -420,7 +420,14 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
                     onChange={(event) => {
                       const category = event.target.value
                       setProductCategory(category)
-                      setValue("productId", "")
+                      // Keep the chosen product if it belongs to the new type; otherwise clear the
+                      // selection and the box together, so the box never shows an unselected product.
+                      const selected = products.find((product) => product.id === selectedProductId)
+                      const stillFits = selected && (!category || selected.category?.trim().toLocaleLowerCase() === category.trim().toLocaleLowerCase())
+                      if (!stillFits) {
+                        setValue("productId", "")
+                        setProductSearch("")
+                      }
                       setProductListOpen(true)
                       setActiveProductIndex(-1)
                     }}
@@ -740,11 +747,18 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
   )
 }
 
-export function ContributePage({ serviceOverride }: { serviceOverride?: SubmissionService }) {
+export const SUBMISSIONS_NOT_CONFIGURED = "Price submissions are not configured. Set VITE_API_BASE_URL in frontend/.env.local, or set VITE_PRICE_SUBMISSION_MODE=local."
+
+export function ContributePage({ serviceOverride, createService = createSubmissionService }: { serviceOverride?: SubmissionService; createService?: typeof createSubmissionService }) {
   const { user, getAccessToken, signOut } = useAuth()
-  const service = useMemo(() => serviceOverride ?? createSubmissionService({
-    refreshAccessToken: () => getAccessToken(true),
-    onSessionEnded: signOut,
-  }), [getAccessToken, serviceOverride, signOut])
+  // A missing API setting throws while creating the service; show it instead of a blank page.
+  const { service, configError } = useMemo(() => {
+    try {
+      return { service: serviceOverride ?? createService({ refreshAccessToken: () => getAccessToken(true), onSessionEnded: signOut }), configError: null }
+    } catch {
+      return { service: null, configError: SUBMISSIONS_NOT_CONFIGURED }
+    }
+  }, [createService, getAccessToken, serviceOverride, signOut])
+  if (!service) return <AppShell><main className="mx-auto max-w-3xl px-4 py-10"><FormAlert message={configError} /></main></AppShell>
   return <AppShell>{user?.role === "admin" ? <AdminWorkspace service={service} /> : <ContributorWorkspace service={service} />}</AppShell>
 }

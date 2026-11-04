@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { ProductImage } from "../components/product-image"
-import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage } from "../contributions/schema"
+import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage, validationMessages } from "../contributions/schema"
 import { SubmissionServiceError } from "../contributions/service"
 import type { CatalogRetailer, ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 
@@ -82,8 +82,8 @@ export function ProductRequestForm({ service, onDone, onExisting }: { service: S
     event.preventDefault(); setError(null); setExistingId(undefined)
     const fields = productFieldsSchema.safeParse(product)
     const contribution = contributionSchema.safeParse({ productId: "new", storeId, price, observedDate: date })
-    if (!fields.success) { setError(fields.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")); return }
-    if (!contribution.success) { setError(contribution.error.issues.map((i) => i.message).join("; ")); return }
+    if (!fields.success) { setError(validationMessages(fields.error.issues)); return }
+    if (!contribution.success) { setError(validationMessages(contribution.error.issues)); return }
     if (!picture) { setError("A product picture is required for every new product."); return }
     setBusy(true)
     try {
@@ -188,7 +188,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
     if (decision === "approved") {
       if (!checked) return
       const result = productCorrectionsSchema.safeParse({ ...fields, minCents: min, maxCents: max, searchTerms: terms.trim() ? terms.split(",").map((s) => s.trim()) : [] })
-      if (!result.success) { setError(result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")); return }
+      if (!result.success) { setError(validationMessages(result.error.issues)); return }
       changes = result.data
     } else if (!reason.trim() || reason.trim().length > 500) { setError("Enter a reason of 1–500 characters before rejecting."); return }
     setBusy(true)

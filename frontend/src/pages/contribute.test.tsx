@@ -76,6 +76,34 @@ async function completeRequiredFields(user: ReturnType<typeof userEvent.setup>) 
 }
 
 describe("price and image contribution workflow", () => {
+  it("keeps the chosen product when the type filter still fits, and clears the box with the choice when it doesn't", async () => {
+    const user = userEvent.setup()
+    const service = submissionService({ listProducts: vi.fn().mockResolvedValue([
+      { id: "bread", name: "Gardenia bread", brand: "Gardenia", category: "bread" },
+      { id: "milk", name: "Meiji milk", brand: "Meiji", category: "milk" },
+    ]) })
+    renderContribution("user", service)
+    const search = await screen.findByRole("combobox", { name: "Product · search by name or brand" })
+    await waitFor(() => expect(search).toBeEnabled())
+    await user.click(search)
+    await user.click(await screen.findByRole("option", { name: /Meiji milk/ }))
+    await user.selectOptions(screen.getByLabelText("Optional type filter"), "milk")
+    expect(search).toHaveValue("Meiji milk")
+    await user.selectOptions(screen.getByLabelText("Optional type filter"), "")
+    expect(search).toHaveValue("Meiji milk")
+    await user.selectOptions(screen.getByLabelText("Optional type filter"), "bread")
+    expect(search).toHaveValue("")
+    await user.click(screen.getByRole("button", { name: "Submit price" }))
+    expect(await screen.findByText("Choose a product")).toBeInTheDocument()
+    expect(service.createSubmission).not.toHaveBeenCalled()
+  })
+
+  it("shows a configuration message instead of a blank page when the API isn't configured", async () => {
+    const createService = () => { throw new Error("API mode requires VITE_API_BASE_URL.") }
+    render(<MemoryRouter initialEntries={["/contribute"]}><AuthProvider serviceOverride={authService("user")}><ContributePage createService={createService} /></AuthProvider></MemoryRouter>)
+    expect(await screen.findByRole("alert")).toHaveTextContent("Price submissions are not configured. Set VITE_API_BASE_URL in frontend/.env.local, or set VITE_PRICE_SUBMISSION_MODE=local.")
+  })
+
   it("keeps product search, category filtering and Clear alongside new-product uploads", async () => {
     const user = userEvent.setup()
     const service = submissionService({ listProducts: vi.fn().mockResolvedValue([

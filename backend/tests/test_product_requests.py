@@ -200,7 +200,32 @@ def test_existing_catalog_product_is_refused_with_its_id(aws):
     assert status == 409 and error["code"] == "PRODUCT_EXISTS" and error["productId"] == MILK_ID
 
 
+def test_multipack_of_a_catalog_product_is_not_a_duplicate(aws):
+    # The catalog milk has no packCount, so it counts as a single pack; a 6-pack is a different product.
+    put_photo(IMAGE_KEY)
+    status, record = create(valid_request(name="Magnolia Fresh Milk", brand="Magnolia", packQty=946, packUnit="ml", packCount=6))
+    assert status == 201 and record["status"] == "pending"
+
+
 def test_product_already_requested_by_someone_else(aws, pending):
+    other_key = f"product-images/pending/{OTHER_USER_ID}/oat.png"
+    put_photo(other_key)
+    status, error = create(valid_request(productImageKey=other_key), user_id=OTHER_USER_ID)
+    assert status == 409 and error["code"] == "PRODUCT_ALREADY_REQUESTED"
+
+
+def test_multipack_of_a_pending_request_is_not_a_duplicate(aws, pending):
+    other_key = f"product-images/pending/{OTHER_USER_ID}/oat.png"
+    put_photo(other_key)
+    status, record = create(valid_request(productImageKey=other_key, packCount=6), user_id=OTHER_USER_ID)
+    assert status == 201 and record["packCount"] == 6
+
+
+def test_pending_request_saved_with_an_old_style_key_still_counts_as_a_duplicate(aws, pending):
+    # Requests saved before packCount joined the key have the old key stored; the check uses their fields.
+    table = aws.Table("unit-product-request")
+    table.update_item(Key={"requestId": pending["id"]}, UpdateExpression="SET duplicateKey = :old",
+                      ExpressionAttributeValues={":old": "oatside barista oat milk|oatside|1|l"})
     other_key = f"product-images/pending/{OTHER_USER_ID}/oat.png"
     put_photo(other_key)
     status, error = create(valid_request(productImageKey=other_key), user_id=OTHER_USER_ID)

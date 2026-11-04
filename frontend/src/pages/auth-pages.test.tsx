@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AuthProvider } from "../auth/auth-context"
+import { PublicOnlyRoute } from "../auth/route-guards"
 import type { AuthService } from "../auth/types"
 import { LoginPage } from "./login"
 import { RegisterPage } from "./register"
@@ -24,6 +25,20 @@ function renderAt(path: string, authService: AuthService) {
 }
 
 describe("authentication pages", () => {
+  it("explains a sign-in setup problem instead of loading forever", async () => {
+    const broken = { ...service(), getCurrentUser: vi.fn().mockRejectedValue(new Error("Cognito mode requires the AWS region, User Pool ID, and App Client ID environment variables.")) }
+    render(<MemoryRouter initialEntries={["/login"]}><AuthProvider serviceOverride={broken}><Routes><Route element={<PublicOnlyRoute />}><Route path="/login" element={<LoginPage />} /></Route></Routes></AuthProvider></MemoryRouter>)
+    expect(await screen.findByText("Sign-in isn't available")).toBeInTheDocument()
+    expect(screen.getByText(/Cognito mode requires the AWS region/)).toBeInTheDocument()
+    expect(screen.queryByText("Loading your session…")).not.toBeInTheDocument()
+  })
+
+  it("has no Remember me option, which never did anything", async () => {
+    renderAt("/login", service())
+    await screen.findByRole("heading", { name: "Welcome back" })
+    expect(screen.queryByText("Remember me")).not.toBeInTheDocument()
+  })
+
   it("never offers administrator registration", async () => {
     renderAt("/register", service())
     expect(await screen.findByRole("heading", { name: "Create your account" })).toBeInTheDocument()

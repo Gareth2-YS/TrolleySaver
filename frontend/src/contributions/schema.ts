@@ -6,21 +6,35 @@ export const MAX_PRICE = 1000
 export const MAX_OBSERVED_AGE_DAYS = 30
 
 export const packUnits = ["ml", "L", "g", "kg", "pcs", "rolls"] as const
+const between = (label: string, low: number, high: number) => `${label} must be ${low}–${high} characters`
+const wholeCents = (label: string) => `${label} must be a whole number of cents from 1 to 100000`
 export const productFieldsSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  brand: z.string().trim().min(1).max(60),
-  category: z.string().trim().min(1).max(40).transform((value) => value.toLowerCase()),
-  packQty: z.coerce.number().positive().max(100000),
-  packUnit: z.enum(packUnits),
-  packCount: z.coerce.number().int().min(1).max(100),
-  hcs: z.boolean(),
-  dietary: z.array(z.string().trim().min(1).max(30)).max(5),
+  name: z.string().trim().min(2, between("Product name", 2, 120)).max(120, between("Product name", 2, 120)),
+  brand: z.string().trim().min(1, between("Brand", 1, 60)).max(60, between("Brand", 1, 60)),
+  category: z.string().trim().min(1, between("Category", 1, 40)).max(40, between("Category", 1, 40)).transform((value) => value.toLowerCase()),
+  packQty: z.coerce.number({ message: "Enter the pack quantity as a number" })
+    .positive("Pack quantity must be more than 0 and at most 100000")
+    .max(100000, "Pack quantity must be more than 0 and at most 100000"),
+  packUnit: z.enum(packUnits, { message: "Choose a pack unit" }),
+  packCount: z.coerce.number({ message: "Enter the units per pack as a number" })
+    .int("Units per pack must be a whole number from 1 to 100")
+    .min(1, "Units per pack must be a whole number from 1 to 100")
+    .max(100, "Units per pack must be a whole number from 1 to 100"),
+  hcs: z.boolean({ message: "Choose whether it has the Healthier Choice Symbol" }),
+  dietary: z.array(z.string().trim().min(1, "Each dietary tag must be 1–30 characters").max(30, "Each dietary tag must be 1–30 characters"))
+    .max(5, "Choose up to five dietary tags"),
 })
 export const productCorrectionsSchema = productFieldsSchema.extend({
-  minCents: z.coerce.number().int().min(1).max(100000),
-  maxCents: z.coerce.number().int().min(1).max(100000),
-  searchTerms: z.array(z.string().trim().min(1).max(30)).max(10),
-}).refine((value) => value.minCents <= value.maxCents, { path: ["maxCents"], message: "Maximum must not be less than minimum" })
+  minCents: z.coerce.number({ message: "Enter the minimum cents as a number" }).int(wholeCents("Minimum cents")).min(1, wholeCents("Minimum cents")).max(100000, wholeCents("Minimum cents")),
+  maxCents: z.coerce.number({ message: "Enter the maximum cents as a number" }).int(wholeCents("Maximum cents")).min(1, wholeCents("Maximum cents")).max(100000, wholeCents("Maximum cents")),
+  searchTerms: z.array(z.string().trim().min(1, "Each search term must be 1–30 characters (check for a stray comma)").max(30, "Each search term must be 1–30 characters"))
+    .max(10, "Use up to 10 search terms"),
+}).refine((value) => value.minCents <= value.maxCents, { path: ["maxCents"], message: "Maximum cents must not be less than minimum cents" })
+
+/** A failed schema's messages, for one alert: each message once, in order. */
+export function validationMessages(issues: readonly { message: string }[]) {
+  return [...new Set(issues.map((issue) => issue.message))].join("; ")
+}
 
 export function singaporeDateString(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {

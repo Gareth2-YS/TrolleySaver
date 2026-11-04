@@ -17,7 +17,7 @@ Notes passed between team members when one person's work becomes someone else's 
 | 29 Oct 2026 | Price & image upload (changes) | backend → frontend | [2026-10-29-price-upload-backend-to-frontend.md](2026-10-29-price-upload-backend-to-frontend.md) | Frontend integrated locally; deployed acceptance pending |
 | 29 Oct 2026 | New product requests | backend → frontend | [2026-10-29-new-product-backend-to-frontend.md](2026-10-29-new-product-backend-to-frontend.md) | Frontend integrated locally; deployed acceptance and policy follow-ups pending |
 | 30 Oct 2026 | Deleting a pending product request | backend → frontend | [2026-10-30-new-product-delete-backend-to-frontend.md](2026-10-30-new-product-delete-backend-to-frontend.md) | Frontend integrated locally; dev acceptance pending |
-
 | 3 Nov 2026 | Backend integration, product requests and auth spacing | frontend → backend | [2026-11-03-frontend-integration-frontend-to-backend.md](2026-11-03-frontend-integration-frontend-to-backend.md) | Implemented locally; remaining policy/security/rollout actions documented |
+| 4 Nov 2026 | When a product's prices were last updated (`priceUpdatedAt`) | backend → frontend | [2026-11-04-price-updated-backend-to-frontend.md](2026-11-04-price-updated-backend-to-frontend.md) | Search & filter shows it; Smart Basket optional |
 
 The API contract that the backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).

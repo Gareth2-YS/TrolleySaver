@@ -162,13 +162,17 @@ def suggested_range(price_cents):
 
 
 def duplicate_key(fields):
-    """Same product = same name, brand and pack size, ignoring case and spacing."""
+    """Same product = same name, brand and pack size (quantity, unit and units per pack), ignoring case
+    and spacing, so a 6 x 1 L pack is a different product from a single 1 L. Products without a
+    packCount (the oldest catalog entries) count as single packs."""
     qty = Decimal(str(fields["packQty"])).normalize()
+    count = int(fields.get("packCount") or 1)
     return "|".join([
         " ".join(str(fields["name"]).split()).casefold(),
         " ".join(str(fields["brand"]).split()).casefold(),
         format(qty, "f"),
         str(fields["packUnit"]).casefold(),
+        str(count),
     ])
 
 
