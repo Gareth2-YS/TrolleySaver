@@ -485,6 +485,14 @@ Resources:
             Description: Average yesterday's accepted price submissions per product and retailer
             ScheduleExpression: cron(5 0 * * ? *)
             ScheduleExpressionTimezone: Asia/Singapore
+        # EveryFiveMinutes:
+        #   Type: ScheduleV2
+        #   Properties:
+        #     Name: !Sub trolleysaver-${Env}-five-minute-prices
+        #     Description: Average yesterday's and today's accepted price submissions per product and retailer
+        #     ScheduleExpression: rate(5 minutes)
+        #     # Yesterday then today (today wins), so submissions from the last minutes before midnight still count
+        #     Input: '{"backfillDays": 2}'
 
   UploadUrlFunction:
     Type: AWS::Serverless::Function
