@@ -133,6 +133,15 @@ def test_catalog_routes(aws):
     assert status == 200 and [r["id"] for r in body["items"]] == ["coldstorage", "fairprice", "shengsiong"]
 
 
+def test_catalog_returns_price_updated_at_on_every_product(aws):
+    aws.Table("unit-product").put_item(Item={"id": "p-2", "name": "Bread", "priceUpdatedAt": "2026-11-03T16:05:00.120Z"})
+    status, body = call(catalog.handler, api_event("GET", "/products", user_id=None))
+    by_id = {p["id"]: p for p in body["items"]}
+    assert status == 200
+    assert by_id["p-2"]["priceUpdatedAt"] == "2026-11-03T16:05:00.120Z"
+    assert by_id[MILK_ID]["priceUpdatedAt"] is None  # never priced: present, but null
+
+
 def test_catalog_signs_product_pictures(aws):
     aws.Table("unit-product").put_item(Item={"id": "p-1", "name": "Aardvark Oats", "imageKey": "product-images/p-1.png"})
     status, body = call(catalog.handler, api_event("GET", "/products", user_id=None))

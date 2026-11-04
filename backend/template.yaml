@@ -477,6 +477,11 @@ Resources:
             TableName: !Sub trolleysaver-${Env}-price-submission
         - DynamoDBCrudPolicy:
             TableName: !Sub trolleysaver-${Env}-retailer-price
+        # Only to set each product's priceUpdatedAt after its prices change.
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/trolleysaver-${Env}-product
       Events:
         Nightly:
           Type: ScheduleV2

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ApiSubmissionService, LocalSubmissionService } from "./service"
-import { productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage } from "./schema"
+import { productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage, validationMessages } from "./schema"
 import type { CreateProductRequestInput } from "./types"
 
 export const proposal: CreateProductRequestInput = { name: "Oat Milk", brand: "Oats", category: "milk", packQty: 1, packUnit: "L", packCount: 6, hcs: true, dietary: ["halal"], retailerId: "fairprice", priceCents: 350, observedAt: singaporeDateString(), productImageKey: "product-images/pending/u/p.png", photoKey: "price-evidence/u/new-product/e.png" }
@@ -140,5 +140,21 @@ describe("backend product validation boundaries", () => {
     expect(productCorrectionsSchema.safeParse({ ...proposal, minCents: 500, maxCents: 100, searchTerms: [] }).success).toBe(false)
     expect(productCorrectionsSchema.safeParse({ ...proposal, minCents: 1, maxCents: 100000, searchTerms: Array(11).fill("oat") }).success).toBe(false)
     expect(validateImage(new File([], "empty.png", { type: "image/png" }))).toBe("Choose a non-empty image")
+  })
+  it("explains each invalid product field in plain words, without field paths or library defaults", () => {
+    const fields = productFieldsSchema.safeParse({ ...proposal, name: "x", packQty: "", packCount: 1.5, packUnit: "oz", dietary: Array(6).fill("vegan") })
+    expect(fields.success).toBe(false)
+    const text = validationMessages(fields.error!.issues)
+    expect(text).toContain("Product name must be 2–120 characters")
+    expect(text).toContain("Pack quantity must be more than 0 and at most 100000")
+    expect(text).toContain("Units per pack must be a whole number from 1 to 100")
+    expect(text).toContain("Choose a pack unit")
+    expect(text).toContain("Choose up to five dietary tags")
+    expect(text).not.toMatch(/packQty:|packCount:|Too small|Too big|Invalid/)
+    expect(validationMessages(productFieldsSchema.safeParse({ ...proposal, packQty: "abc" }).error!.issues)).toBe("Enter the pack quantity as a number")
+    expect(validationMessages(productCorrectionsSchema.safeParse({ ...proposal, minCents: 500, maxCents: 100, searchTerms: [] }).error!.issues))
+      .toBe("Maximum cents must not be less than minimum cents")
+    expect(validationMessages(productCorrectionsSchema.safeParse({ ...proposal, minCents: 1, maxCents: 100, searchTerms: ["oat", "", ""] }).error!.issues))
+      .toBe("Each search term must be 1–30 characters (check for a stray comma)")
   })
 })

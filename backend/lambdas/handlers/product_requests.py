@@ -64,7 +64,9 @@ def _check_duplicates(fields):
     kwargs = {"IndexName": "ByStatus", "KeyConditionExpression": Key("status").eq("pending")}
     while True:
         page = db.product_requests().query(**kwargs)
-        if any(item.get("duplicateKey") == key for item in page["Items"]):
+        # Compare against each request's own fields, not its stored duplicateKey, so requests saved
+        # before the key included packCount still match correctly.
+        if any(duplicate_key(item) == key for item in page["Items"]):
             raise ApiError(409, "PRODUCT_ALREADY_REQUESTED", "Someone has already proposed this product. It is waiting for an admin.")
         if "LastEvaluatedKey" not in page:
             return

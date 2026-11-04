@@ -42,6 +42,8 @@ interface SearchProduct {
   searchTerms?: string[]
   prices: Record<string, StorePrice>
   lowestPrice: { retailerId: string; retailerName: string | null; priceCents: number; priceDate: string } | null
+  // When the nightly price job last changed any of its store prices (UTC); missing if never priced
+  priceUpdatedAt?: string | null
 }
 
 interface SearchResult {
@@ -129,6 +131,14 @@ function getCategoryIcon(category?: string) {
   return category ? PRODUCT_CATEGORY_ICONS[normalizeCategory(category)] : undefined
 }
 
+const PRICE_UPDATED_FORMAT = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+
+// Shown in Singapore time whatever the browser's time zone, e.g. "Prices updated 4 Nov, 12:05 am"
+function getPriceUpdatedLabel(value?: string | null) {
+  const date = value ? new Date(value) : null
+  return date && !Number.isNaN(date.getTime()) ? `Prices updated ${PRICE_UPDATED_FORMAT.format(date)}` : null
+}
+
 function getPackDescription(product: SearchProduct) {
   const unitSize = [product.packQty, product.packUnit].filter((value) => value !== undefined).join(" ")
   if (!unitSize) return null
@@ -152,6 +162,7 @@ function ProductCard({
   const packDescription = getPackDescription(product)
   // const lowestPrice = getLowestPrice(product)
   const lowestPrice = product.lowestPrice
+  const priceUpdated = getPriceUpdatedLabel(product.priceUpdatedAt)
   const categoryIcon = getCategoryIcon(product.category)
   const retailerIds = [
     ...Object.keys(RETAILER_NAMES),
@@ -216,6 +227,7 @@ function ProductCard({
             No current price available
           </p>
         )}
+        {priceUpdated && <p className="mt-2 text-xs text-muted-foreground">{priceUpdated}</p>}
 
         <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
           <div className="flex flex-wrap gap-2">
@@ -270,6 +282,7 @@ function ProductCard({
 
           <section aria-labelledby={`product-prices-title-${product.id}`}>
             <h3 id={`product-prices-title-${product.id}`} className="font-semibold">Current retailer prices</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{priceUpdated ?? "No prices yet"}</p>
             <div className="mt-3 divide-y divide-border rounded-lg border border-border">
               {retailerIds.map((retailerId) => {
                 const price = product.prices?.[retailerId]

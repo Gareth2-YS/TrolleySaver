@@ -22,7 +22,7 @@ Serverless backend for **login** (Cognito), **product search**, **community pric
 | `scripts/create_admin.py` | Creates an admin account |
 | `scripts/invoke.py` | Calls any Lambda directly as any user, without Cognito |
 | `scripts/basket_eval.py` | Smart Basket evaluation: checks the backend's totals and savings against figures worked out from the spreadsheet, for the baskets in `scripts/basket_cases.json` |
-| `scripts/smoke_test.py` | 58 end-to-end checks over real HTTP, including the Smart Basket, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
+| `scripts/smoke_test.py` | 59 end-to-end checks over real HTTP, including the Smart Basket, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
 | `tests/` | Unit tests (pytest + moto, no AWS needed) |
 
 ## Setup
@@ -49,7 +49,7 @@ Frontend values from the outputs: `ApiUrl` → `VITE_API_BASE_URL`, `UserPoolId`
   - the sixth table, `trolleysaver-dev-product-request` (proposed products, with `ByStatus` and `ByUser` indexes), on 29 Oct 2026
 
   A new index or table has to be added to dev the same way.
-- **Daily prices.** The `price-aggregator` Lambda refreshes `retailer-price` at 00:05 SGT. After seeding, or to pick up today's submissions straight away, run `.venv\Scripts\python scripts\invoke.py aggregate --set backfillDays=30` ([TESTING.md §8](TESTING.md#daily-prices-run-the-nightly-job-by-hand)).
+- **Daily prices.** The `price-aggregator` Lambda refreshes `retailer-price` at 00:05 SGT. After seeding, or to pick up today's submissions straight away, run `.venv\Scripts\python scripts\invoke.py aggregate --set backfillDays=30` ([TESTING.md §8](TESTING.md#daily-prices-run-the-nightly-job-by-hand)). Each run also sets `priceUpdatedAt` on every product whose price it changed; `GET /products` returns it. Products priced before it existed are filled in by running `invoke.py aggregate --set syncProductTimestamps=true` once per environment.
 - **A new environment** (e.g. staging): copy the `[dev.*]` sections in `samconfig.toml` with a new stack name and `Env=<name> CreateTables=true`, so the stack creates its own tables.
 
 ## Everyday commands
@@ -58,6 +58,7 @@ Run these from the `backend` folder:
 
 | Command | What it does |
 |---|---|
+| `.venv\Scripts\python ..\tests\run_all.py` | Every test suite (backend, frontend, template lint), then a pass/fail table. Add `--aws` for the smoke test and basket evaluation on dev. |
 | `.venv\Scripts\python -m pytest` | Unit tests (no AWS) |
 | `sam validate --lint` | Checks the template |
 | `sam deploy --config-env dev` | Deploys code or infrastructure changes |

@@ -5,6 +5,8 @@ import type { AuthNextStep, AuthRole, AuthService, AuthUser, SignInInput, SignUp
 interface AuthContextValue {
   user: AuthUser | null
   loading: boolean
+  /** Set when sign-in can't start at all, e.g. missing Cognito settings. */
+  error: string | null
   signIn(input: SignInInput, intendedRole: AuthRole): Promise<AuthNextStep & { authenticatedRole?: AuthRole }>
   signUp(input: SignUpInput): Promise<AuthNextStep>
   signOut(): Promise<void>
@@ -17,15 +19,22 @@ export function AuthProvider({ children, serviceOverride }: { children: ReactNod
   const [service, setService] = useState<AuthService | null>(serviceOverride ?? null)
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let current = true
     async function restore() {
-      const resolved = serviceOverride ?? await createAuthService()
-      if (!current) return
-      setService(resolved)
-      setUser(await resolved.getCurrentUser())
-      setLoading(false)
+      try {
+        const resolved = serviceOverride ?? await createAuthService()
+        if (!current) return
+        setService(resolved)
+        setUser(await resolved.getCurrentUser())
+      } catch (e) {
+        // Without this the guarded pages would show "Loading your session…" forever.
+        if (current) setError(e instanceof Error ? e.message : "Sign-in could not be set up.")
+      } finally {
+        if (current) setLoading(false)
+      }
     }
     void restore()
     return () => { current = false }
@@ -41,6 +50,7 @@ export function AuthProvider({ children, serviceOverride }: { children: ReactNod
   const value = useMemo<AuthContextValue>(() => ({
     user,
     loading,
+    error,
     async signIn(input, intendedRole) {
       if (!service) throw new Error("Authentication is still loading.")
       const next = await service.signIn(input)
@@ -60,7 +70,7 @@ export function AuthProvider({ children, serviceOverride }: { children: ReactNod
     async signUp(input) { if (!service) throw new Error("Authentication is still loading."); return service.signUp(input) },
     async signOut() { if (service) await service.signOut(); setUser(null) },
     async getAccessToken(forceRefresh = false) { return service?.getAccessToken(forceRefresh) ?? null },
-  }), [loading, refreshUser, service, user])
+  }), [error, loading, refreshUser, service, user])
 
   return <AuthContext value={value}>{children}</AuthContext>
 }
