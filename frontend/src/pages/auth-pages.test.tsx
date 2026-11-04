@@ -28,7 +28,7 @@ describe("authentication pages", () => {
     renderAt("/register", service())
     expect(await screen.findByRole("heading", { name: "Create your account" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /admin/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create user account" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create my account" })).toBeInTheDocument()
   })
 
   it("does not grant admin access based on the selected login mode", async () => {
@@ -39,7 +39,7 @@ describe("authentication pages", () => {
     await user.click(screen.getByRole("button", { name: /^admin$/i }))
     await user.type(screen.getByRole("textbox", { name: /Email address/i }), "alex@example.com")
     await user.type(screen.getByLabelText("Password", { selector: "input" }), "password")
-    await user.click(screen.getByRole("button", { name: "Log in as admin" }))
+    await user.click(screen.getByRole("button", { name: "Log in to review" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("does not have administrator access")
     expect(authService.signOut).toHaveBeenCalledOnce()
   })
@@ -51,7 +51,7 @@ describe("authentication pages", () => {
     await screen.findByRole("heading", { name: "Welcome back" })
     await user.type(screen.getByRole("textbox", { name: /Email address/i }), "admin@example.com")
     await user.type(screen.getByLabelText("Password", { selector: "input" }), "password")
-    await user.click(screen.getByRole("button", { name: "Log in as user" }))
+    await user.click(screen.getByRole("button", { name: "Log in & start sharing" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("must log in through the Admin tab")
     expect(authService.signOut).toHaveBeenCalledOnce()
   })
