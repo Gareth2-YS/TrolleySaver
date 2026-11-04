@@ -1,3 +1,4 @@
+import { ProductImage } from "../components/product-image"
 import {
   AlertTriangle,
   BadgeCheck,
@@ -100,6 +101,7 @@ function SavingCard({ saving, recommendedName }: { saving: BasketSaving; recomme
 export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketService }) {
   const [service] = useState(() => serviceOverride ?? createBasketService())
   const [products, setProducts] = useState<Product[]>([])
+  const [imageRevision, setImageRevision] = useState(0)
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [items, setItems] = useState<BasketItem[]>(loadBasket)
@@ -117,7 +119,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
       .catch((error) => { if (active) setCatalogError(error instanceof Error ? error.message : "Could not load the product catalog.") })
       .finally(() => { if (active) setCatalogLoading(false) })
     return () => { active = false }
-  }, [service])
+  }, [service, imageRevision])
 
   const catalog = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
   // Saved lines for products no longer in the catalog are dropped once it loads.
@@ -252,7 +254,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                       <li key={item.productId} className="py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold leading-snug">{product.name}</p>
+                            <ProductImage url={product.imageUrl} name={product.name} onExpired={() => setImageRevision((n) => n + 1)} className="mb-2 size-14 rounded-lg object-contain" /><p className="text-sm font-semibold leading-snug">{product.name}</p>
                             <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
                           </div>
                           <span className="shrink-0 text-sm font-semibold tabular-nums">

@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod"
-import { ArrowLeft, ImageUp, LoaderCircle, Search, ShieldCheck, ShoppingBasket, UserRound } from "lucide-react"
+import { ArrowLeft, ArrowRight, ImageUp, LoaderCircle, Search, ShieldCheck, ShoppingBasket, UserRound } from "lucide-react"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { Link, useLocation, useNavigate } from "react-router-dom"
@@ -36,18 +36,36 @@ export function LoginPage() {
   }
 
   return (
-    <AuthShell aside={<aside className="hidden grid-cols-2 gap-4 lg:grid"><div className="glass-panel col-span-2 flex flex-col justify-between p-7"><div><span className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Explore before signing in</span><h2 className="mt-3 text-3xl font-semibold tracking-tight">Save smarter, at your own pace.</h2><p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">Smart Basket and Search stay open to everyone. Sign in only when you are ready to contribute.</p></div><ShoppingBasket className="mt-8 size-10 text-primary" /></div><Link to="/basket" className="glass-panel group p-6 transition-transform hover:-translate-y-1"><ShoppingBasket className="size-6 text-primary" /><strong className="mt-8 block">Smart basket</strong><span className="mt-1 block text-xs text-muted-foreground">Open public page</span></Link><Link to="/search" className="glass-panel group p-6 transition-transform hover:-translate-y-1"><Search className="size-6 text-primary" /><strong className="mt-8 block">Search & filter</strong><span className="mt-1 block text-xs text-muted-foreground">Open public page</span></Link><div className="glass-panel col-span-2 flex items-center gap-3 p-5"><span className="grid size-10 place-items-center rounded-lg bg-accent text-primary"><ImageUp className="size-5" /></span><div><strong className="text-sm">Price contributions</strong><p className="text-xs text-muted-foreground">Available after sign-in</p></div></div></aside>}>
-      <CardHeader className="pb-5 text-center">
-        <Button asChild variant="ghost" size="sm" className="mb-2 w-fit self-start px-0 text-muted-foreground hover:bg-transparent hover:text-foreground"><Link to="/basket"><ArrowLeft className="size-4" />Back to public features</Link></Button>
-        <Tabs value="login" onValueChange={(value) => value === "register" && navigate("/register")} className="mb-5">
+    <AuthShell aside={
+      <aside className="hidden grid-cols-2 gap-4 lg:grid">
+        <div className="glass-panel col-span-2 p-7">
+          <span className="text-sm font-semibold text-primary">A little help with the everyday shop</span>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight">Good finds are better shared.</h2>
+          <p className="mt-4 text-base leading-relaxed text-muted-foreground">Find a better price for your basket, or share one you spotted. Your next small find could make someone else’s shop a little easier.</p>
+          <div className="mt-6 inline-flex items-center gap-2 rounded-xl bg-accent/60 px-4 py-3 text-sm font-medium"><ShoppingBasket className="size-5 text-primary" />Just browsing? You’re welcome here too.</div>
+        </div>
+        <Link to="/basket" className="glass-panel group p-6 transition-transform hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <ShoppingBasket className="size-7 text-primary" /><strong className="mt-5 block text-lg">Build a smarter basket</strong><span className="mt-2 block text-sm leading-relaxed text-muted-foreground">Compare your grocery list across stores.</span><span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">Explore Smart Basket <ArrowRight className="size-4" /></span>
+        </Link>
+        <Link to="/search" className="glass-panel group p-6 transition-transform hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Search className="size-7 text-primary" /><strong className="mt-5 block text-lg">Find your next good buy</strong><span className="mt-2 block text-sm leading-relaxed text-muted-foreground">Look up a product and see its prices.</span><span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">Explore prices <ArrowRight className="size-4" /></span>
+        </Link>
+        <div className="glass-panel col-span-2 flex items-start gap-3 p-5"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent text-primary"><ImageUp className="size-5" /></span><div><strong className="text-base">Spotted a price worth sharing?</strong><p className="mt-1 text-sm leading-relaxed text-muted-foreground">Log in to pass it on to the community.</p></div></div>
+      </aside>
+    }>
+      <CardHeader className="space-y-0 gap-5 pb-8 pt-8 text-center">
+        <Button asChild variant="ghost" size="sm" className="mb-2 w-fit self-start px-0 text-muted-foreground hover:bg-transparent hover:text-foreground"><Link to="/basket"><ArrowLeft className="size-4" />Keep exploring prices</Link></Button>
+        <Tabs value="login" onValueChange={(value) => value === "register" && navigate("/register")} className="mb-8">
           <TabsList><TabsTrigger value="login">Log in</TabsTrigger><TabsTrigger value="register">Register</TabsTrigger></TabsList>
         </Tabs>
-        <CardTitle>Welcome back</CardTitle>
-        <CardDescription>Log in to save baskets and contribute prices.</CardDescription>
+        <div className="space-y-3">
+          <CardTitle className="text-3xl">Welcome back</CardTitle>
+          <CardDescription className="text-base leading-relaxed">Your next good find could help someone save. Log in and share it with the community.</CardDescription>
+        </div>
       </CardHeader>
       <CardContent className="px-6 pb-8 sm:px-8">
         <div className="mb-5 space-y-2">
-          <span className="text-sm font-medium">Sign in as</span>
+          <span className="text-base font-semibold">Choose your space</span>
           <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary p-1" role="group" aria-label="Account type">
             {(["user", "admin"] as const).map((value) => (
               <button key={value} type="button" aria-pressed={role === value} onClick={() => setRole(value)} className={cn("flex h-11 items-center justify-center gap-2 rounded-md text-sm font-medium capitalize text-muted-foreground transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", role === value && "bg-primary text-primary-foreground shadow-sm")}>
@@ -55,7 +73,7 @@ export function LoginPage() {
               </button>
             ))}
           </div>
-          {role === "admin" && <p className="text-xs text-muted-foreground">Administrator access is verified from your account permissions.</p>}
+          {role === "admin" && <p className="rounded-lg bg-accent/50 p-3 text-sm leading-relaxed text-muted-foreground">Here to review community finds? Use your administrator account to keep shared prices trustworthy.</p>}
         </div>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           <FormAlert message={error} />
@@ -64,7 +82,8 @@ export function LoginPage() {
           <div className="flex items-center gap-3 text-sm">
             <label className="flex items-center gap-2 text-muted-foreground"><input type="checkbox" className="size-4 rounded border-border accent-primary" />Remember me</label>
           </div>
-          <Button className="w-full" type="submit" disabled={isSubmitting}>{isSubmitting && <LoaderCircle className="size-4 animate-spin" />}Log in as {role}</Button>
+          <Button className="h-12 w-full text-base" type="submit" disabled={isSubmitting}>{isSubmitting && <LoaderCircle className="size-4 animate-spin" />}{role === "admin" ? "Log in to review" : "Log in & start sharing"}<ArrowRight className="size-4" /></Button>
+          <p className="pt-2 text-center text-sm text-muted-foreground">New here? <Link to="/register" className="font-semibold text-primary underline-offset-4 hover:underline">Join the community</Link></p>
         </form>
       </CardContent>
     </AuthShell>

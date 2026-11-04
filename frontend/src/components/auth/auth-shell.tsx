@@ -13,7 +13,7 @@ export function AuthShell({ children, wide = false, aside }: { children: ReactNo
           <div className="px-6 pt-7 sm:px-8"><Brand /></div>
           {children}
         </Card>
-        <p className={aside ? "text-center text-xs leading-relaxed text-muted-foreground lg:col-start-2" : "mt-5 text-center text-xs leading-relaxed text-muted-foreground"}>Compare prices. Build a smarter basket. Spend less.</p>
+        <p className={aside ? "text-center text-sm leading-relaxed text-muted-foreground lg:col-start-2" : "mt-5 text-center text-sm leading-relaxed text-muted-foreground"}>Compare prices. Build a smarter basket. Spend less.</p>
       </motion.div>
     </main>
   )
