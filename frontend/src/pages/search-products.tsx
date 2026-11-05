@@ -6,8 +6,7 @@ import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
-import { loadBasket, saveBasket } from "../basket/service"
-import type { BasketItem } from "../basket/types"
+import { useBasketItems } from "../basket/use-basket-items"
 import breadIcon from "../../assets/product-icons/Bread.svg"
 import cerealIcon from "../../assets/product-icons/Cereal.svg"
 import coffeeIcon from "../../assets/product-icons/Coffee.svg"
@@ -263,7 +262,7 @@ function ProductCard({
             aria-label={basketQuantity >= 99 ? `${product.name} is already at the maximum basket quantity` : basketQuantity > 0 ? `Add another ${product.name}; ${basketQuantity} currently in basket` : `Add ${product.name} to basket`}
             onClick={() => onAdd(product.id)}
           >
-            <Plus className="size-4" />{basketQuantity > 0 ? `Add (${basketQuantity})` : "Add"}
+            <Plus className="size-4" />{basketQuantity > 0 ? `Add to basket (${basketQuantity})` : "Add to basket"}
           </Button>
         </div>
       </article>
@@ -364,7 +363,7 @@ export function SearchProductsPage() {
   // const [products, setProducts] = useState<SearchProduct[]>([])
   const [imageRevision, setImageRevision] = useState(0)
   const [result, setResult] = useState<SearchResult | null>(null)
-  const [basketItems, setBasketItems] = useState<BasketItem[]>(loadBasket)
+  const { items: basketItems, setItems: setBasketItems, save: saveBasket } = useBasketItems()
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
   // const [pricesLoading, setPricesLoading] = useState(true)
@@ -396,7 +395,7 @@ export function SearchProductsPage() {
     [categories],
   )
 
-  useEffect(() => { saveBasket(basketItems) }, [basketItems])
+  useEffect(() => { saveBasket(basketItems) }, [basketItems, saveBasket])
 
   function addToBasket(productId: string) {
     setBasketItems((current) => {

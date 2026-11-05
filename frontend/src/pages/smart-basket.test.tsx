@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -24,6 +24,8 @@ const fullPrices: PriceTable = {
   rice: { a: at(1880), b: at(1860), c: at(1980) },
   milk: { a: at(370), b: at(360), c: at(400) },
 }
+
+const shopper = { id: "u1", email: "alex@example.com", name: "Alex Tan", role: "user" as const, groups: ["user"] }
 
 function anonymousAuth(): AuthService {
   return {
@@ -101,15 +103,117 @@ describe("smart basket page", () => {
     const user = userEvent.setup()
     const withWhiteBread: Product[] = [...products, { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false }]
     localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "white", quantity: 2 }]))
-    renderBasket(basketService(fullPrices, { listProducts: vi.fn().mockResolvedValue(withWhiteBread) }))
+    const prices: PriceTable = { ...fullPrices, white: { a: at(260), b: at(250), c: at(270) }, bread: { a: at(330), b: at(320), c: at(340) } }
+    const service = basketService(prices, { listProducts: vi.fn().mockResolvedValue(withWhiteBread) })
+    service.compare = vi.fn().mockImplementation(async (items: BasketItem[]) => ({ priceMaxAgeDays: 30, basket: compareBasket(items, withWhiteBread, retailers, prices) }))
+    renderBasket(service)
 
     expect(await screen.findByText(/1 item has a Healthier Choice alternative/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: /Swap for healthier/ }))
-    await user.click(screen.getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
+    await screen.findByRole("radio", { name: /Beta Grocer/ })
+    await user.click(screen.getByRole("button", { name: "Healthier options (1)" }))
+
+    // Options are priced at the selected store (Beta, the cheapest) against the line being swapped.
+    const dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+    expect(await within(dialog).findByText("$3.20")).toBeInTheDocument()
+    expect(within(dialog).getByText("+$0.70")).toBeInTheDocument()
+    expect(within(dialog).getByText(/\$0\.80 \/ 100g/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
 
     expect(screen.getByLabelText("Wholemeal Bread quantity")).toHaveTextContent("2")
     expect(screen.getByText("1 of 1 item is Healthier Choice.")).toBeInTheDocument()
+    expect(screen.getByText("Swapped from White Bread")).toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1")!)).toEqual([{ productId: "bread", quantity: 2 }])
+
+    const toast = screen.getByRole("status")
+    expect(toast).toHaveTextContent("Swapped to Wholemeal Bread")
+    await user.click(within(toast).getByRole("button", { name: "Undo" }))
+    expect(screen.getByLabelText("White Bread quantity")).toHaveTextContent("2")
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("undoes a capped merge back to the basket as it was", async () => {
+    const user = userEvent.setup()
+    const withWhiteBread: Product[] = [...products, { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false }]
+    const prices: PriceTable = { ...fullPrices, white: { a: at(260), b: at(250), c: at(270) }, bread: { a: at(330), b: at(320), c: at(340) } }
+    const service = basketService(prices, { listProducts: vi.fn().mockResolvedValue(withWhiteBread) })
+    service.compare = vi.fn().mockImplementation(async (items: BasketItem[]) => ({ priceMaxAgeDays: 30, basket: compareBasket(items, withWhiteBread, retailers, prices) }))
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "white", quantity: 20 }, { productId: "bread", quantity: 90 }]))
+    renderBasket(service)
+
+    await screen.findByRole("radio", { name: /Beta Grocer/ })
+    await user.click(screen.getByRole("button", { name: "Healthier options (1)" }))
+    const dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+    await within(dialog).findByText("$3.20")
+    await user.click(within(dialog).getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
+    // 90 + 20 is capped at 99.
+    expect(screen.getByLabelText("Wholemeal Bread quantity")).toHaveTextContent("99")
+
+    await user.click(within(screen.getByRole("status")).getByRole("button", { name: "Undo" }))
+    expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1")!)).toEqual([{ productId: "white", quantity: 20 }, { productId: "bread", quantity: 90 }])
+  })
+
+  it("keeps a signed-in shopper's basket apart from the signed-out one", async () => {
+    const user = userEvent.setup()
+    const auth: AuthService = {
+      ...anonymousAuth(),
+      getCurrentUser: vi.fn().mockResolvedValue(shopper),
+    }
+    render(<MemoryRouter initialEntries={["/basket"]}><AuthProvider serviceOverride={auth}><SmartBasketPage serviceOverride={basketService(fullPrices)} /></AuthProvider></MemoryRouter>)
+
+    expect(await screen.findByText("Alex Tan")).toBeInTheDocument()
+    await user.click(await screen.findByRole("button", { name: "Add Thai Rice" }))
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1.u1")!)).toEqual([{ productId: "rice", quantity: 1 }]))
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }))
+    expect(await screen.findByRole("heading", { name: "Your basket is empty" })).toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1") ?? "[]")).toEqual([])
+    expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1.u1")!)).toEqual([{ productId: "rice", quantity: 1 }])
+  })
+
+  it("prices the signed-out basket after signing out, even when it matches the signed-in one", async () => {
+    const user = userEvent.setup()
+    const auth: AuthService = { ...anonymousAuth(), getCurrentUser: vi.fn().mockResolvedValue(shopper) }
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    localStorage.setItem("trolleysaver.basket.v1.u1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    render(<MemoryRouter initialEntries={["/basket"]}><AuthProvider serviceOverride={auth}><SmartBasketPage serviceOverride={basketService(fullPrices)} /></AuthProvider></MemoryRouter>)
+
+    expect(await screen.findByRole("radio", { name: /Beta Grocer/ })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Sign out" }))
+    expect(await screen.findByRole("radio", { name: /Beta Grocer/ })).toBeInTheDocument()
+    expect(screen.getByText("Total at Beta Grocer · cheapest")).toBeInTheDocument()
+  })
+
+  it("keeps items added while the session is still being restored", async () => {
+    const user = userEvent.setup()
+    let finishRestore: (value: typeof shopper) => void = () => {}
+    const auth: AuthService = { ...anonymousAuth(), getCurrentUser: vi.fn(() => new Promise<typeof shopper>((resolve) => { finishRestore = resolve })) }
+    localStorage.setItem("trolleysaver.basket.v1.u1", JSON.stringify([{ productId: "milk", quantity: 1 }]))
+    render(<MemoryRouter initialEntries={["/basket"]}><AuthProvider serviceOverride={auth}><SmartBasketPage serviceOverride={basketService(fullPrices)} /></AuthProvider></MemoryRouter>)
+
+    await user.click(await screen.findByRole("button", { name: "Add Thai Rice" }))
+    await act(async () => finishRestore(shopper))
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1.u1")!)).toEqual([{ productId: "milk", quantity: 1 }, { productId: "rice", quantity: 1 }]))
+  })
+
+  it("stops offering undo once a merged line is edited", async () => {
+    const user = userEvent.setup()
+    const withWhiteBread: Product[] = [...products, { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false }]
+    const prices: PriceTable = { ...fullPrices, white: { a: at(260), b: at(250), c: at(270) }, bread: { a: at(330), b: at(320), c: at(340) } }
+    const service = basketService(prices, { listProducts: vi.fn().mockResolvedValue(withWhiteBread) })
+    service.compare = vi.fn().mockImplementation(async (items: BasketItem[]) => ({ priceMaxAgeDays: 30, basket: compareBasket(items, withWhiteBread, retailers, prices) }))
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "bread", quantity: 1 }, { productId: "white", quantity: 5 }]))
+    renderBasket(service)
+
+    await screen.findByRole("radio", { name: /Beta Grocer/ })
+    await user.click(screen.getByRole("button", { name: "Healthier options (1)" }))
+    const dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+    await within(dialog).findByText("$3.20")
+    await user.click(within(dialog).getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
+    expect(within(screen.getByRole("status")).getByRole("button", { name: "Undo" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Decrease Wholemeal Bread" }))
+    expect(within(screen.getByRole("status")).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Swapped from White Bread")).not.toBeInTheDocument()
   })
 
   it("shows an error when the comparison fails", async () => {

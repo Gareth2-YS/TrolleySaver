@@ -21,12 +21,19 @@ import { useEffect, useMemo, useRef, type KeyboardEvent, useState, type ReactNod
 import { FormAlert } from "../components/auth/form-alert"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
-import { createBasketService, loadBasket, saveBasket } from "../basket/service"
+import { createBasketService } from "../basket/service"
+import { useBasketItems, type BasketItems } from "../basket/use-basket-items"
 import type { BasketItem, BasketResult, BasketService, BasketStore, Product } from "../basket/types"
 import { cn } from "../lib/utils"
 
 const MAX_QUANTITY = 99
 const COMPARE_DELAY_MS = 300
+// The backend's MAX_BASKET_LINES: a compare request holding more products is rejected.
+const COMPARE_MAX_LINES = 50
+
+// One swap, recorded so it can be undone. `added` is what a merge actually added after the quantity cap,
+// and `toQuantity` the swapped-in line's quantity right after the swap.
+interface SwapRecord { fromId: string; fromQuantity: number; fromIndex: number; merged: boolean; added: number; toQuantity: number }
 
 function formatCents(cents: number) {
   return new Intl.NumberFormat("en-SG", { style: "currency", currency: "SGD", currencyDisplay: "narrowSymbol" }).format(cents / 100)
@@ -104,6 +111,154 @@ function ZoomableImage({ product, onOpen, onExpired, className }: { product: Pro
   )
 }
 
+// Price per 100 g or 100 ml, so packs of different sizes compare fairly. Null for units that don't convert.
+function per100(product: Product, cents: number) {
+  // Products added through requests can come back from the API without a pack unit.
+  const unit = (product.packUnit ?? "").toLowerCase()
+  const scale = unit === "kg" || unit === "l" ? 1000 : unit === "g" || unit === "ml" ? 1 : null
+  if (scale === null || !product.packQty) return null
+  return { cents: (cents * 100) / (product.packQty * scale * (product.packCount ?? 1)), unit: unit === "kg" || unit === "g" ? "g" : "ml" }
+}
+
+function per100Label(product: Product, cents: number | null) {
+  const value = cents === null ? null : per100(product, cents)
+  return value ? `${formatCents(Math.round(value.cents))} / 100${value.unit}` : ""
+}
+
+function differenceLabel(cents: number) {
+  return cents === 0 ? "Same price" : cents > 0 ? `+${formatCents(cents)}` : `Save ${formatCents(-cents)}`
+}
+
+type SwapSort = "price" | "unit"
+
+function HealthierChoices({ product, quantity, options, store, cheapest, optionStores, sort, onSort, onSwap, onOpenImage, onExpired, onClose }: {
+  product: Product
+  quantity: number
+  options: Product[]
+  store: BasketStore | undefined
+  cheapest: boolean
+  // undefined while the options' prices load; null if they could not be loaded.
+  optionStores: BasketStore[] | null | undefined
+  sort: SwapSort
+  onSort: (sort: SwapSort) => void
+  onSwap: (toId: string) => void
+  onOpenImage: (productId: string) => void
+  onExpired: () => void
+  onClose: () => void
+}) {
+  const loading = optionStores === undefined
+  const known = Boolean(store && optionStores)
+  const fromCents = store?.lines.find((line) => line.productId === product.id)?.unitPriceCents ?? null
+  const optionStore = optionStores?.find((entry) => entry.retailerId === store?.retailerId)
+  const unitValue = (option: Product, cents: number | null) => (cents === null ? null : per100(option, cents)?.cents ?? null)
+  // Unpriced options go last; ties fall back to the name so the order stays put.
+  const ranked = options
+    .map((option) => ({ option, cents: optionStore?.lines.find((line) => line.productId === option.id)?.unitPriceCents ?? null }))
+    .sort((a, b) => {
+      if ((a.cents === null) !== (b.cents === null)) return a.cents === null ? 1 : -1
+      const key = (entry: typeof a) => (sort === "unit" ? unitValue(entry.option, entry.cents) ?? Infinity : entry.cents ?? 0)
+      return (key(a) === key(b) ? 0 : key(a) - key(b)) || a.option.name.localeCompare(b.option.name)
+    })
+  const where = store ? storeName(store) : "your store"
+
+  return (
+    <>
+      <div className="flex items-start justify-between gap-3 px-6 pb-4 pt-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-primary"><Leaf className="size-5" /></span>
+          <div className="min-w-0">
+            <h2 id="swap-title" className="text-lg font-semibold leading-snug">Healthier choices</h2>
+            <p className="mt-0.5 text-xs capitalize text-muted-foreground">{product.category}{store && ` · prices at ${storeName(store)}`}</p>
+          </div>
+        </div>
+        <Button type="button" variant="ghost" size="icon" className="size-9 shrink-0" aria-label="Close" onClick={onClose}><X className="size-[18px]" /></Button>
+      </div>
+
+      <div className="mx-6 flex items-center justify-between gap-3 rounded-xl bg-secondary px-3.5 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <ZoomableImage product={product} onOpen={onOpenImage} onExpired={onExpired} className="size-10 rounded-md object-contain" />
+          <div className="min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">In your basket</span>
+            <p className="mt-0.5 text-sm font-semibold leading-snug">{product.name}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-semibold tabular-nums">{fromCents === null ? (store ? "No price" : "—") : formatCents(fromCents)}</p>
+          <p className="text-xs text-muted-foreground tabular-nums">{per100Label(product, fromCents)}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 px-6 pb-2 pt-4">
+        <p className="flex items-center gap-1.5 text-[13px] font-semibold">
+          {plural(options.length, "Healthier Choice option")}
+          {loading && <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-label="Loading prices" />}
+        </p>
+        <div role="group" aria-label="Sort recommendations" className="flex gap-0.5 rounded-lg bg-secondary p-[3px]">
+          {([["price", "Lowest price"], ["unit", "Best unit price"]] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={sort === value}
+              onClick={() => onSort(value)}
+              className={cn(
+                "h-[30px] rounded-md px-3 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                sort === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <ol aria-label="Healthier Choice options" className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6">
+        {ranked.map(({ option, cents }, index) => {
+          const top = index === 0 && (sort === "unit" ? unitValue(option, cents) !== null : cents !== null)
+          const unpriced = known && cents === null
+          const difference = cents === null || fromCents === null ? null : cents - fromCents
+          return (
+            <li key={option.id} className={cn("flex items-center gap-3 rounded-xl border px-3.5 py-3", top && "border-primary/45 bg-accent/50")}>
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold tabular-nums text-muted-foreground">{index + 1}</span>
+              <ZoomableImage product={option} onOpen={onOpenImage} onExpired={onExpired} className="size-10 rounded-md object-contain" />
+              <div className="min-w-0 flex-1">
+                {/* The badge sits on its own line so moving it between rows on a re-sort never rewraps a name. */}
+                {top && <span className="mb-1 inline-block rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground">{sort === "unit" ? "Best value" : "Cheapest"}</span>}
+                <p className="text-sm font-semibold leading-snug">{option.name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {option.brand} · {packLabel(option)}
+                  {unpriced ? ` · No price at ${where}` : cents !== null && per100Label(option, cents) ? ` · ${per100Label(option, cents)}` : ""}
+                </p>
+              </div>
+              <div className="w-20 shrink-0 text-right">
+                <p className="text-[15px] font-semibold tabular-nums">{cents !== null ? formatCents(cents) : loading ? "…" : "—"}</p>
+                {difference !== null && <p className={cn("text-xs font-semibold tabular-nums", difference < 0 ? "text-primary" : "text-muted-foreground")}>{differenceLabel(difference)}</p>}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0 rounded-lg px-3.5 text-[13px] font-semibold"
+                disabled={loading || unpriced}
+                onClick={() => onSwap(option.id)}
+                aria-label={`Swap ${product.name} for ${option.name}`}
+              >
+                Swap
+              </Button>
+            </li>
+          )
+        })}
+      </ol>
+
+      <p className="px-6 pb-5 pt-4 text-xs text-muted-foreground">
+        {optionStores === null
+          ? "Prices for these options could not be loaded. "
+          : store ? `Prices per pack at ${storeName(store)}${cheapest ? ", your cheapest store" : ""}. ` : ""}
+        Your quantity (×{quantity}) carries over when you swap.
+      </p>
+    </>
+  )
+}
+
 function retailerNote(store: BasketStore, cheapest: BasketStore) {
   if (store.retailerId === cheapest.retailerId && store.pricedCount > 0) return store.complete ? "Lowest total" : `${store.pricedCount} priced · ${store.missingCount} missing`
   if (!store.complete || !cheapest.complete) return `${store.pricedCount} priced · ${store.missingCount} missing`
@@ -112,12 +267,18 @@ function retailerNote(store: BasketStore, cheapest: BasketStore) {
 }
 
 export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketService }) {
+  const basketItems = useBasketItems()
+  // Prices, swaps and store choices belong to one account's basket, so signing in or out starts the page afresh.
+  return <SmartBasketView key={basketItems.generation} serviceOverride={serviceOverride} basketItems={basketItems} />
+}
+
+function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: BasketService; basketItems: BasketItems }) {
   const [service] = useState(() => serviceOverride ?? createBasketService())
   const [products, setProducts] = useState<Product[]>([])
   const [imageRevision, setImageRevision] = useState(0)
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState<string | null>(null)
-  const [items, setItems] = useState<BasketItem[]>(loadBasket)
+  const { items, setItems, save: saveBasket } = basketItems
   const [query, setQuery] = useState("")
   const [category, setCategory] = useState("")
   const [brand, setBrand] = useState("")
@@ -126,9 +287,16 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
   const [settled, setSettled] = useState<{ key: string; error: string | null } | null>(null)
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null)
   const [swapOpenFor, setSwapOpenFor] = useState<string | null>(null)
+  const [swapSort, setSwapSort] = useState<SwapSort>("price")
+  // Prices for the open swap's options; a line's own comparison only prices what is in the basket.
+  const [optionPrices, setOptionPrices] = useState<{ forId: string; stores: BasketStore[] | null } | null>(null)
+  // Swaps into each product, oldest first, so they can be undone one at a time.
+  const [swaps, setSwaps] = useState<Record<string, SwapRecord[]>>({})
+  const [toastFor, setToastFor] = useState<string | null>(null)
   const [noteDismissed, setNoteDismissed] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
   const previewRef = useRef<HTMLDialogElement>(null)
+  const swapRef = useRef<HTMLDialogElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const retailerRefs = useRef<(HTMLButtonElement | null)[]>([])
 
@@ -157,7 +325,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
   const basketKey = JSON.stringify(basket)
 
   // Only save once the catalog has loaded, so a failed load can't wipe the saved basket.
-  useEffect(() => { if (!catalogLoading && !catalogError) saveBasket(basket) }, [basket, catalogError, catalogLoading])
+  useEffect(() => { if (!catalogLoading && !catalogError) saveBasket(basket) }, [basket, catalogError, catalogLoading, saveBasket])
 
   useEffect(() => {
     const current: BasketItem[] = JSON.parse(basketKey)
@@ -196,7 +364,53 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
     return byProduct
   }, [basket, catalog, products])
 
+  const swapOptions = swapOpenFor ? alternatives.get(swapOpenFor) ?? [] : []
+  const swapOptionsKey = swapOptions.map((option) => option.id).join(",")
+
+  useEffect(() => {
+    if (!swapOpenFor || !swapOptionsKey) return
+    let active = true
+    const ids = swapOptionsKey.split(",")
+    const chunks = Array.from({ length: Math.ceil(ids.length / COMPARE_MAX_LINES) }, (_, index) => ids.slice(index * COMPARE_MAX_LINES, (index + 1) * COMPARE_MAX_LINES))
+    // Only the per-store lines are used, so chunked results merge by store.
+    Promise.all(chunks.map((chunk) => service.compare(chunk.map((productId) => ({ productId, quantity: 1 })))))
+      .then((results) => {
+        const byStore = new Map<string, BasketStore>()
+        for (const store of results.flatMap((next) => next.basket.stores)) {
+          const seen = byStore.get(store.retailerId)
+          byStore.set(store.retailerId, seen ? { ...seen, lines: [...seen.lines, ...store.lines] } : store)
+        }
+        if (active) setOptionPrices({ forId: swapOpenFor, stores: [...byStore.values()] })
+      })
+      .catch(() => { if (active) setOptionPrices({ forId: swapOpenFor, stores: null }) })
+    return () => { active = false }
+  }, [service, swapOpenFor, swapOptionsKey])
+
+  useEffect(() => {
+    const dialog = swapRef.current
+    if (!dialog) return
+    if (swapOpenFor && swapOptionsKey && !dialog.open) dialog.showModal()
+    if (!(swapOpenFor && swapOptionsKey) && dialog.open) dialog.close()
+  }, [swapOpenFor, swapOptionsKey])
+
+  function openSwap(productId: string) {
+    setSwapSort("price")
+    // Drop prices from an earlier open so the dialog shows as loading until the fresh ones arrive.
+    setOptionPrices(null)
+    setSwapOpenFor(productId)
+  }
+
+  function forgetSwap(productId: string) {
+    setSwaps((current) => {
+      const next = { ...current }
+      delete next[productId]
+      return next
+    })
+    setToastFor((current) => (current === productId ? null : current))
+  }
+
   function setQuantity(productId: string, quantity: number) {
+    if (quantity < 1) forgetSwap(productId)
     setItems((current) => quantity < 1
       ? current.filter((item) => item.productId !== productId)
       : current.map((item) => (item.productId === productId ? { ...item, quantity: Math.min(quantity, MAX_QUANTITY) } : item)))
@@ -210,6 +424,22 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
 
   // The swap keeps the line's place and quantity; if the alternative is already in the basket the two merge.
   function swapProduct(fromId: string, toId: string) {
+    const fromIndex = items.findIndex((item) => item.productId === fromId)
+    if (fromIndex >= 0) {
+      const from = items[fromIndex]
+      const existing = items.find((item) => item.productId === toId)
+      const toQuantity = existing ? Math.min(existing.quantity + from.quantity, MAX_QUANTITY) : from.quantity
+      const record: SwapRecord = {
+        fromId,
+        fromQuantity: from.quantity,
+        fromIndex,
+        merged: Boolean(existing),
+        added: existing ? toQuantity - existing.quantity : from.quantity,
+        toQuantity,
+      }
+      setSwaps((current) => ({ ...current, [toId]: [...(current[toId] ?? []), record] }))
+      setToastFor(toId)
+    }
     setItems((current) => {
       const from = current.find((item) => item.productId === fromId)
       if (!from) return current
@@ -219,6 +449,40 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
         .map((item) => item.productId === (existing ? toId : fromId) ? { productId: toId, quantity: Math.min(item.quantity + (existing ? from.quantity : 0), MAX_QUANTITY) } : item)
     })
     setSwapOpenFor(null)
+  }
+
+  // Undoes the latest swap into a product. An ordinary swap puts the original back in place of the line,
+  // keeping its current quantity. A merge takes back only what it added and restores the original line,
+  // at its old position, with the quantity it had.
+  function undoSwap(toId: string) {
+    const records = swaps[toId] ?? []
+    const swap = undoableSwap(toId)
+    if (!swap) return
+    setItems((current) => {
+      const to = current.find((item) => item.productId === toId)
+      if (!to) return current
+      if (!swap.merged) return current.map((item) => (item.productId === toId ? { productId: swap.fromId, quantity: item.quantity } : item))
+      const kept = to.quantity - swap.added
+      const rest = current.flatMap((item) => (item.productId !== toId ? [item] : kept >= 1 ? [{ productId: toId, quantity: kept }] : []))
+      const at = Math.min(swap.fromIndex, rest.length)
+      return [...rest.slice(0, at), { productId: swap.fromId, quantity: swap.fromQuantity }, ...rest.slice(at)]
+    })
+    // An ordinary swap removes the line the earlier swaps went into, so their records go with it.
+    if (!swap.merged) forgetSwap(toId)
+    else {
+      setSwaps((current) => ({ ...current, [toId]: records.slice(0, -1) }))
+      setToastFor((current) => (current === toId ? null : current))
+    }
+  }
+
+  // Undo is only offered while the original isn't back in the basket some other way. A merged line's
+  // quantity mixes what was there with what the swap added, so once it is edited the merge can't be split back.
+  function undoableSwap(toId: string) {
+    const records = swaps[toId] ?? []
+    const swap = records[records.length - 1]
+    const to = basket.find((item) => item.productId === toId)
+    if (!swap || !to || basket.some((item) => item.productId === swap.fromId)) return undefined
+    return swap.merged && to.quantity !== swap.toQuantity ? undefined : swap
   }
 
   const comparison = basket.length ? result?.basket ?? null : null
@@ -323,7 +587,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
           <Card aria-labelledby="basket-heading">
             <div className="mb-[18px] flex items-start gap-4">
               <div className="flex-1"><CardTitle id="basket-heading" icon={ShoppingBasket} title="Your basket" description={`${plural(basket.length, "product")} · ${plural(packCount, "pack")}`} /></div>
-              {basket.length > 0 && <Button type="button" variant="outline" size="sm" className="rounded-lg text-[13px] font-semibold text-muted-foreground" onClick={() => setItems([])}>Reset</Button>}
+              {basket.length > 0 && <Button type="button" variant="outline" size="sm" className="rounded-lg text-[13px] font-semibold text-muted-foreground" onClick={() => { setItems([]); setSwaps({}); setToastFor(null) }}>Reset</Button>}
             </div>
 
             {basket.length === 0 ? (
@@ -388,9 +652,10 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                 )}
 
                 {swappable > 0 && !noteDismissed && (
-                  <div className="mb-[18px] flex items-start gap-3 rounded-[10px] bg-accent px-4 py-3.5">
+                  <div role="note" className="mb-[18px] flex items-start gap-3 rounded-[10px] bg-accent px-4 py-3.5">
+                    <Leaf className="mt-0.5 size-[18px] shrink-0 text-accent-foreground" />
                     <p className="flex-1 text-[13px] leading-relaxed text-accent-foreground">
-                      <strong>{plural(swappable, "item")} {swappable === 1 ? "has" : "have"} a Healthier Choice alternative.</strong> Tap <strong>Swap for healthier</strong> under an item to compare and swap.
+                      <strong>{plural(swappable, "item")} {swappable === 1 ? "has" : "have"} a Healthier Choice alternative.</strong> Tap <strong>Healthier options</strong> under an item to compare and swap.
                     </p>
                     <button type="button" className="grid size-6 place-items-center rounded-md text-accent-foreground hover:bg-background/60" onClick={() => setNoteDismissed(true)} aria-label="Dismiss note"><X className="size-3.5" /></button>
                   </div>
@@ -401,7 +666,8 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                     const product = catalog.get(item.productId)!
                     const line = selectedStore?.lines.find((entry) => entry.productId === item.productId)
                     const options = alternatives.get(item.productId) ?? []
-                    const swapOpen = swapOpenFor === item.productId && options.length > 0
+                    const swap = undoableSwap(item.productId)
+                    const swappedFrom = swap ? catalog.get(swap.fromId) : undefined
                     return (
                       <li key={item.productId} className="py-4">
                         <div className="flex items-start justify-between gap-3">
@@ -421,12 +687,11 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                           {options.length > 0 && (
                             <button
                               type="button"
-                              aria-expanded={swapOpen}
-                              onClick={() => setSwapOpenFor(swapOpen ? null : item.productId)}
-                              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-primary bg-accent px-3 py-1.5 text-[13px] font-semibold text-accent-foreground hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-haspopup="dialog"
+                              onClick={() => openSwap(item.productId)}
+                              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-primary/35 bg-accent/60 px-2.5 py-1.5 text-xs font-semibold text-accent-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
-                              <Leaf className="size-[15px]" />Swap for healthier
-                              <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">{options.length}</span>
+                              <Leaf className="size-3.5" />Healthier options ({options.length})
                             </button>
                           )}
                           <div className="order-last flex items-center overflow-hidden rounded-lg border bg-background">
@@ -439,19 +704,11 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                             </button>
                           </div>
                         </div>
-                        {swapOpen && (
-                          <ul className="mt-3 flex flex-col gap-2 rounded-[10px] bg-accent/40 p-3" aria-label={`Healthier alternatives to ${product.name}`}>
-                            {options.map((option) => (
-                              <li key={option.id} className="flex items-center gap-3">
-                                <ZoomableImage product={option} onOpen={setPreviewId} onExpired={refreshImages} className="size-10 rounded-md object-contain" />
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-[13px] font-semibold leading-snug">{option.name}</p>
-                                  <p className="text-xs text-muted-foreground">{option.brand} · {packLabel(option)}</p>
-                                </div>
-                                <Button type="button" variant="outline" size="sm" className="rounded-lg border-primary text-[13px] font-semibold text-primary hover:bg-accent" onClick={() => swapProduct(item.productId, option.id)} aria-label={`Swap ${product.name} for ${option.name}`}>Swap</Button>
-                              </li>
-                            ))}
-                          </ul>
+                        {swappedFrom && (
+                          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                            <span>Swapped from {swappedFrom.name}</span>
+                            <button type="button" className="py-0.5 font-semibold text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => undoSwap(item.productId)} aria-label={`Undo swap back to ${swappedFrom.name}`}>Undo</button>
+                          </p>
                         )}
                       </li>
                     )
@@ -511,6 +768,47 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
           </Card>
         </div>
       </div>
+
+      <dialog
+        ref={swapRef}
+        aria-labelledby="swap-title"
+        className="max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-[600px] flex-col overflow-hidden rounded-2xl border bg-card p-0 text-card-foreground shadow-2xl backdrop:bg-black/45 backdrop:backdrop-blur-sm open:flex"
+        onClose={() => setSwapOpenFor(null)}
+        onClick={(event) => { if (event.target === swapRef.current) swapRef.current?.close() }}
+      >
+        {swapOpenFor && swapOptions.length > 0 && (() => {
+          const item = basket.find((entry) => entry.productId === swapOpenFor)
+          const product = catalog.get(swapOpenFor)
+          if (!item || !product) return null
+          return (
+            <HealthierChoices
+              product={product}
+              quantity={item.quantity}
+              options={swapOptions}
+              store={selectedStore}
+              cheapest={Boolean(selectedStore && selectedStore.retailerId === cheapest?.retailerId)}
+              optionStores={optionPrices?.forId === swapOpenFor ? optionPrices.stores : undefined}
+              sort={swapSort}
+              onSort={setSwapSort}
+              onSwap={(toId) => swapProduct(swapOpenFor, toId)}
+              onOpenImage={setPreviewId}
+              onExpired={refreshImages}
+              onClose={() => swapRef.current?.close()}
+            />
+          )
+        })()}
+      </dialog>
+
+      {toastFor && catalog.get(toastFor) && (
+        <div role="status" className="fixed bottom-6 left-1/2 z-50 flex w-max max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-xl bg-foreground py-2.5 pl-4 pr-2.5 text-[13px] text-background shadow-2xl">
+          <BadgeCheck className="size-4 shrink-0" />
+          <span>Swapped to {catalog.get(toastFor)!.name}</span>
+          {undoableSwap(toastFor) && (
+            <button type="button" className="h-[30px] rounded-md bg-background/15 px-2.5 text-xs font-semibold hover:bg-background/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => undoSwap(toastFor)}>Undo</button>
+          )}
+          <button type="button" className="grid size-[30px] place-items-center rounded-md hover:bg-background/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setToastFor(null)} aria-label="Dismiss"><X className="size-3.5" /></button>
+        </div>
+      )}
 
       <dialog
         ref={previewRef}

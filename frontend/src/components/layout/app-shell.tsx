@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {visibleNavigation.map(([label, path]) => <NavLink key={path} to={path} className={({ isActive }) => cn("border-b-2 border-transparent py-5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground", isActive && "border-primary text-foreground")}>{label}</NavLink>)}
           </nav>
           <div className="hidden items-center gap-2 md:flex">
-            {user ? <><span className="rounded-full border border-white/15 bg-secondary/60 px-3 py-1.5 text-xs text-muted-foreground"><UserRound className="mr-1 inline size-3.5" />{user.role}</span><Button variant="outline" size="sm" onClick={leave}><LogOut className="size-4" />Sign out</Button></> : <Button asChild size="sm"><Link to="/login"><LogIn className="size-4" />Log in</Link></Button>}
+            {user ? <><span className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-white/15 bg-secondary/60 px-3 py-1.5 text-xs text-muted-foreground" title={user.email}><UserRound className="size-3.5 shrink-0" /><span className="truncate">{user.name?.trim() || user.email}</span></span><Button variant="outline" size="sm" onClick={leave}><LogOut className="size-4" />Sign out</Button></> : <Button asChild size="sm"><Link to="/login"><LogIn className="size-4" />Log in</Link></Button>}
           </div>
           <Button className="md:hidden" variant="ghost" size="icon" onClick={() => setOpen((value) => !value)} aria-label="Toggle navigation">{open ? <X /> : <Menu />}</Button>
         </div>

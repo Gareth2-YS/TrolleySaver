@@ -57,16 +57,21 @@ export function createBasketService(): BasketService {
   return configuredMode === "local" ? new LocalBasketService() : new ApiBasketService()
 }
 
-// The basket is public, so it lives in this browser rather than on the server.
-export function loadBasket(): BasketItem[] {
+// The basket is public, so it lives in this browser rather than on the server. Each signed-in
+// account keeps its own basket, apart from the signed-out one, so signing out never shows it.
+function basketKey(userId: string | null) {
+  return userId ? `${BASKET_KEY}.${userId}` : BASKET_KEY
+}
+
+export function loadBasket(userId: string | null = null): BasketItem[] {
   try {
-    const saved = JSON.parse(localStorage.getItem(BASKET_KEY) ?? "[]")
+    const saved = JSON.parse(localStorage.getItem(basketKey(userId)) ?? "[]")
     return Array.isArray(saved) ? saved.filter((item) => typeof item?.productId === "string" && Number.isInteger(item?.quantity) && item.quantity > 0) : []
   } catch {
     return []
   }
 }
 
-export function saveBasket(items: BasketItem[]) {
-  try { localStorage.setItem(BASKET_KEY, JSON.stringify(items)) } catch { /* storage unavailable: the basket lasts for this visit only */ }
+export function saveBasket(items: BasketItem[], userId: string | null = null) {
+  try { localStorage.setItem(basketKey(userId), JSON.stringify(items)) } catch { /* storage unavailable: the basket lasts for this visit only */ }
 }
