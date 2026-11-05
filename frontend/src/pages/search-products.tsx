@@ -159,6 +159,7 @@ function ProductCard({
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const imagePreviewRef = useRef<HTMLDialogElement>(null)
   const packDescription = getPackDescription(product)
   // const lowestPrice = getLowestPrice(product)
   const lowestPrice = product.lowestPrice
@@ -180,6 +181,10 @@ function ProductCard({
     setDetailsOpen(true)
   }
 
+  function openImagePreview() {
+    imagePreviewRef.current?.showModal()
+  }
+
   return (
     <>
       <article
@@ -187,7 +192,15 @@ function ProductCard({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-12 shrink-0 object-contain" />
+            <button
+              type="button"
+              className="shrink-0 cursor-zoom-in rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Enlarge image of ${product.name}`}
+              title="Click to enlarge image"
+              onClick={openImagePreview}
+            >
+              <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-12 object-contain" />
+            </button>
             <div className="min-w-0">
               <button
                 type="button"
@@ -267,7 +280,15 @@ function ProductCard({
         <div className="space-y-6 p-6 sm:p-8">
           <header className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-14 shrink-0 object-contain" />
+              <button
+                type="button"
+                className="shrink-0 cursor-zoom-in rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Enlarge image of ${product.name}`}
+                title="Click to enlarge image"
+                onClick={openImagePreview}
+              >
+                <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-14 object-contain" />
+              </button>
               <div>
                 <h2 id={`product-title-${product.id}`} className="text-2xl font-semibold">{product.name}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -317,6 +338,23 @@ function ProductCard({
             </dl>
           </section>
         </div>
+      </dialog>
+
+      <dialog
+        ref={imagePreviewRef}
+        aria-label={`Enlarged image of ${product.name}`}
+        className="max-h-[95vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-xl border border-border bg-card p-3 text-card-foreground shadow-2xl backdrop:bg-black/75"
+        onClick={(event) => {
+          if (event.target === imagePreviewRef.current) imagePreviewRef.current?.close()
+        }}
+      >
+        <div className="mb-2 flex items-center justify-between gap-4">
+          <p className="truncate font-medium">{product.name}</p>
+          <Button type="button" variant="ghost" size="icon" aria-label={`Close enlarged image of ${product.name}`} onClick={() => imagePreviewRef.current?.close()}>
+            <X className="size-4" />
+          </Button>
+        </div>
+        <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="mx-auto max-h-[82vh] max-w-full object-contain" />
       </dialog>
     </>
   )
