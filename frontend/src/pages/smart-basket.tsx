@@ -290,14 +290,16 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                   <p className="text-[13px] font-semibold">Compare by retailer</p>
                   <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
                     {comparing && <LoaderCircle className="size-3.5 animate-spin" aria-label="Updating prices" />}
-                    {selectedStore ? `${selectedStore.pricedCount} priced · ${selectedStore.missingCount} missing at ${storeName(selectedStore)}` : "Comparing store prices…"}
+                    {selectedStore ? `${selectedStore.pricedCount} priced · ${selectedStore.missingCount} missing at ${storeName(selectedStore)}` : comparing ? "Comparing store prices…" : "No store prices yet"}
                   </p>
                 </div>
 
                 {stores.length === 0 ? (
-                  <div className="mb-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
-                    {[0, 1, 2].map((index) => <div key={index} className="h-[88px] rounded-xl bg-secondary" />)}
-                  </div>
+                  comparing && (
+                    <div className="mb-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
+                      {[0, 1, 2].map((index) => <div key={index} className="h-[88px] rounded-xl bg-secondary" />)}
+                    </div>
+                  )
                 ) : (
                   <div className="mb-[18px] grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5" role="radiogroup" aria-label="Show basket prices at">
                     {stores.map((store, index) => {
@@ -408,7 +410,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                     <p className="text-sm font-semibold">
                       {selectedStore
                         ? `${selectedStore.complete ? "Total" : "Total for priced items"} at ${storeName(selectedStore)}${selectedStore.rank === 1 ? " · cheapest" : ""}`
-                        : "Comparing store prices…"}
+                        : comparing ? "Comparing store prices…" : "No store prices yet"}
                     </p>
                     <p className="text-2xl font-bold tracking-tight text-primary tabular-nums">{selectedStore ? formatCents(selectedStore.totalCents) : "—"}</p>
                   </div>
@@ -423,7 +425,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
             <p className="text-[13px] text-muted-foreground">Line totals for each product · lowest price highlighted</p>
             {basket.length === 0 || stores.length === 0 ? (
               <p className="mt-4 rounded-[10px] border border-dashed px-4 py-5 text-center text-[13px] text-muted-foreground">
-                {basket.length ? "Comparing store prices…" : "Add items to compare prices at each store."}
+                {basket.length ? (comparing ? "Comparing store prices…" : "No store prices yet") : "Add items to compare prices at each store."}
               </p>
             ) : (
               <ul className="mt-3.5">
