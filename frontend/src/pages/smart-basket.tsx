@@ -89,6 +89,21 @@ function Filter({ label, value, options, allLabel, onChange }: { label: string; 
   )
 }
 
+function ZoomableImage({ product, onOpen, onExpired, className }: { product: Product; onOpen: (productId: string) => void; onExpired: () => void; className: string }) {
+  if (!product.imageUrl) return null
+  return (
+    <button
+      type="button"
+      className="shrink-0 cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={`Enlarge image of ${product.name}`}
+      title="Click to enlarge image"
+      onClick={() => onOpen(product.id)}
+    >
+      <ProductImage url={product.imageUrl} name={product.name} onExpired={onExpired} className={className} />
+    </button>
+  )
+}
+
 function retailerNote(store: BasketStore, cheapest: BasketStore) {
   if (store.retailerId === cheapest.retailerId && store.pricedCount > 0) return store.complete ? "Lowest total" : `${store.pricedCount} priced · ${store.missingCount} missing`
   if (!store.complete || !cheapest.complete) return `${store.pricedCount} priced · ${store.missingCount} missing`
@@ -112,6 +127,8 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null)
   const [swapOpenFor, setSwapOpenFor] = useState<string | null>(null)
   const [noteDismissed, setNoteDismissed] = useState(false)
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const previewRef = useRef<HTMLDialogElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const retailerRefs = useRef<(HTMLButtonElement | null)[]>([])
 
@@ -128,6 +145,13 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
   const refreshImages = () => setImageRevision((n) => n + 1)
 
   const catalog = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
+  // Looked up from the catalog so a refreshed (re-signed) image link reaches the open preview too.
+  const previewProduct = previewId ? catalog.get(previewId) : undefined
+
+  useEffect(() => {
+    const dialog = previewRef.current
+    if (previewProduct && dialog && !dialog.open) dialog.showModal()
+  }, [previewProduct])
   // Saved lines for products no longer in the catalog are dropped once it loads.
   const basket = useMemo(() => (catalogLoading ? [] : items.filter((item) => catalog.has(item.productId))), [catalog, catalogLoading, items])
   const basketKey = JSON.stringify(basket)
@@ -274,7 +298,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                 return (
                   <li key={product.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[10px] border border-border/60 bg-background px-4 py-3.5">
                     <div className="flex min-w-0 flex-[999_1_200px] items-center gap-3">
-                      <ProductImage url={product.imageUrl} name={product.name} onExpired={refreshImages} className="size-12 shrink-0 rounded-lg object-contain" />
+                      <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12 rounded-lg object-contain" />
                       <div className="min-w-0">
                       <p className="mb-1 text-sm font-semibold leading-snug">{product.name}</p>
                       <p className="text-xs text-muted-foreground">{product.brand} · {packLabel(product)} · {product.category}</p>
@@ -382,7 +406,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                       <li key={item.productId} className="py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 items-start gap-3">
-                            <ProductImage url={product.imageUrl} name={product.name} onExpired={refreshImages} className="size-12 shrink-0 rounded-lg object-contain" />
+                            <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12 rounded-lg object-contain" />
                             <div className="min-w-0">
                               <p className="text-sm font-semibold leading-snug">{product.name}</p>
                               <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
@@ -419,7 +443,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                           <ul className="mt-3 flex flex-col gap-2 rounded-[10px] bg-accent/40 p-3" aria-label={`Healthier alternatives to ${product.name}`}>
                             {options.map((option) => (
                               <li key={option.id} className="flex items-center gap-3">
-                                <ProductImage url={option.imageUrl} name={option.name} onExpired={refreshImages} className="size-10 shrink-0 rounded-md object-contain" />
+                                <ZoomableImage product={option} onOpen={setPreviewId} onExpired={refreshImages} className="size-10 rounded-md object-contain" />
                                 <div className="min-w-0 flex-1">
                                   <p className="text-[13px] font-semibold leading-snug">{option.name}</p>
                                   <p className="text-xs text-muted-foreground">{option.brand} · {packLabel(option)}</p>
@@ -487,6 +511,26 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
           </Card>
         </div>
       </div>
+
+      <dialog
+        ref={previewRef}
+        aria-label={previewProduct ? `Enlarged image of ${previewProduct.name}` : "Enlarged image"}
+        className="max-h-[95vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-xl border border-border bg-card p-3 text-card-foreground shadow-2xl backdrop:bg-black/75"
+        onClose={() => setPreviewId(null)}
+        onClick={(event) => { if (event.target === previewRef.current) previewRef.current?.close() }}
+      >
+        {previewProduct && (
+          <>
+            <div className="mb-2 flex items-center justify-between gap-4">
+              <p className="truncate font-medium">{previewProduct.name}</p>
+              <Button type="button" variant="ghost" size="icon" aria-label={`Close enlarged image of ${previewProduct.name}`} onClick={() => previewRef.current?.close()}>
+                <X className="size-4" />
+              </Button>
+            </div>
+            <ProductImage url={previewProduct.imageUrl} name={previewProduct.name} onExpired={refreshImages} className="mx-auto max-h-[82vh] max-w-full object-contain" />
+          </>
+        )}
+      </dialog>
     </AppShell>
   )
 }
