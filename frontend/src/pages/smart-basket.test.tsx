@@ -53,11 +53,11 @@ describe("smart basket page", () => {
     const service = basketService(fullPrices)
     renderBasket(service)
     expect(await screen.findByRole("heading", { name: "Your basket is empty" })).toBeInTheDocument()
-    expect(screen.getByText("Add items to calculate your savings")).toBeInTheDocument()
+    expect(screen.getByText("Add items to compare prices at each store.")).toBeInTheDocument()
     expect(service.compare).not.toHaveBeenCalled()
   })
 
-  it("compares the basket and shows the saving against each other supermarket", async () => {
+  it("compares the basket at each retailer and switches the total to the chosen one", async () => {
     const user = userEvent.setup()
     renderBasket(basketService(fullPrices))
     await user.click(await screen.findByRole("button", { name: "Add Thai Rice" }))
@@ -66,14 +66,21 @@ describe("smart basket page", () => {
 
     expect(screen.getByLabelText("Fresh Milk quantity")).toHaveTextContent("2")
     // Beta: 18.60 + 2 × 3.60 = 25.80; Alpha: 26.20; Gamma: 27.80
-    expect(await screen.findByText("Save $0.40")).toBeInTheDocument()
-    expect(screen.getByText("Save $2.00")).toBeInTheDocument()
-    expect(screen.getByText("Best single store").closest("article")).toHaveTextContent("Beta Grocer$25.80")
-    expect(within(screen.getByRole("button", { name: /Beta Grocer/ })).getByText("Cheapest")).toBeInTheDocument()
+    const beta = await screen.findByRole("radio", { name: /Beta Grocer/ })
+    expect(beta).toHaveAttribute("aria-checked", "true")
+    expect(within(beta).getByText("Cheapest")).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /Alpha Mart/ })).toHaveTextContent("+$0.40 more")
+    expect(screen.getByRole("radio", { name: /Gamma Foods/ })).toHaveTextContent("+$2.00 more")
+    expect(screen.getByText("Total at Beta Grocer · cheapest")).toBeInTheDocument()
+    expect(screen.getByText("$2.00", { selector: "p" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("radio", { name: /Gamma Foods/ }))
+    expect(screen.getByText("Total at Gamma Foods")).toBeInTheDocument()
+    expect(screen.getByText("$27.80", { selector: "p" })).toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1")!)).toEqual([{ productId: "rice", quantity: 1 }, { productId: "milk", quantity: 2 }])
   })
 
-  it("flags missing prices and labels partial savings", async () => {
+  it("flags missing prices at each store", async () => {
     const user = userEvent.setup()
     const basket = [{ productId: "rice", quantity: 1 }, { productId: "bread", quantity: 1 }, { productId: "milk", quantity: 1 }]
     localStorage.setItem("trolleysaver.basket.v1", JSON.stringify(basket))
@@ -81,16 +88,28 @@ describe("smart basket page", () => {
     renderBasket(basketService({ rice: { a: at(1880), b: at(1860), c: at(1900) }, bread: { a: at(330) }, milk: { b: at(360) } }))
 
     expect(await screen.findByText(/No single store has a price for every item yet/)).toBeInTheDocument()
-    expect(screen.getAllByText("Partial")).toHaveLength(2)
-    expect(screen.getAllByText("Compared on the 1 item both stores price.")).toHaveLength(2)
-    // On rice, the only item they share, Alpha costs $0.20 more than Beta and $0.20 less than Gamma.
-    expect(screen.getByText("$0.20 more")).toBeInTheDocument()
-    expect(screen.getByText("Save $0.20")).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /Gamma Foods/ })).toHaveTextContent("1 priced · 2 missing")
 
-    await user.click(screen.getByRole("button", { name: /Gamma Foods/ }))
-    expect(screen.getByRole("heading", { name: "Shopping list · Gamma Foods" })).toBeInTheDocument()
-    expect(screen.getAllByText("No price found, working on it")).toHaveLength(2)
-    expect(screen.getByText("Total for priced items")).toBeInTheDocument()
+    await user.click(screen.getByRole("radio", { name: /Gamma Foods/ }))
+    expect(screen.getByText("1 priced · 2 missing at Gamma Foods")).toBeInTheDocument()
+    expect(screen.getByText("Total for priced items at Gamma Foods")).toBeInTheDocument()
+    // Price per item: bread and milk are each missing at two of the three stores.
+    expect(within(screen.getByRole("region", { name: "Price per item" })).getAllByText("No price")).toHaveLength(4)
+  })
+
+  it("swaps a product for a Healthier Choice one in its category", async () => {
+    const user = userEvent.setup()
+    const withWhiteBread: Product[] = [...products, { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false }]
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "white", quantity: 2 }]))
+    renderBasket(basketService(fullPrices, { listProducts: vi.fn().mockResolvedValue(withWhiteBread) }))
+
+    expect(await screen.findByText(/1 item has a Healthier Choice alternative/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Swap for healthier/ }))
+    await user.click(screen.getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
+
+    expect(screen.getByLabelText("Wholemeal Bread quantity")).toHaveTextContent("2")
+    expect(screen.getByText("1 of 1 item is Healthier Choice.")).toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1")!)).toEqual([{ productId: "bread", quantity: 2 }])
   })
 
   it("shows an error when the comparison fails", async () => {
