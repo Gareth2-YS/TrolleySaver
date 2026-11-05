@@ -124,6 +124,9 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
     return () => { active = false }
   }, [service, imageRevision])
 
+  // S3 image links are presigned and expire; reloading the catalog fetches fresh ones.
+  const refreshImages = () => setImageRevision((n) => n + 1)
+
   const catalog = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
   // Saved lines for products no longer in the catalog are dropped once it loads.
   const basket = useMemo(() => (catalogLoading ? [] : items.filter((item) => catalog.has(item.productId))), [catalog, catalogLoading, items])
@@ -270,9 +273,12 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                 const inBasket = basket.find((item) => item.productId === product.id)
                 return (
                   <li key={product.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[10px] border border-border/60 bg-background px-4 py-3.5">
-                    <div className="min-w-0 flex-[999_1_200px]">
+                    <div className="flex min-w-0 flex-[999_1_200px] items-center gap-3">
+                      <ProductImage url={product.imageUrl} name={product.name} onExpired={refreshImages} className="size-12 shrink-0 rounded-lg object-contain" />
+                      <div className="min-w-0">
                       <p className="mb-1 text-sm font-semibold leading-snug">{product.name}</p>
                       <p className="text-xs text-muted-foreground">{product.brand} · {packLabel(product)} · {product.category}</p>
+                      </div>
                     </div>
                     {product.hcs && <HcsBadge />}
                     <Button
@@ -375,9 +381,12 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                     return (
                       <li key={item.productId} className="py-4">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <ProductImage url={product.imageUrl} name={product.name} onExpired={() => setImageRevision((n) => n + 1)} className="mb-2 size-14 rounded-lg object-contain" /><p className="text-sm font-semibold leading-snug">{product.name}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
+                          <div className="flex min-w-0 items-start gap-3">
+                            <ProductImage url={product.imageUrl} name={product.name} onExpired={refreshImages} className="size-12 shrink-0 rounded-lg object-contain" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold leading-snug">{product.name}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
+                            </div>
                           </div>
                           <p className="whitespace-nowrap text-[15px] font-semibold tabular-nums">
                             {line ? formatCents(line.subtotalCents) : <span className="text-xs font-medium text-muted-foreground">{comparing || !selectedStore ? "…" : "No price"}</span>}
@@ -410,6 +419,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                           <ul className="mt-3 flex flex-col gap-2 rounded-[10px] bg-accent/40 p-3" aria-label={`Healthier alternatives to ${product.name}`}>
                             {options.map((option) => (
                               <li key={option.id} className="flex items-center gap-3">
+                                <ProductImage url={option.imageUrl} name={option.name} onExpired={refreshImages} className="size-10 shrink-0 rounded-md object-contain" />
                                 <div className="min-w-0 flex-1">
                                   <p className="text-[13px] font-semibold leading-snug">{option.name}</p>
                                   <p className="text-xs text-muted-foreground">{option.brand} · {packLabel(option)}</p>
