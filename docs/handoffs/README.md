@@ -2,7 +2,7 @@
 
 Notes passed between team members when one person's work becomes someone else's starting point.
 
-**Naming:** `<YYYY-MM-DD>-<feature>-<from>-to-<to>.md`, e.g. `2026-10-24-price-upload-backend-to-frontend.md`. One feature per file. The date is when the handoff was written, so the folder reads oldest first and each request sits just before its reply. A later handoff on the same feature gets a new file with a new date, rather than an edit to the old one.
+**Naming:** `<YYYY-MM-DD>-<feature>-<from>-to-<to>.md`, e.g. `2026-10-24-price-upload-backend-to-frontend.md`. One feature per file by default; related work handed over together may use one consolidated document. The date is when the handoff was written, so the folder reads oldest first and each request sits just before its reply. A later handoff on the same feature gets a new file with a new date, rather than an edit to the old one.
 
 | Date | Feature | From → to | Document | Status |
 |---|---|---|---|---|
@@ -14,8 +14,10 @@ Notes passed between team members when one person's work becomes someone else's 
 | 24 Oct 2026 | Smart Basket | backend → frontend | [2026-10-24-smart-basket-backend-to-frontend.md](2026-10-24-smart-basket-backend-to-frontend.md) | **Open**: frontend to build the page |
 | 25 Oct 2026 | Auth, API and price upload integration | frontend → team | [2026-10-25-frontend-integration-findings.md](2026-10-25-frontend-integration-findings.md) | **Complete** |
 | 27 Oct 2026 | Search & filter | backend → frontend | [2026-10-27-search-backend-to-frontend.md](2026-10-27-search-backend-to-frontend.md) | **Open**: Search page in progress, moving to `GET /products/search` |
-| 29 Oct 2026 | Price & image upload (changes) | backend → frontend | [2026-10-29-price-upload-backend-to-frontend.md](2026-10-29-price-upload-backend-to-frontend.md) | **Open, action needed**: photo uploads on `/contribute` fail until the upload-link call sends `productId` and `retailerId` |
-| 29 Oct 2026 | New product requests | backend → frontend | [2026-10-29-new-product-backend-to-frontend.md](2026-10-29-new-product-backend-to-frontend.md) | **Open**: backend done; contributor form and admin queue to build |
-| 30 Oct 2026 | Deleting a pending product request | backend → frontend | [2026-10-30-new-product-delete-backend-to-frontend.md](2026-10-30-new-product-delete-backend-to-frontend.md) | **Open**: backend done; Delete action in the contributor's list to build |
+| 29 Oct 2026 | Price & image upload (changes) | backend → frontend | [2026-10-29-price-upload-backend-to-frontend.md](2026-10-29-price-upload-backend-to-frontend.md) | Frontend integrated locally; deployed acceptance pending |
+| 29 Oct 2026 | New product requests | backend → frontend | [2026-10-29-new-product-backend-to-frontend.md](2026-10-29-new-product-backend-to-frontend.md) | Frontend integrated locally; deployed acceptance and policy follow-ups pending |
+| 30 Oct 2026 | Deleting a pending product request | backend → frontend | [2026-10-30-new-product-delete-backend-to-frontend.md](2026-10-30-new-product-delete-backend-to-frontend.md) | Frontend integrated locally; dev acceptance pending |
+| 3 Nov 2026 | Backend integration, product requests and auth spacing | frontend → backend | [2026-11-03-frontend-integration-frontend-to-backend.md](2026-11-03-frontend-integration-frontend-to-backend.md) | Implemented locally; remaining policy/security/rollout actions documented |
+| 4 Nov 2026 | When a product's prices were last updated (`priceUpdatedAt`) | backend → frontend | [2026-11-04-price-updated-backend-to-frontend.md](2026-11-04-price-updated-backend-to-frontend.md) | Search & filter shows it; Smart Basket optional |
 
 The API contract that the backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).

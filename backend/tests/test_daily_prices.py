@@ -167,3 +167,61 @@ def test_submissions_to_basket(aws):
     assert lines["shengsiong"] == []
     assert result["basket"]["recommendation"]["retailerId"] == "coldstorage"
     assert result["pricesUpdated"] is not None
+
+
+# ---------- priceUpdatedAt on products ----------
+
+OTHER_ID = "c0000000-0000-4000-8000-000000000001"
+
+
+def product(product_id):
+    return boto3.resource("dynamodb", region_name=REGION).Table(ENV["PRODUCT_TABLE"]).get_item(Key={"id": product_id}).get("Item")
+
+
+def add_product(product_id, **fields):
+    boto3.resource("dynamodb", region_name=REGION).Table(ENV["PRODUCT_TABLE"]).put_item(Item={"id": product_id, "name": "Other", **fields})
+
+
+def test_run_stamps_price_updated_at_only_on_products_with_new_prices(aws):
+    add_product(OTHER_ID, priceUpdatedAt="2026-10-01T16:05:00.000Z")
+    put_price(MILK_ID, "fairprice", 360, submitted_at=at(sgt_today() - timedelta(days=1)))
+    result = run({})
+    assert result["productsUpdated"] == 1
+    assert product(MILK_ID)["priceUpdatedAt"] == result["computedAt"]
+    assert product(OTHER_ID)["priceUpdatedAt"] == "2026-10-01T16:05:00.000Z"  # no new prices: kept
+
+
+def test_run_with_nothing_new_stamps_nothing(aws):
+    result = run({})
+    assert result["productsUpdated"] == 0 and "priceUpdatedAt" not in product(MILK_ID)
+
+
+def test_prices_for_a_deleted_product_do_not_recreate_it(aws):
+    put_price("deleted-product", "fairprice", 360, submitted_at=at(sgt_today() - timedelta(days=1)))
+    result = run({})
+    assert result["productsUpdated"] == 0
+    assert product("deleted-product") is None
+    assert ("deleted-product", "fairprice") in stored()  # the average itself is still stored, as before
+
+
+def test_backfill_stamps_one_time_for_the_whole_run(aws):
+    today = sgt_today()
+    put_price(MILK_ID, "fairprice", 300, submitted_at=at(today - timedelta(days=4)))
+    put_price(MILK_ID, "shengsiong", 310, submitted_at=at(today - timedelta(days=2)))
+    result = run({"backfillDays": 5})
+    assert result["productsUpdated"] == 1 and product(MILK_ID)["priceUpdatedAt"] == result["computedAt"]
+
+
+def test_sync_sets_the_latest_computed_at_per_product(aws):
+    add_product(OTHER_ID)
+    put_stored_price(MILK_ID, "fairprice", 363, computed_at="2026-10-30T16:05:00.000Z")
+    put_stored_price(MILK_ID, "shengsiong", 356, computed_at="2026-11-02T16:05:00.000Z")
+    put_stored_price("deleted-product", "fairprice", 300, computed_at="2026-11-03T16:05:00.000Z")
+    before = stored()
+    assert run({"syncProductTimestamps": True}) == {"productsUpdated": 1}
+    assert product(MILK_ID)["priceUpdatedAt"] == "2026-11-02T16:05:00.000Z"
+    assert "priceUpdatedAt" not in product(OTHER_ID)  # never priced
+    assert product("deleted-product") is None
+    assert stored() == before  # the stored averages themselves are untouched
+    assert run({"syncProductTimestamps": True}) == {"productsUpdated": 1}  # running it again is harmless
+    assert product(MILK_ID)["priceUpdatedAt"] == "2026-11-02T16:05:00.000Z"

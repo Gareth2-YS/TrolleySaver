@@ -1,5 +1,23 @@
-import { AlertTriangle, ChevronDown, Leaf, LoaderCircle, Minus, PiggyBank, Plus, Search, ShoppingBag, ShoppingBasket, Trash2, X } from "lucide-react"
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { ProductImage } from "../components/product-image"
+import {
+  AlertTriangle,
+  BadgeCheck,
+  ChartColumn,
+  ChevronDown,
+  ClipboardList,
+  Leaf,
+  LoaderCircle,
+  Minus,
+  PiggyBank,
+  Plus,
+  Search,
+  ShoppingBag,
+  ShoppingBasket,
+  Store,
+  Trash2,
+  X,
+} from "lucide-react"
+import { useEffect, useMemo, useRef, type KeyboardEvent, useState, type ReactNode } from "react"
 import { FormAlert } from "../components/auth/form-alert"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
@@ -81,6 +99,7 @@ function retailerNote(store: BasketStore, cheapest: BasketStore) {
 export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketService }) {
   const [service] = useState(() => serviceOverride ?? createBasketService())
   const [products, setProducts] = useState<Product[]>([])
+  const [imageRevision, setImageRevision] = useState(0)
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [items, setItems] = useState<BasketItem[]>(loadBasket)
@@ -103,7 +122,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
       .catch((error) => { if (active) setCatalogError(error instanceof Error ? error.message : "Could not load the product catalog.") })
       .finally(() => { if (active) setCatalogLoading(false) })
     return () => { active = false }
-  }, [service])
+  }, [service, imageRevision])
 
   const catalog = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
   // Saved lines for products no longer in the catalog are dropped once it loads.
@@ -354,11 +373,11 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
                     const options = alternatives.get(item.productId) ?? []
                     const swapOpen = swapOpenFor === item.productId && options.length > 0
                     return (
-                      <li key={item.productId} className="border-t border-border/60 py-4 last:border-b">
-                        <div className="mb-2.5 flex items-start gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="mb-0.5 text-sm font-semibold leading-snug">{product.name}</p>
-                            <p className="text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
+                      <li key={item.productId} className="py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <ProductImage url={product.imageUrl} name={product.name} onExpired={() => setImageRevision((n) => n + 1)} className="mb-2 size-14 rounded-lg object-contain" /><p className="text-sm font-semibold leading-snug">{product.name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
                           </div>
                           <p className="whitespace-nowrap text-[15px] font-semibold tabular-nums">
                             {line ? formatCents(line.subtotalCents) : <span className="text-xs font-medium text-muted-foreground">{comparing || !selectedStore ? "…" : "No price"}</span>}

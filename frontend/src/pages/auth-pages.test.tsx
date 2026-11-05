@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AuthProvider } from "../auth/auth-context"
+import { PublicOnlyRoute } from "../auth/route-guards"
 import type { AuthService } from "../auth/types"
 import { LoginPage } from "./login"
 import { RegisterPage } from "./register"
@@ -24,11 +25,25 @@ function renderAt(path: string, authService: AuthService) {
 }
 
 describe("authentication pages", () => {
+  it("explains a sign-in setup problem instead of loading forever", async () => {
+    const broken = { ...service(), getCurrentUser: vi.fn().mockRejectedValue(new Error("Cognito mode requires the AWS region, User Pool ID, and App Client ID environment variables.")) }
+    render(<MemoryRouter initialEntries={["/login"]}><AuthProvider serviceOverride={broken}><Routes><Route element={<PublicOnlyRoute />}><Route path="/login" element={<LoginPage />} /></Route></Routes></AuthProvider></MemoryRouter>)
+    expect(await screen.findByText("Sign-in isn't available")).toBeInTheDocument()
+    expect(screen.getByText(/Cognito mode requires the AWS region/)).toBeInTheDocument()
+    expect(screen.queryByText("Loading your session…")).not.toBeInTheDocument()
+  })
+
+  it("has no Remember me option, which never did anything", async () => {
+    renderAt("/login", service())
+    await screen.findByRole("heading", { name: "Welcome back" })
+    expect(screen.queryByText("Remember me")).not.toBeInTheDocument()
+  })
+
   it("never offers administrator registration", async () => {
     renderAt("/register", service())
     expect(await screen.findByRole("heading", { name: "Create your account" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /admin/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create user account" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create my account" })).toBeInTheDocument()
   })
 
   it("does not grant admin access based on the selected login mode", async () => {
@@ -39,7 +54,7 @@ describe("authentication pages", () => {
     await user.click(screen.getByRole("button", { name: /^admin$/i }))
     await user.type(screen.getByRole("textbox", { name: /Email address/i }), "alex@example.com")
     await user.type(screen.getByLabelText("Password", { selector: "input" }), "password")
-    await user.click(screen.getByRole("button", { name: "Log in as admin" }))
+    await user.click(screen.getByRole("button", { name: "Log in to review" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("does not have administrator access")
     expect(authService.signOut).toHaveBeenCalledOnce()
   })
@@ -51,7 +66,7 @@ describe("authentication pages", () => {
     await screen.findByRole("heading", { name: "Welcome back" })
     await user.type(screen.getByRole("textbox", { name: /Email address/i }), "admin@example.com")
     await user.type(screen.getByLabelText("Password", { selector: "input" }), "password")
-    await user.click(screen.getByRole("button", { name: "Log in as user" }))
+    await user.click(screen.getByRole("button", { name: "Log in & start sharing" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("must log in through the Admin tab")
     expect(authService.signOut).toHaveBeenCalledOnce()
   })

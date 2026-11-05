@@ -103,13 +103,14 @@ Returns every product, sorted by name.
       "dietary": ["halal"],
       "searchTerms": [],
       "minCents": 181,
-      "maxCents": 548
+      "maxCents": 548,
+      "priceUpdatedAt": "2026-11-03T16:05:01.230Z"
     }
   ]
 }
 ```
 
-See [Product](#product) for field details. Products added through an approved [product request](#post-product-requests) also have a picture: an `imageKey` and a signed **`imageUrl`** that works for 1 hour. The products the team loaded have no picture, so keep showing their category icon. The same applies to `GET /products/search`.
+See [Product](#product) for field details. **`priceUpdatedAt`** is on every product: when the nightly price job last recomputed any of its store prices (UTC), or `null` if it has never been priced. Products added through an approved [product request](#post-product-requests) also have a picture: an `imageKey` and a signed **`imageUrl`** that works for 1 hour. The products the team loaded have no picture, so keep showing their category icon. The same applies to `GET /products/search`.
 
 ### `GET /retailers`
 
@@ -414,7 +415,7 @@ Errors, in the order they're checked:
 | 400 | `INVALID_BODY` | Body isn't a JSON object |
 | 400 | `VALIDATION_ERROR` | `fieldErrors` names every missing or bad field, including `"productImageKey": "Upload a picture of the product"` and an unknown store |
 | 429 | `RATE_LIMITED` | More than 10 product requests in the past 24 hours |
-| 409 | `PRODUCT_EXISTS` | The catalog already has this product (same name, brand and pack size, ignoring case and spacing). The response includes **`productId`** so the user can submit a price for it instead. |
+| 409 | `PRODUCT_EXISTS` | The catalog already has this product (same name, brand, pack size and units per pack, ignoring case and spacing; a 6 × 1 L pack is not a duplicate of a single 1 L). The response includes **`productId`** so the user can submit a price for it instead. |
 | 409 | `PRODUCT_ALREADY_REQUESTED` | Someone has already proposed this product and it's waiting for an admin |
 | 400 | `VALIDATION_ERROR` | `productImageKey` or `photoKey` isn't one of the caller's own uploads for a product request |
 | 400 | `PHOTO_NOT_FOUND` / `INVALID_PHOTO` | Nothing was uploaded for that key, or it isn't a JPEG/PNG of 5 MiB or less |
@@ -607,6 +608,7 @@ Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[
 | `minCents`, `maxCents` | integer | Believable price range. Prices outside it are flagged. |
 | `imageKey`, `imageUrl` | string, optional | Only on products published from a product request. `imageUrl` is a signed link to the product's picture that works for **1 hour**. Products without it keep their category icon. |
 | `createdFromRequest`, `createdAt` | string, optional | Only on products published from a product request |
+| `priceUpdatedAt` | string (UTC ISO 8601) or `null` | When the nightly price job (00:05 SGT) last recomputed any of this product's store prices: that run's time. It only changes on nights when new accepted prices came in for the product. Always present in `GET /products` (`null` if never priced); in `GET /products/search`, present once set. Not the same as a store's `priceDate` (the day a store's average covers) or the page-wide `pricesUpdated` (the last run of all). |
 
 ### Retailer
 

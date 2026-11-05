@@ -1,3 +1,4 @@
+import { ProductImage } from "../components/product-image"
 import { Filter, Plus, Search, X } from "lucide-react"
 // import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -28,6 +29,7 @@ interface StorePrice {
 }
 
 interface SearchProduct {
+  imageUrl?: string
   id: string
   name: string
   brand?: string
@@ -40,6 +42,8 @@ interface SearchProduct {
   searchTerms?: string[]
   prices: Record<string, StorePrice>
   lowestPrice: { retailerId: string; retailerName: string | null; priceCents: number; priceDate: string } | null
+  // When the nightly price job last changed any of its store prices (UTC); missing if never priced
+  priceUpdatedAt?: string | null
 }
 
 interface SearchResult {
@@ -127,6 +131,14 @@ function getCategoryIcon(category?: string) {
   return category ? PRODUCT_CATEGORY_ICONS[normalizeCategory(category)] : undefined
 }
 
+const PRICE_UPDATED_FORMAT = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+
+// Shown in Singapore time whatever the browser's time zone, e.g. "Prices updated 4 Nov, 12:05 am"
+function getPriceUpdatedLabel(value?: string | null) {
+  const date = value ? new Date(value) : null
+  return date && !Number.isNaN(date.getTime()) ? `Prices updated ${PRICE_UPDATED_FORMAT.format(date)}` : null
+}
+
 function getPackDescription(product: SearchProduct) {
   const unitSize = [product.packQty, product.packUnit].filter((value) => value !== undefined).join(" ")
   if (!unitSize) return null
@@ -138,9 +150,11 @@ function ProductCard({
   product,
   basketQuantity,
   onAdd,
+  onImageExpired,
 }: {
   product: SearchProduct
   basketQuantity: number
+  onImageExpired: () => void
   onAdd: (productId: string) => void
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -148,6 +162,7 @@ function ProductCard({
   const packDescription = getPackDescription(product)
   // const lowestPrice = getLowestPrice(product)
   const lowestPrice = product.lowestPrice
+  const priceUpdated = getPriceUpdatedLabel(product.priceUpdatedAt)
   const categoryIcon = getCategoryIcon(product.category)
   const retailerIds = [
     ...Object.keys(RETAILER_NAMES),
@@ -172,7 +187,7 @@ function ProductCard({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            {categoryIcon && <img src={categoryIcon} alt="" aria-hidden="true" className="size-12 shrink-0 object-contain" />}
+            <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-12 shrink-0 object-contain" />
             <div className="min-w-0">
               <button
                 type="button"
@@ -212,6 +227,7 @@ function ProductCard({
             No current price available
           </p>
         )}
+        {priceUpdated && <p className="mt-2 text-xs text-muted-foreground">{priceUpdated}</p>}
 
         <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
           <div className="flex flex-wrap gap-2">
@@ -251,7 +267,7 @@ function ProductCard({
         <div className="space-y-6 p-6 sm:p-8">
           <header className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              {categoryIcon && <img src={categoryIcon} alt="" aria-hidden="true" className="size-14 shrink-0 object-contain" />}
+              <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-14 shrink-0 object-contain" />
               <div>
                 <h2 id={`product-title-${product.id}`} className="text-2xl font-semibold">{product.name}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -266,6 +282,7 @@ function ProductCard({
 
           <section aria-labelledby={`product-prices-title-${product.id}`}>
             <h3 id={`product-prices-title-${product.id}`} className="font-semibold">Current retailer prices</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{priceUpdated ?? "No prices yet"}</p>
             <div className="mt-3 divide-y divide-border rounded-lg border border-border">
               {retailerIds.map((retailerId) => {
                 const price = product.prices?.[retailerId]
@@ -307,6 +324,7 @@ function ProductCard({
 
 export function SearchProductsPage() {
   // const [products, setProducts] = useState<SearchProduct[]>([])
+  const [imageRevision, setImageRevision] = useState(0)
   const [result, setResult] = useState<SearchResult | null>(null)
   const [basketItems, setBasketItems] = useState<BasketItem[]>(loadBasket)
   const [loading, setLoading] = useState(true)
@@ -378,7 +396,7 @@ export function SearchProductsPage() {
     }, 300)
 
     return () => { clearTimeout(timer); controller.abort() }
-  }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, query])
+  }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, query, imageRevision])
 
 
 
@@ -550,6 +568,7 @@ export function SearchProductsPage() {
                 key={product.id}
                 product={product}
                 basketQuantity={basketQuantities.get(product.id) ?? 0}
+                onImageExpired={() => setImageRevision((n) => n + 1)}
                 onAdd={addToBasket}
               />
             ))}

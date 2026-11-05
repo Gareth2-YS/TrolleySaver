@@ -129,14 +129,22 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 
 **Before you start:** part 0 done in this terminal. The prompt ends in `\backend>`.
 
+**All at once:** one script runs 1.1, 1.2 and the frontend's unit tests, then prints a table of what passed. Add `--aws` to also run 1.3 and the Smart Basket evaluation (8.4) against dev:
+
+```powershell
+.venv\Scripts\python ..\tests\run_all.py --aws
+```
+
+**You should see:** each suite's output, then a summary with `Passed` on every row and `No failures.` at the end. A suite that can't run on your machine shows `Skipped` with what to set up (e.g. `run npm ci in frontend/ first`). `--only backend,lint` runs just those suites. The sections below run each suite on its own.
+
 ### 1.1 Unit tests
 
 ```powershell
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 203 tests of the Lambda code (including the Smart Basket, its daily prices, Search and new product requests) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `203 passed in …s`.
+**What it checks:** 212 tests of the Lambda code (including the Smart Basket, its daily prices, Search and new product requests) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `212 passed in …s`.
 
 ### 1.2 Template check
 
@@ -153,7 +161,7 @@ sam validate --lint
 ```
 
 **What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. Finally it proposes a new product with a picture, approves it and finds it in the catalog, and proposes a second one that its owner deletes while it's pending. Everything it created is deleted at the end, including the published product. Takes about a minute.
-**You should see:** 58 lines starting with `PASS`, then:
+**You should see:** 59 lines starting with `PASS`, then:
 
 ```
 PASS  deleting an approved request -> 409
@@ -658,7 +666,7 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `203 passed`
+- [ ] 1.1: `pytest` shows `212 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products
@@ -788,7 +796,7 @@ The basket only sees prices the nightly job has averaged. On a new environment, 
 - `.venv\Scripts\python scripts\invoke.py aggregate` processes yesterday only, which is what the 00:05 schedule does.
 - `--set date=2026-10-24` processes one day.
 
-**You should see:** one entry per day, with how many product–store prices it updated, then the run time:
+**You should see:** one entry per day, with how many product–store prices it updated, then the run time and how many products got a new `priceUpdatedAt` (the run time, set on every product with a recomputed price):
 
 ```
 {
@@ -797,9 +805,18 @@ The basket only sees prices the nightly job has averaged. On a new environment, 
     { "date": "2026-10-24", "pairsUpdated": 66 },
     …
   ],
-  "computedAt": "…"
+  "computedAt": "…",
+  "productsUpdated": 24
 }
 ```
+
+**Product timestamps only:** the nightly job stamps `priceUpdatedAt` on each product it prices. To fill it in for products priced before that existed, without recomputing any prices, run:
+
+```powershell
+.venv\Scripts\python scripts\invoke.py aggregate --set syncProductTimestamps=true
+```
+
+It sets each product's `priceUpdatedAt` to the newest `computedAt` among its `retailer-price` rows, and skips products that have been deleted. Running it again is safe: it writes the same values, so it reports the same count. **You should see:** `{"productsUpdated": 24}`, or however many products have prices. Then `.venv\Scripts\python scripts\invoke.py products` shows `"priceUpdatedAt": "…Z"` on each priced product, and `null` on the rest.
 
 To check the nightly schedule exists and when it runs next:
 
@@ -813,16 +830,17 @@ aws scheduler get-schedule --name trolleysaver-dev-daily-prices --query "{state:
 .venv\Scripts\python -m pytest tests\test_basket_compare.py tests\test_basket_handler.py tests\test_daily_prices.py -v
 ```
 
-**What it checks:** 62 tests, using an in-memory fake of AWS.
+**What it checks:** 67 tests, using an in-memory fake of AWS.
 - **Calculation:** totals, ranking, unpriced items, savings over the full basket and over common items only, tie-breaks.
 - **Healthier basket:** swaps, "already Healthier Choice", "no Healthier Choice option", the cheapest option per store, and no fallback to the original when a store lacks the healthier product.
 - **Daily prices:**
   - Window edges at Singapore midnight, accepted prices only, admin-accepted prices on their acceptance day, half-up rounding.
   - Carry-forward, safe re-runs, backfill order, stale averages, and `pricesUpdated`.
+  - Each product's `priceUpdatedAt`: set only when its prices change, never on a deleted product, and filled in by `syncProductTimestamps`.
   - One end-to-end test runs the whole path: submissions, then the job, then the basket.
 - **Requests:** every validation error.
 
-**You should see:** `62 passed`.
+**You should see:** `67 passed`.
 
 ### 8.2 Write the test baskets
 

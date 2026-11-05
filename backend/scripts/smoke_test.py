@@ -93,6 +93,9 @@ def main():
         r = call("GET", "/products")
         products = r.json().get("items", []) if r.ok else []
         t.check("GET /products is public", r.status_code == 200 and len(products) > 0, r.status_code)
+        t.check("GET /products returns priceUpdatedAt on every product",
+                all("priceUpdatedAt" in p for p in products) and any(p.get("priceUpdatedAt") for p in products),
+                [p.get("name") for p in products if "priceUpdatedAt" not in p][:5])
         r = call("GET", "/retailers")
         retailers = [x["id"] for x in r.json().get("items", [])] if r.ok else []
         t.check("GET /retailers is public", r.status_code == 200 and "fairprice" in retailers, r.text[:200])
