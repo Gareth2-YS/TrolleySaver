@@ -6,7 +6,8 @@ PATCH /admin/product-requests/{id}             {"decision": "approved", "changes
 
 Approving publishes the product and its first price. In one transaction with the request's status change
 it creates the product (its picture copied to product-images/<productId>.<ext>) and the price as an
-accepted submission. The price counts towards the daily average of the day it was approved (reviewedAt).
+accepted submission. The price counts towards the daily average of the day it was approved (reviewedAt),
+so a request whose price was seen more than 30 days before that can't be approved, only rejected.
 """
 
 import uuid
@@ -20,7 +21,7 @@ from common.auth import require_admin
 from common.http import ApiError, api_handler, parse_json_body, response
 from common.images import delete_quietly, product_image_key
 from common.product_requests import PRODUCT_FIELDS, find_existing_product, to_records, validate_approval_changes
-from common.validation import to_iso
+from common.validation import MAX_OBSERVED_AGE_DAYS, observed_too_old, to_iso
 
 STATUSES = ("pending", "approved", "rejected")
 DECISIONS = ("approved", "rejected")
@@ -38,14 +39,8 @@ def list_requests(event):
         "ScanIndexForward": False,
         "Limit": db.page_limit(event),
     }
-    start_key = db.decode_page_token(params.get("nextToken"))
-    if start_key:
-        query["ExclusiveStartKey"] = start_key
-    page = db.product_requests().query(**query)
-    return response(200, {
-        "items": to_records(page["Items"], admin=True),
-        "nextToken": db.encode_page_token(page.get("LastEvaluatedKey")),
-    })
+    items, next_token = db.query_page(db.product_requests(), query, params.get("nextToken"), ("requestId", "status", "submittedAt"))
+    return response(200, {"items": to_records(items, admin=True), "nextToken": next_token})
 
 
 def _load(request_id):
@@ -77,7 +72,16 @@ def reject(item, reason, admin, now):
     return _load(item["requestId"])
 
 
+def _parse_iso(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def approve(item, changes, admin, now):
+    # The first price counts on the day it's approved, so it must still be recent enough then.
+    if observed_too_old(_parse_iso(item["observedAt"]), _parse_iso(now)):
+        raise ApiError(409, "OBSERVATION_TOO_OLD",
+                       f"This request's price was seen more than {MAX_OBSERVED_AGE_DAYS} days ago, so it can't be "
+                       "published as a current price. Reject it and ask the contributor for a fresh one.")
     field_changes, min_cents, max_cents, search_terms = validate_approval_changes(changes, int(item["priceCents"]))
     fields = {field: item[field] for field in PRODUCT_FIELDS}
     fields.update(field_changes)

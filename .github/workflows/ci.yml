@@ -1,11 +1,68 @@
+# Continuous integration: every push and pull request runs all the automated checks that need no AWS
+# access. Deploying is a separate, deliberate step: python infra/deploy.py (see docs/deployment.md).
 name: CI
 
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  pass:
+  backend:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12" # the Lambda runtime
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      # moto fakes DynamoDB, S3 and Cognito in memory; nothing is sent to AWS.
+      - run: python -m pytest
+
+  frontend:
+    name: Frontend lint, types, tests and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      # The production build refuses mock sign-in, so build it the way infra/deploy.py does.
+      - run: npm run build
+        env:
+          VITE_AUTH_MODE: cognito
+          VITE_PRICE_SUBMISSION_MODE: api
+          VITE_SMART_BASKET_MODE: api
+
+  template:
+    name: Template lint
     runs-on: ubuntu-latest
     steps:
-      - run: echo "CI passed"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # cfn-lint is what `sam validate --lint` runs, without needing AWS credentials.
+      - run: pip install cfn-lint
+      - run: cfn-lint backend/template.yaml

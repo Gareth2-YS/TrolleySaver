@@ -47,6 +47,45 @@ def test_my_submissions_pagination(aws):
     assert status == 200 and len(page2["items"]) == 1 and page2["nextToken"] is None
 
 
+@pytest.mark.parametrize("start_key", [{"foo": "bar"}, {"productId": MILK_ID}])
+def test_page_token_that_does_not_fit_the_query_is_400(aws, start_key):
+    """A token that decodes but isn't a start key for this list (edited by hand, or from another list)."""
+    from common import db
+
+    submit(300)
+    token = db.encode_page_token(start_key)
+    for handler, resource, groups in ((my_submissions.handler, "/price-submissions/mine", None),
+                                      (admin_submissions.handler, "/admin/price-submissions", "admin")):
+        status, error = call(handler, api_event("GET", resource, groups=groups, query={"nextToken": token}))
+        assert status == 400 and error["code"] == "INVALID_PAGE_TOKEN", (resource, status, error)
+
+
+def test_garbage_page_token_is_400(aws):
+    status, error = call(my_submissions.handler, api_event("GET", "/price-submissions/mine", query={"nextToken": "not-a-token"}))
+    assert status == 400 and error["code"] == "INVALID_PAGE_TOKEN"
+
+
+def test_start_key_dynamodb_refuses_is_400():
+    """Real DynamoDB refuses a well-formed start key from another partition (e.g. another user's list)
+    with a ValidationException; moto can't reproduce that, so a stand-in table raises it."""
+    from botocore.exceptions import ClientError
+
+    from common import db
+    from common.http import ApiError
+
+    class RefusingTable:
+        def query(self, **kwargs):
+            raise ClientError({"Error": {"Code": "ValidationException", "Message": "The provided starting key is invalid"}}, "Query")
+
+    keys = ("productId", "sk", "userId", "submittedAt")
+    token = db.encode_page_token({name: "x" for name in keys})
+    with pytest.raises(ApiError) as raised:
+        db.query_page(RefusingTable(), {}, token, keys)
+    assert raised.value.status == 400 and raised.value.code == "INVALID_PAGE_TOKEN"
+    with pytest.raises(ClientError):  # without a token it's a genuine failure, not the client's fault
+        db.query_page(RefusingTable(), {}, None, keys)
+
+
 @pytest.mark.parametrize("groups", [None, "user"])
 def test_admin_routes_forbidden_for_non_admins(aws, groups):
     assert admin_list(groups=groups)[0] == 403

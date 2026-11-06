@@ -17,11 +17,6 @@ def handler(event, context):
         "ScanIndexForward": False,
         "Limit": db.page_limit(event),
     }
-    start_key = db.decode_page_token((event.get("queryStringParameters") or {}).get("nextToken"))
-    if start_key:
-        query["ExclusiveStartKey"] = start_key
-    page = db.submissions().query(**query)
-    return response(200, {
-        "items": to_records(page["Items"]),
-        "nextToken": db.encode_page_token(page.get("LastEvaluatedKey")),
-    })
+    token = (event.get("queryStringParameters") or {}).get("nextToken")
+    items, next_token = db.query_page(db.submissions(), query, token, ("productId", "sk", "userId", "submittedAt"))
+    return response(200, {"items": to_records(items), "nextToken": next_token})

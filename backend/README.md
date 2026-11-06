@@ -1,6 +1,6 @@
 # TrolleySaver backend
 
-Serverless backend for **login** (Cognito), **product search**, **community price & photo submissions**, **new product requests** and the **Smart Basket** comparison (API Gateway → Lambda → DynamoDB, with photos and product pictures in private S3). Everything is defined in [template.yaml](template.yaml) (AWS SAM) and deployed as the **`trolleysaver-dev`** stack.
+Serverless backend for **login** (Cognito), **product search**, **community price & photo submissions**, **new product requests** and the **Smart Basket** comparison (API Gateway → Lambda → DynamoDB, with photos and product pictures in private S3). Everything is defined in [template.yaml](template.yaml) (AWS SAM), together with the web app's hosting (S3 + CloudFront), and deployed as the **`trolleysaver-dev`** stack. **To deploy, run `python infra\deploy.py` from the repository root:** see [docs/deployment.md](../docs/deployment.md).
 
 | Looking for | Go to |
 |---|---|
@@ -22,7 +22,7 @@ Serverless backend for **login** (Cognito), **product search**, **community pric
 | `scripts/create_admin.py` | Creates an admin account |
 | `scripts/invoke.py` | Calls any Lambda directly as any user, without Cognito |
 | `scripts/basket_eval.py` | Smart Basket evaluation: checks the backend's totals and savings against figures worked out from the spreadsheet, for the baskets in `scripts/basket_cases.json` |
-| `scripts/smoke_test.py` | 59 end-to-end checks over real HTTP, including the Smart Basket, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
+| `scripts/smoke_test.py` | 64 end-to-end checks over real HTTP, including the Smart Basket, CORS for the local and deployed sites, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
 | `tests/` | Unit tests (pytest + moto, no AWS needed) |
 
 ## Setup
@@ -61,7 +61,8 @@ Run these from the `backend` folder:
 | `.venv\Scripts\python ..\tests\run_all.py` | Every test suite (backend, frontend, template lint), then a pass/fail table. Add `--aws` for the smoke test and basket evaluation on dev. |
 | `.venv\Scripts\python -m pytest` | Unit tests (no AWS) |
 | `sam validate --lint` | Checks the template |
-| `sam deploy --config-env dev` | Deploys code or infrastructure changes |
+| `python ..\infra\deploy.py --profile <profile>` | The full deploy: tests, this stack, then the web app ([docs/deployment.md](../docs/deployment.md)) |
+| `sam deploy --config-env dev` | Deploys just this stack's code or infrastructure changes |
 | `.venv\Scripts\python scripts\smoke_test.py` | End-to-end check of the deployed stack |
 | `.venv\Scripts\python scripts\seed_catalog.py --env dev --dry-run` | Shows what the spreadsheet would add |
 | `.venv\Scripts\python scripts\create_admin.py --env dev --email you@example.com --name "Your Name"` | Creates an admin account |

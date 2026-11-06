@@ -2,9 +2,7 @@ import { ProductImage } from "../components/product-image"
 import {
   AlertTriangle,
   BadgeCheck,
-  ChartColumn,
   ChevronDown,
-  ClipboardList,
   Leaf,
   LoaderCircle,
   Minus,
@@ -13,7 +11,6 @@ import {
   Search,
   ShoppingBag,
   ShoppingBasket,
-  Store,
   Trash2,
   X,
 } from "lucide-react"

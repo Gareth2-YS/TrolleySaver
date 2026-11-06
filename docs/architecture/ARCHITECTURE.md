@@ -1,6 +1,6 @@
 # TrolleySaver Architecture
 
-**Status:** Draft · **Last updated:** 29 Oct 2026
+**Status:** Draft · **Last updated:** 6 Nov 2026
 
 How TrolleySaver's cloud components fit together. It builds on the Preliminary Report's architecture.
 
@@ -31,7 +31,7 @@ flowchart TB
     S["EventBridge Scheduler<br/>00:05 SGT daily"]
     AG["price-aggregator λ<br/>daily average price"]
     P[("S3 photo bucket<br/>private")]
-    CF["CloudFront + S3<br/>static frontend<br/><i>not built yet</i>"]
+    CF["CloudFront + S3<br/>web app (HTTPS)"]
 
     B -- "sign-up / sign-in (Amplify)" --> C
     C --> PSU
@@ -54,7 +54,7 @@ flowchart TB
 
 | Component | Service | Role | Status |
 |---|---|---|---|
-| Frontend hosting | S3 + CloudFront | Serves the built React app via CDN | Decided (the frontend runs locally for now) |
+| Frontend hosting | S3 + CloudFront | Serves the built React app over HTTPS from a private bucket (Origin Access Control), with a fallback to `index.html` for the app's own routes and AWS's security-headers policy. Published by `infra/deploy.py`; see [deployment.md](../deployment.md). | Built |
 | Auth | Cognito User Pool + 2 trigger Lambdas | Sign-up (confirmed automatically), sign-in, `user`/`admin` groups. The user id (`sub`) is attached to every submission. | Built |
 | API | API Gateway (REST) | Routing, CORS, and a Cognito authorizer that accepts access tokens only | Built |
 | Backend | Lambda | Catalog, product search, photo upload URLs, price submissions, new product requests, admin moderation, Smart Basket comparison | Built |
@@ -62,7 +62,8 @@ flowchart TB
 | Database | DynamoDB, on-demand | 6 tables + 5 GSIs: product, retailer, user, price-submission, retailer-price (daily average price per product and store) and product-request (proposed products awaiting an admin). See [database-design.md](database-design.md). | Built |
 | Scheduled jobs | EventBridge Scheduler | Runs `price-aggregator` at 00:05 SGT every day | Built |
 | Photo storage | S3, private | Shelf-tag evidence photos (admins only, 5-minute links) and product pictures (1-hour links on the catalog), uploaded and viewed only through presigned URLs | Built |
-| Infrastructure as code | AWS SAM (`backend/template.yaml`) | One CloudFormation stack per environment | Built |
+| Infrastructure as code | AWS SAM (`backend/template.yaml`) | One CloudFormation stack per environment, including the web app's hosting | Built |
+| Deployment and CI | `infra/deploy.py`, GitHub Actions | One command tests, deploys the stack and publishes the web app. CI runs every test suite and the template lint on each push. See [deployment.md](../deployment.md). | Built |
 | Cost guard | AWS Budgets alarm | Cap spend before stress testing | Proposed (Xinpeng) |
 | Region | ap-southeast-1 | All users are in Singapore | Built |
 
@@ -281,7 +282,7 @@ sequenceDiagram
   - out-of-range prices wait for an admin, and only `accepted` prices count
   - new products wait for an admin before anyone sees them
 - **Least-privilege IAM:** each Lambda can only use the tables and bucket prefix it needs.
-- **CORS** only allows the frontend origin (`http://localhost:5173` for now).
+- **CORS** only allows the local dev server (`http://localhost:5173`) and the deployed site (the CloudFront URL): API responses name the caller's origin only when it's one of those, and the photo bucket accepts uploads only from them ([deployment.md §5](../deployment.md#5-cors-which-sites-may-call-the-api)).
 
 **Proposed:**
 - Scanning image content

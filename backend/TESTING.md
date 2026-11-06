@@ -143,8 +143,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 212 tests of the Lambda code (including the Smart Basket, its daily prices, Search and new product requests) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `212 passed in …s`.
+**What it checks:** 234 tests of the Lambda code (including the Smart Basket, its daily prices, Search, new product requests, date and pagination rules, and CORS) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `234 passed in …s`.
 
 ### 1.2 Template check
 
@@ -160,8 +160,8 @@ sam validate --lint
 .venv\Scripts\python scripts\smoke_test.py
 ```
 
-**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. Finally it proposes a new product with a picture, approves it and finds it in the catalog, and proposes a second one that its owner deletes while it's pending. Everything it created is deleted at the end, including the published product. Takes about a minute.
-**You should see:** 59 lines starting with `PASS`, then:
+**What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. It also checks CORS: API responses name only the local dev server and the deployed site, and the photo bucket accepts uploads from the site. Finally it proposes a new product with a picture, approves it and finds it in the catalog, and proposes a second one that its owner deletes while it's pending. Everything it created is deleted at the end, including the published product. Takes about a minute.
+**You should see:** 64 lines starting with `PASS`, then:
 
 ```
 PASS  deleting an approved request -> 409
@@ -659,14 +659,11 @@ Check [Common problems](#common-problems) first. Then:
    - **What appears:** refused requests are logged as `Client error <CODE>: …`, and crashes (`HTTP 500`) with a full Python traceback.
 3. **Reproduce it locally.** Add `--local` to the same `invoke.py` command. It then runs the code in your `lambdas/` folder against the real dev tables, so you can add `print()` calls or breakpoints without deploying.
 4. **Look at the data.** AWS console → DynamoDB → Tables → `trolleysaver-dev-price-submission` → *Explore table items*. Photos are in S3 → `trolleysaver-dev-photos-…` → `price-evidence/`.
-5. **After fixing code:**
-   1. `.venv\Scripts\python -m pytest`
-   2. `sam deploy --config-env dev`
-   3. `.venv\Scripts\python scripts\smoke_test.py`
+5. **After fixing code:** from the repository root, `python infra\deploy.py --profile <profile> --smoke`. It runs the tests, deploys the stack and the web app, then the smoke test ([docs/deployment.md](../docs/deployment.md)). For a backend-only fix, add `--backend-only`.
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `212 passed`
+- [ ] 1.1: `pytest` shows `234 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products

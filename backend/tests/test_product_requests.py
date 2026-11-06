@@ -399,6 +399,38 @@ def test_approve_refused_if_product_was_added_meanwhile(aws, pending):
     assert object_exists(IMAGE_KEY)
 
 
+def test_request_whose_price_is_over_30_days_old_cannot_be_approved(aws, pending):
+    """Approval publishes the first price as today's, so a stale one is refused; rejecting still works."""
+    old = (datetime.now(SGT) - timedelta(days=31)).replace(hour=0, minute=0, second=0, microsecond=0)
+    aws.Table("unit-product-request").update_item(
+        Key={"requestId": pending["id"]}, UpdateExpression="SET observedAt = :old",
+        ExpressionAttributeValues={":old": old.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")})
+    status, error = decide(pending["id"], {"decision": "approved"})
+    assert status == 409 and error["code"] == "OBSERVATION_TOO_OLD" and "more than 30 days ago" in error["message"]
+    assert aws.Table("unit-product").scan()["Count"] == 1 and object_exists(IMAGE_KEY)
+    assert admin_list()[1]["items"][0]["status"] == "pending"
+    assert decide(pending["id"], {"decision": "rejected", "reason": "Price too old"})[0] == 200
+
+
+def test_request_whose_price_is_exactly_30_days_old_can_still_be_approved(aws, pending):
+    day = (datetime.now(SGT) - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
+    aws.Table("unit-product-request").update_item(
+        Key={"requestId": pending["id"]}, UpdateExpression="SET observedAt = :day",
+        ExpressionAttributeValues={":day": day.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")})
+    assert decide(pending["id"], {"decision": "approved"})[0] == 200
+
+
+def test_mine_rejects_a_page_token_from_another_list(aws, pending):
+    from common import db
+
+    token = db.encode_page_token({"productId": MILK_ID, "sk": "fairprice#x"})
+    status, error = call(product_requests.handler, api_event("GET", "/product-requests/mine", query={"nextToken": token}))
+    assert status == 400 and error["code"] == "INVALID_PAGE_TOKEN"
+    status, error = call(admin_product_requests.handler, api_event(
+        "GET", "/admin/product-requests", user_id=ADMIN_ID, groups="admin", query={"nextToken": token}))
+    assert status == 400 and error["code"] == "INVALID_PAGE_TOKEN"
+
+
 def test_unknown_request_and_bad_decision(aws, pending):
     assert decide("no-such-request", {"decision": "approved"})[0] == 404
     status, error = decide(pending["id"], {"decision": "accepted"})

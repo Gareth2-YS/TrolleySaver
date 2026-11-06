@@ -31,14 +31,8 @@ def list_submissions(event):
         "ScanIndexForward": False,
         "Limit": db.page_limit(event),
     }
-    start_key = db.decode_page_token(params.get("nextToken"))
-    if start_key:
-        query["ExclusiveStartKey"] = start_key
-    page = db.submissions().query(**query)
-    return response(200, {
-        "items": to_records(page["Items"], admin=True),
-        "nextToken": db.encode_page_token(page.get("LastEvaluatedKey")),
-    })
+    items, next_token = db.query_page(db.submissions(), query, params.get("nextToken"), ("productId", "sk", "status", "submittedAt"))
+    return response(200, {"items": to_records(items, admin=True), "nextToken": next_token})
 
 
 def moderate(event, admin):

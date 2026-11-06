@@ -220,5 +220,131 @@ describe("smart basket page", () => {
     localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
     renderBasket(basketService(fullPrices, { compare: vi.fn().mockRejectedValue(new Error("Could not reach the price comparison service.")) }))
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not reach the price comparison service."))
+    // Once the comparison has failed the page stops saying it is still comparing.
+    expect(screen.getAllByText("No store prices yet").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Comparing store prices…")).not.toBeInTheDocument()
+  })
+
+  it("handles a basket that no store has a price for", async () => {
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    renderBasket(basketService({}))
+
+    const alpha = await screen.findByRole("radio", { name: /Alpha Mart/ })
+    expect(alpha).toHaveTextContent("0 priced · 1 missing")
+    // Nothing is priced anywhere, so no store is "Cheapest" and there's no saving to show.
+    for (const store of screen.getAllByRole("radio")) expect(within(store).queryByText("Cheapest")).not.toBeInTheDocument()
+    expect(screen.getByText("Potential savings, up to").previousElementSibling).toHaveTextContent("—")
+    expect(screen.getByText(/No single store has a price for every item yet/)).toBeInTheDocument()
+    expect(within(screen.getByRole("list", { name: "Basket items" })).getByText("No price")).toBeInTheDocument()
+  })
+
+  it("moves between stores with the arrow keys", async () => {
+    const user = userEvent.setup()
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    renderBasket(basketService(fullPrices))
+
+    // Ranked Beta (18.60), Alpha (18.80), Gamma (19.80).
+    await user.click(await screen.findByRole("radio", { name: /Beta Grocer/ }))
+    await user.keyboard("{ArrowRight}")
+    expect(screen.getByRole("radio", { name: /Alpha Mart/ })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByRole("radio", { name: /Alpha Mart/ })).toHaveFocus()
+    expect(screen.getByText("Total at Alpha Mart")).toBeInTheDocument()
+    await user.keyboard("{ArrowRight}{ArrowRight}")
+    expect(screen.getByRole("radio", { name: /Beta Grocer/ })).toHaveAttribute("aria-checked", "true")
+    await user.keyboard("{ArrowLeft}")
+    expect(screen.getByRole("radio", { name: /Gamma Foods/ })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("highlights each item's lowest store price", async () => {
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    renderBasket(basketService(fullPrices))
+    const perItem = await screen.findByRole("region", { name: "Price per item" })
+    await within(perItem).findByText("$18.60")
+    expect(within(perItem).getByText("$18.60").closest("div")).toHaveClass("border-primary")
+    expect(within(perItem).getByText("$18.80").closest("div")).not.toHaveClass("border-primary")
+    expect(within(perItem).getByText("$19.80").closest("div")).not.toHaveClass("border-primary")
+  })
+
+  describe("healthier options", () => {
+    const breads: Product[] = [
+      ...products,
+      { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false },
+      { id: "big", name: "Big Wholemeal Loaf", brand: "Sunshine", category: "bread", packQty: 800, packUnit: "g", hcs: true },
+      { id: "rolls", name: "Wholemeal Rolls", brand: "Sunshine", category: "bread", packQty: 6, packUnit: "pcs", hcs: true },
+    ]
+
+    function breadService(prices: PriceTable) {
+      return basketService(prices, {
+        listProducts: vi.fn().mockResolvedValue(breads),
+        compare: vi.fn().mockImplementation(async (items: BasketItem[]) => ({ priceMaxAgeDays: 30, basket: compareBasket(items, breads, retailers, prices) })),
+      })
+    }
+
+    async function openOptions(user: ReturnType<typeof userEvent.setup>, count: number) {
+      await screen.findByRole("radio", { name: /Beta Grocer/ })
+      await user.click(screen.getByRole("button", { name: `Healthier options (${count})` }))
+      return screen.getByRole("dialog", { name: "Healthier choices" })
+    }
+
+    it("sorts by lowest price, or by price per 100 g with unconvertible units last", async () => {
+      const user = userEvent.setup()
+      localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "white", quantity: 1 }]))
+      renderBasket(breadService({
+        white: { a: at(260), b: at(250), c: at(270) },
+        bread: { a: at(330), b: at(320), c: at(340) },  // 400 g: 80¢ / 100 g
+        big: { a: at(500), b: at(500), c: at(520) },    // 800 g: 62.5¢ / 100 g
+        rolls: { a: at(200), b: at(200), c: at(210) },  // pcs: no unit price
+      }))
+      const dialog = await openOptions(user, 3)
+      const options = () => within(within(dialog).getByRole("list", { name: "Healthier Choice options" })).getAllByRole("listitem")
+      await within(dialog).findByText("$2.00")
+
+      // Lowest price first (at Beta, the selected store).
+      expect(options().map((item) => item.textContent)).toEqual([
+        expect.stringMatching(/^1Cheapest.*Wholemeal Rolls/), expect.stringMatching(/^2.*Wholemeal Bread/), expect.stringMatching(/^3.*Big Wholemeal Loaf/),
+      ])
+      await user.click(within(dialog).getByRole("button", { name: "Best unit price" }))
+      expect(within(dialog).getByRole("button", { name: "Best unit price" })).toHaveAttribute("aria-pressed", "true")
+      expect(options().map((item) => item.textContent)).toEqual([
+        expect.stringMatching(/^1Best value.*Big Wholemeal Loaf/), expect.stringMatching(/^2.*Wholemeal Bread/), expect.stringMatching(/^3.*Wholemeal Rolls/),
+      ])
+    })
+
+    it("can't swap to an option the selected store has no price for", async () => {
+      const user = userEvent.setup()
+      localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "white", quantity: 1 }]))
+      // Beta is cheapest for white bread, but only Alpha prices the wholemeal loaf.
+      renderBasket(breadService({ white: { a: at(260), b: at(250), c: at(270) }, bread: { a: at(330) } }))
+      let dialog = await openOptions(user, 3)
+      const swap = () => within(dialog).getByRole("button", { name: "Swap White Bread for Wholemeal Bread" })
+      await waitFor(() => expect(swap()).toBeDisabled())
+      expect(within(dialog).getAllByText(/No price at Beta Grocer/).length).toBeGreaterThan(0)
+
+      await user.click(within(dialog).getByRole("button", { name: "Close" }))
+      await user.click(screen.getByRole("radio", { name: /Alpha Mart/ }))
+      await user.click(screen.getByRole("button", { name: "Healthier options (3)" }))
+      dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+      await waitFor(() => expect(swap()).toBeEnabled())
+    })
+  })
+
+  it("enlarges a product picture and closes it again", async () => {
+    const user = userEvent.setup()
+    const withPicture = products.map((product) => (product.id === "milk" ? { ...product, imageUrl: "https://img.example/milk.png" } : product))
+    renderBasket(basketService(fullPrices, { listProducts: vi.fn().mockResolvedValue(withPicture) }))
+
+    // Only products with a picture can be enlarged.
+    expect(screen.queryByRole("button", { name: "Enlarge image of Thai Rice" })).not.toBeInTheDocument()
+    await user.click(await screen.findByRole("button", { name: "Enlarge image of Fresh Milk" }))
+    const preview = screen.getByRole("dialog", { name: "Enlarged image of Fresh Milk" })
+    expect(within(preview).getByRole("img", { name: "Fresh Milk" })).toHaveAttribute("src", "https://img.example/milk.png")
+
+    await user.click(within(preview).getByRole("button", { name: "Close enlarged image of Fresh Milk" }))
+    expect(preview).toHaveProperty("open", false)
+    // Clicking the backdrop (the dialog itself, outside its content) closes it too.
+    await user.click(screen.getByRole("button", { name: "Enlarge image of Fresh Milk" }))
+    expect(preview).toHaveProperty("open", true)
+    await user.click(preview)
+    expect(preview).toHaveProperty("open", false)
   })
 })

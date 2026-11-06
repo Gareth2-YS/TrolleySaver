@@ -70,13 +70,24 @@ def validate_evidence_upload_request(body):
     return product_id.strip(), retailer_id.strip(), content_type, size
 
 
+def observed_too_old(observed, now):
+    """True when a price was seen before the oldest allowed Singapore calendar day: today (SGT)
+    minus MAX_OBSERVED_AGE_DAYS. The frontend's date picker uses the same day, so its earliest
+    date is always accepted."""
+    earliest = now.astimezone(SGT).date() - timedelta(days=MAX_OBSERVED_AGE_DAYS)
+    return observed.astimezone(SGT).date() < earliest
+
+
 def parse_observed_at(value, now):
-    """Accept a date (YYYY-MM-DD, read as midnight SGT) or an ISO datetime; naive datetimes are SGT."""
+    """Accept a date (YYYY-MM-DD, read as midnight SGT) or an ISO datetime; naive datetimes are SGT.
+
+    A date is checked by Singapore calendar day, a datetime to the moment."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("Choose the observed date")
     value = value.strip()
+    date_only = len(value) == 10
     try:
-        if len(value) == 10:
+        if date_only:
             observed = datetime.combine(datetime.strptime(value, "%Y-%m-%d").date(), time(), SGT)
         else:
             observed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -86,7 +97,8 @@ def parse_observed_at(value, now):
         raise ValueError("Must be a date (YYYY-MM-DD) or ISO 8601 datetime")
     if observed > now + CLOCK_SKEW:
         raise ValueError("Observed date cannot be in the future")
-    if observed < now - timedelta(days=MAX_OBSERVED_AGE_DAYS):
+    too_old = observed_too_old(observed, now) if date_only else observed < now - timedelta(days=MAX_OBSERVED_AGE_DAYS)
+    if too_old:
         raise ValueError(f"Observed date must be within the last {MAX_OBSERVED_AGE_DAYS} days")
     return observed
 
