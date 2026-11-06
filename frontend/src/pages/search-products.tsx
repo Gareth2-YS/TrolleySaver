@@ -6,18 +6,8 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { useBasketItems } from "../basket/use-basket-items"
-import breadIcon from "../../assets/product-icons/Bread.svg"
-import cerealIcon from "../../assets/product-icons/Cereal.svg"
-import coffeeIcon from "../../assets/product-icons/Coffee.svg"
-import cookieIcon from "../../assets/product-icons/Cookie.svg"
-import detergentIcon from "../../assets/product-icons/Detergent.svg"
-import eggIcon from "../../assets/product-icons/Egg.svg"
-import milkIcon from "../../assets/product-icons/Milk.svg"
-import paperIcon from "../../assets/product-icons/Paper.svg"
-import riceIcon from "../../assets/product-icons/Rice.svg"
-import softDrinkIcon from "../../assets/product-icons/Soft.svg"
-import teaIcon from "../../assets/product-icons/Tea.svg"
-import yogurtIcon from "../../assets/product-icons/Yogurt.svg"
+import { getCategoryIcon, normalizeCategory } from "../lib/category-icons"
+import { formatCents } from "../lib/format"
 
 interface StorePrice {
   priceCents: number
@@ -60,31 +50,12 @@ interface SearchCriteria {
   maximumPrice: string
 }
 
-const RETAILER_NAMES: Record<string, string> = {
-  fairprice: "FairPrice",
-  shengsiong: "Sheng Siong",
-  coldstorage: "Cold Storage",
+interface Retailer {
+  id: string
+  name: string
 }
 
 const QUICK_CATEGORY_LABELS = ["cereal", "milk", "soft drinks", "cookies", "toilet rolls"]
-
-const PRODUCT_CATEGORY_ICONS: Record<string, string> = {
-  bread: breadIcon,
-  cereal: cerealIcon,
-  coffee: coffeeIcon,
-  cookies: cookieIcon,
-  detergent: detergentIcon,
-  "laundry detergent": detergentIcon,
-  eggs: eggIcon,
-  milk: milkIcon,
-  dairy: milkIcon,
-  paper: paperIcon,
-  "toilet rolls": paperIcon,
-  rice: riceIcon,
-  "soft drinks": softDrinkIcon,
-  tea: teaIcon,
-  yoghurt: yogurtIcon,
-}
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "")
 
@@ -114,18 +85,19 @@ async function fetchSearch(criteria: SearchCriteria, signal: AbortSignal): Promi
   return data
 }
 
+// Store names come from the catalog, so a new or renamed store needs no frontend change.
+async function fetchRetailers(signal: AbortSignal): Promise<Retailer[]> {
+  if (!API_BASE_URL) return []
+  const response = await fetch(`${API_BASE_URL}/retailers`, { signal })
+  if (!response.ok) throw new Error(`Could not load stores (HTTP ${response.status}).`)
+  const data = (await response.json()) as { items?: Retailer[] }
+  return Array.isArray(data.items) ? data.items : []
+}
+
 function formatLabel(value: string) {
   return value
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function normalizeCategory(value: string) {
-  return value.toLocaleLowerCase().replace(/[-_]/g, " ").trim()
-}
-
-function getCategoryIcon(category?: string) {
-  return category ? PRODUCT_CATEGORY_ICONS[normalizeCategory(category)] : undefined
 }
 
 const PRICE_UPDATED_FORMAT = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
@@ -147,11 +119,13 @@ function ProductCard({
   basketQuantity,
   onAdd,
   onImageExpired,
+  retailers,
 }: {
   product: SearchProduct
   basketQuantity: number
   onImageExpired: () => void
   onAdd: (productId: string) => void
+  retailers: Retailer[]
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -160,10 +134,13 @@ function ProductCard({
   const lowestPrice = product.lowestPrice
   const priceUpdated = getPriceUpdatedLabel(product.priceUpdatedAt)
   const categoryIcon = getCategoryIcon(product.category)
+  // Every store in the catalog gets a row, priced or not, plus any priced store the list doesn't know yet.
+  const retailerNames = new Map(retailers.map((retailer) => [retailer.id, retailer.name]))
   const retailerIds = [
-    ...Object.keys(RETAILER_NAMES),
-    ...Object.keys(product.prices ?? {}).filter((id) => !(id in RETAILER_NAMES)),
+    ...retailers.map((retailer) => retailer.id),
+    ...Object.keys(product.prices ?? {}).filter((id) => !retailerNames.has(id)),
   ]
+  const retailerName = (id: string) => retailerNames.get(id) ?? formatLabel(id)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -221,9 +198,9 @@ function ProductCard({
         {lowestPrice && (
           <div className="mt-4 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5">
             <p className="mt-0.5 font-semibold text-[20px] text-primary">
-              ${(lowestPrice.priceCents / 100).toFixed(2)}
+              {formatCents(lowestPrice.priceCents)}
               <span className="ml-2 text-sm font-normal text-foreground">
-                at {lowestPrice.retailerName ?? RETAILER_NAMES[lowestPrice.retailerId] ?? formatLabel(lowestPrice.retailerId)}
+                at {lowestPrice.retailerName ?? retailerName(lowestPrice.retailerId)}
               </span>
             </p>
           </div>
@@ -303,10 +280,10 @@ function ProductCard({
                 const hasPrice = typeof price?.priceCents === "number" && Number.isFinite(price.priceCents)
                 return (
                   <div key={retailerId} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                    <span className="font-medium">{RETAILER_NAMES[retailerId] ?? formatLabel(retailerId)}</span>
+                    <span className="font-medium">{retailerName(retailerId)}</span>
                     {hasPrice ? (
                       <div className="text-right">
-                        <p className="font-semibold">${(price.priceCents! / 100).toFixed(2)}</p>
+                        <p className="font-semibold">{formatCents(price.priceCents!)}</p>
                         <p className="text-xs text-muted-foreground">
                           {price.priceDate ? `Price date ${price.priceDate}` : "Date unavailable"}
                           {price.submissionCount ? ` · ${price.submissionCount} submission${price.submissionCount === 1 ? "" : "s"}` : ""}
@@ -356,6 +333,7 @@ function ProductCard({
 export function SearchProductsPage() {
   const [imageRevision, setImageRevision] = useState(0)
   const [result, setResult] = useState<SearchResult | null>(null)
+  const [retailers, setRetailers] = useState<Retailer[]>([])
   const { items: basketItems, setItems: setBasketItems, save: saveBasket } = useBasketItems()
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
@@ -424,6 +402,13 @@ export function SearchProductsPage() {
 
     return () => { clearTimeout(timer); controller.abort() }
   }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, query, imageRevision])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    // Without the list, the details still show each priced store, named from its id.
+    fetchRetailers(controller.signal).then(setRetailers).catch(() => undefined)
+    return () => controller.abort()
+  }, [])
 
   const activeFilterCount = Number(Boolean(category)) + Number(hcsOnly) + Number(Boolean(brand))
     + Number(Boolean(dietary)) + Number(Boolean(minimumPrice)) + Number(Boolean(maximumPrice))
@@ -582,6 +567,7 @@ export function SearchProductsPage() {
                 basketQuantity={basketQuantities.get(product.id) ?? 0}
                 onImageExpired={() => setImageRevision((n) => n + 1)}
                 onAdd={addToBasket}
+                retailers={retailers}
               />
             ))}
           </div>

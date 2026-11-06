@@ -35,9 +35,14 @@ function anonymousAuth(): AuthService {
   }
 }
 
-function renderSearch(items: object[]) {
+const catalogRetailers = [{ id: "coldstorage", name: "Cold Storage" }, { id: "fairprice", name: "FairPrice" }, { id: "shengsiong", name: "Sheng Siong" }]
+
+function renderSearch(items: object[], retailers: object[] = catalogRetailers) {
   const result = { items, total: items.length, catalogSize: items.length, facets: { categories: ["bread", "milk"], brands: [], dietary: [] } }
-  vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => ({ ok: true, json: async () => result })))
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => ({
+    ok: true,
+    json: async () => (url.endsWith("/retailers") ? { items: retailers } : result),
+  })))
   return render(<MemoryRouter><AuthProvider serviceOverride={anonymousAuth()}><SearchProductsPage /></AuthProvider></MemoryRouter>)
 }
 
@@ -90,5 +95,29 @@ describe("search page", () => {
     await user.click(within(card).getByRole("button", { name: "Enlarge image of Wholemeal Bread" }))
     const preview = screen.getByRole("dialog", { name: "Enlarged image of Wholemeal Bread" })
     expect(preview.querySelector("img")).toHaveAttribute("src", breadIcon)
+  })
+
+  it("names every store from the catalog in the details, priced or not", async () => {
+    const user = userEvent.setup()
+    // A store the frontend has never heard of, with a price.
+    renderSearch([{ ...milk, prices: { ...milk.prices, newmart: { priceCents: 1250, priceDate: "2026-11-03", submissionCount: 1 } } }],
+      [...catalogRetailers, { id: "newmart", name: "New Mart" }])
+    await user.click(await screen.findByRole("button", { name: "View details for Fresh Milk" }))
+    const details = screen.getByRole("dialog", { name: "Fresh Milk" })
+
+    const rows = within(details).getByText("Cold Storage").closest("div")!.parentElement!
+    expect([...rows.children].map((row) => row.firstElementChild?.textContent)).toEqual(["Cold Storage", "FairPrice", "Sheng Siong", "New Mart"])
+    expect(within(details).getByText("$3.63")).toBeInTheDocument()
+    expect(within(details).getByText("$12.50")).toBeInTheDocument()
+    expect(within(details).getAllByText("No current price")).toHaveLength(2)
+  })
+
+  it("still shows priced stores when the store list can't be loaded", async () => {
+    const user = userEvent.setup()
+    renderSearch([milk], [])
+    const card = (await screen.findByRole("button", { name: "View details for Fresh Milk" })).closest("article")!
+    expect(within(card).getByText("$3.63")).toBeInTheDocument()
+    await user.click(within(card).getByRole("button", { name: "View details for Fresh Milk" }))
+    expect(within(screen.getByRole("dialog", { name: "Fresh Milk" })).getByText("Fairprice")).toBeInTheDocument()
   })
 })

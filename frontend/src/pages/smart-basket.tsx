@@ -21,6 +21,8 @@ import { Button } from "../components/ui/button"
 import { createBasketService } from "../basket/service"
 import { useBasketItems, type BasketItems } from "../basket/use-basket-items"
 import type { BasketItem, BasketResult, BasketService, BasketStore, Product } from "../basket/types"
+import { getCategoryIcon } from "../lib/category-icons"
+import { formatCents } from "../lib/format"
 import { cn } from "../lib/utils"
 
 const MAX_QUANTITY = 99
@@ -31,10 +33,6 @@ const COMPARE_MAX_LINES = 50
 // One swap, recorded so it can be undone. `added` is what a merge actually added after the quantity cap,
 // and `toQuantity` the swapped-in line's quantity right after the swap.
 interface SwapRecord { fromId: string; fromQuantity: number; fromIndex: number; merged: boolean; added: number; toQuantity: number }
-
-function formatCents(cents: number) {
-  return new Intl.NumberFormat("en-SG", { style: "currency", currency: "SGD", currencyDisplay: "narrowSymbol" }).format(cents / 100)
-}
 
 function packLabel(item: { packQty: number | null; packUnit: string | null; packCount?: number }) {
   if (item.packQty === null || item.packUnit === null) return ""
@@ -94,7 +92,13 @@ function Filter({ label, value, options, allLabel, onChange }: { label: string; 
 }
 
 function ZoomableImage({ product, onOpen, onExpired, className }: { product: Product; onOpen: (productId: string) => void; onExpired: () => void; className: string }) {
-  if (!product.imageUrl) return null
+  const categoryIcon = getCategoryIcon(product.category)
+  // No photo: the category icon, like Search, or an empty box of the same size, so rows stay lined up.
+  if (!product.imageUrl) {
+    return categoryIcon
+      ? <img src={categoryIcon} alt="" aria-hidden="true" className={cn("shrink-0", className)} />
+      : <span aria-hidden="true" className={cn("inline-block shrink-0", className)} />
+  }
   return (
     <button
       type="button"
@@ -103,7 +107,7 @@ function ZoomableImage({ product, onOpen, onExpired, className }: { product: Pro
       title="Click to enlarge image"
       onClick={() => onOpen(product.id)}
     >
-      <ProductImage url={product.imageUrl} name={product.name} onExpired={onExpired} className={className} />
+      <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onExpired} className={className} />
     </button>
   )
 }
@@ -489,6 +493,16 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
   const packCount = basket.reduce((sum, item) => sum + item.quantity, 0)
   const hcsCount = basket.filter((item) => catalog.get(item.productId)?.hcs).length
   const swappable = [...alternatives.values()].filter((options) => options.length > 0).length
+  // The savings tile: the largest full-basket saving and the two stores it is between.
+  const maxSavingsCents = comparison?.maxSavingsCents ?? null
+  const bestSaving = maxSavingsCents
+    ? comparison?.savings.find((saving) => saving.basis === "full-basket" && saving.savingsCents === maxSavingsCents) ?? null
+    : null
+  const recommendation = comparison?.recommendation ?? null
+  const savingsMessage = !basket.length ? "Add groceries to see what you could save."
+    : !comparison ? (comparing ? "Comparing store prices…" : "No savings to show yet.")
+    : maxSavingsCents === 0 ? "Every store charges the same for this basket."
+    : "Savings show once two stores price every item."
 
   function retailerKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0
@@ -511,11 +525,16 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
           </div>
           <aside className="flex flex-[1_1_240px] items-center gap-4 rounded-[14px] border bg-card px-6 py-5 shadow-sm">
             <span className="grid size-14 shrink-0 place-items-center rounded-full bg-accent text-primary"><PiggyBank className="size-7" /></span>
-            <div>
-              <p className="mb-1.5 text-[34px] font-bold leading-none tracking-tight text-primary tabular-nums">
-                {comparison?.maxSavingsCents ? formatCents(comparison.maxSavingsCents) : "—"}
-              </p>
-              <p className="text-[13px] text-muted-foreground">Potential savings, up to</p>
+            <div aria-live="polite">
+              {maxSavingsCents && bestSaving && recommendation ? (
+                <>
+                  <p className="text-[13px] font-medium text-muted-foreground">Save up to</p>
+                  <p className="my-1.5 text-[34px] font-bold leading-none tracking-tight text-primary tabular-nums">{formatCents(maxSavingsCents)}</p>
+                  <p className="text-[13px] text-muted-foreground">at {storeName(recommendation)} instead of {storeName(bestSaving)}</p>
+                </>
+              ) : (
+                <p className="text-[14px] leading-relaxed text-muted-foreground">{savingsMessage}</p>
+              )}
             </div>
           </aside>
         </header>
@@ -822,7 +841,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                 <X className="size-4" />
               </Button>
             </div>
-            <ProductImage url={previewProduct.imageUrl} name={previewProduct.name} onExpired={refreshImages} className="mx-auto max-h-[82vh] max-w-full object-contain" />
+            <ProductImage url={previewProduct.imageUrl} fallback={getCategoryIcon(previewProduct.category)} name={previewProduct.name} onExpired={refreshImages} className="mx-auto max-h-[82vh] max-w-full object-contain" />
           </>
         )}
       </dialog>

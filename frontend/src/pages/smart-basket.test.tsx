@@ -7,6 +7,7 @@ import type { AuthService } from "../auth/types"
 import { compareBasket, type PriceTable } from "../basket/compare"
 import type { BasketItem, BasketService, Product, Retailer } from "../basket/types"
 import { SmartBasketPage } from "./smart-basket"
+import riceIcon from "../../assets/product-icons/Rice.svg"
 
 afterEach(() => {
   cleanup()
@@ -56,7 +57,26 @@ describe("smart basket page", () => {
     renderBasket(service)
     expect(await screen.findByRole("heading", { name: "Your basket is empty" })).toBeInTheDocument()
     expect(screen.getByText("Add items to compare prices at each store.")).toBeInTheDocument()
+    expect(screen.getByText("Add groceries to see what you could save.")).toBeInTheDocument()
     expect(service.compare).not.toHaveBeenCalled()
+  })
+
+  it("shows the category icon for a basket product without a photo", async () => {
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    renderBasket(basketService(fullPrices))
+    const list = await screen.findByRole("list", { name: "Basket items" })
+    const icon = list.querySelector("img")!
+    expect(icon).toHaveAttribute("src", riceIcon)
+    expect(icon).toHaveAttribute("aria-hidden", "true")
+    // An icon isn't a photo, so there's nothing to enlarge.
+    expect(within(list).queryByRole("button", { name: /Enlarge image/ })).not.toBeInTheDocument()
+  })
+
+  it("says when every store charges the same", async () => {
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
+    renderBasket(basketService({ rice: { a: at(1880), b: at(1880), c: at(1880) } }))
+    expect(await screen.findByText("Every store charges the same for this basket.")).toBeInTheDocument()
+    expect(screen.queryByText("Save up to")).not.toBeInTheDocument()
   })
 
   it("compares the basket at each retailer and switches the total to the chosen one", async () => {
@@ -75,6 +95,9 @@ describe("smart basket page", () => {
     expect(screen.getByRole("radio", { name: /Gamma Foods/ })).toHaveTextContent("+$2.00 more")
     expect(screen.getByText("Total at Beta Grocer · cheapest")).toBeInTheDocument()
     expect(screen.getByText("$2.00", { selector: "p" })).toBeInTheDocument()
+    // The largest full-basket saving, and the two stores it is between.
+    expect(screen.getByText("$2.00", { selector: "p" }).previousElementSibling).toHaveTextContent("Save up to")
+    expect(screen.getByText("at Beta Grocer instead of Gamma Foods")).toBeInTheDocument()
 
     await user.click(screen.getByRole("radio", { name: /Gamma Foods/ }))
     expect(screen.getByText("Total at Gamma Foods")).toBeInTheDocument()
@@ -233,7 +256,7 @@ describe("smart basket page", () => {
     expect(alpha).toHaveTextContent("0 priced · 1 missing")
     // Nothing is priced anywhere, so no store is "Cheapest" and there's no saving to show.
     for (const store of screen.getAllByRole("radio")) expect(within(store).queryByText("Cheapest")).not.toBeInTheDocument()
-    expect(screen.getByText("Potential savings, up to").previousElementSibling).toHaveTextContent("—")
+    expect(screen.getByText("Savings show once two stores price every item.")).toBeInTheDocument()
     expect(screen.getByText(/No single store has a price for every item yet/)).toBeInTheDocument()
     expect(within(screen.getByRole("list", { name: "Basket items" })).getByText("No price")).toBeInTheDocument()
   })
