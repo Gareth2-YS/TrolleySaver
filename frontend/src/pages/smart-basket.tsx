@@ -2,7 +2,6 @@ import { ProductImage } from "../components/product-image"
 import {
   AlertTriangle,
   BadgeCheck,
-  ChevronDown,
   Leaf,
   LoaderCircle,
   Minus,
@@ -18,6 +17,11 @@ import { useEffect, useMemo, useRef, type KeyboardEvent, useState, type ReactNod
 import { FormAlert } from "../components/auth/form-alert"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
+import { Input } from "../components/ui/input"
+import { Select } from "../components/ui/select"
+import { HcsBadge } from "../components/hcs-badge"
+import { PageHeader } from "../components/layout/page-header"
+import { usePageTitle } from "../lib/use-page-title"
 import { createBasketService } from "../basket/service"
 import { useBasketItems, type BasketItems } from "../basket/use-basket-items"
 import type { BasketItem, BasketResult, BasketService, BasketStore, Product } from "../basket/types"
@@ -49,13 +53,13 @@ function storeName(store: { retailerId: string; retailerName: string | null }) {
 }
 
 function Card({ className, children, ...props }: { className?: string; children: ReactNode; "aria-labelledby"?: string; "aria-label"?: string }) {
-  return <section className={cn("rounded-[14px] border bg-card p-5 shadow-sm sm:p-6", className)} {...props}>{children}</section>
+  return <section className={cn("surface-card p-5 sm:p-6", className)} {...props}>{children}</section>
 }
 
 function CardTitle({ id, icon: Icon, title, description }: { id: string; icon: typeof Search; title: string; description: string }) {
   return (
     <div className="min-w-0">
-      <h2 id={id} className="flex items-center gap-2.5 text-[22px] font-semibold tracking-tight">
+      <h2 id={id} className="flex items-center gap-2.5 font-display text-[22px] font-extrabold tracking-tight">
         <span className="grid size-9 shrink-0 place-items-center rounded-[10px] bg-accent text-primary"><Icon className="size-5" /></span>{title}
       </h2>
       <p className="pl-[46px] text-[13px] text-muted-foreground">{description}</p>
@@ -63,30 +67,14 @@ function CardTitle({ id, icon: Icon, title, description }: { id: string; icon: t
   )
 }
 
-function HcsBadge({ solid = false }: { solid?: boolean }) {
-  return (
-    <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide", solid ? "bg-primary text-primary-foreground" : "bg-accent text-accent-foreground")}>
-      Healthier Choice
-    </span>
-  )
-}
-
 function Filter({ label, value, options, allLabel, onChange }: { label: string; value: string; options: string[]; allLabel: string; onChange: (value: string) => void }) {
   return (
-    <label className="relative min-w-0 flex-1 sm:max-w-[220px] sm:basis-[170px]">
-      <span className="sr-only">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={cn(
-          "h-10 w-full cursor-pointer appearance-none rounded-lg border bg-background pl-3 pr-9 text-[13px] font-medium capitalize hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          value && "border-primary bg-accent/50 text-accent-foreground",
-        )}
-      >
+    <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm font-semibold sm:max-w-[220px] sm:basis-[170px]">
+      {label}
+      <Select value={value} onChange={(event) => onChange(event.target.value)} className={cn("capitalize", value && "border-primary")}>
         <option value="">{allLabel}</option>
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      </Select>
     </label>
   )
 }
@@ -96,8 +84,8 @@ function ZoomableImage({ product, onOpen, onExpired, className }: { product: Pro
   // No photo: the category icon, like Search, or an empty box of the same size, so rows stay lined up.
   if (!product.imageUrl) {
     return categoryIcon
-      ? <img src={categoryIcon} alt="" aria-hidden="true" className={cn("shrink-0", className)} />
-      : <span aria-hidden="true" className={cn("inline-block shrink-0", className)} />
+      ? <img src={categoryIcon} alt="" aria-hidden="true" className={cn("product-tile", className)} />
+      : <span aria-hidden="true" className={cn("product-tile inline-block", className)} />
   }
   return (
     <button
@@ -107,7 +95,7 @@ function ZoomableImage({ product, onOpen, onExpired, className }: { product: Pro
       title="Click to enlarge image"
       onClick={() => onOpen(product.id)}
     >
-      <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onExpired} className={className} />
+      <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onExpired} className={cn("product-tile", className)} />
     </button>
   )
 }
@@ -168,7 +156,7 @@ function HealthierChoices({ product, quantity, options, store, cheapest, optionS
         <div className="flex min-w-0 items-start gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-primary"><Leaf className="size-5" /></span>
           <div className="min-w-0">
-            <h2 id="swap-title" className="text-lg font-semibold leading-snug">Healthier choices</h2>
+            <h2 id="swap-title" className="font-display text-xl font-extrabold leading-snug">Healthier choices</h2>
             <p className="mt-0.5 text-xs capitalize text-muted-foreground">{product.category}{store && ` · prices at ${storeName(store)}`}</p>
           </div>
         </div>
@@ -177,7 +165,7 @@ function HealthierChoices({ product, quantity, options, store, cheapest, optionS
 
       <div className="mx-6 flex items-center justify-between gap-3 rounded-xl bg-secondary px-3.5 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <ZoomableImage product={product} onOpen={onOpenImage} onExpired={onExpired} className="size-10 rounded-md object-contain" />
+          <ZoomableImage product={product} onOpen={onOpenImage} onExpired={onExpired} className="size-10" />
           <div className="min-w-0">
             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">In your basket</span>
             <p className="mt-0.5 text-sm font-semibold leading-snug">{product.name}</p>
@@ -221,7 +209,7 @@ function HealthierChoices({ product, quantity, options, store, cheapest, optionS
           return (
             <li key={option.id} className={cn("flex items-center gap-3 rounded-xl border px-3.5 py-3", top && "border-primary/45 bg-accent/50")}>
               <span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold tabular-nums text-muted-foreground">{index + 1}</span>
-              <ZoomableImage product={option} onOpen={onOpenImage} onExpired={onExpired} className="size-10 rounded-md object-contain" />
+              <ZoomableImage product={option} onOpen={onOpenImage} onExpired={onExpired} className="size-10" />
               <div className="min-w-0 flex-1">
                 {/* The badge sits on its own line so moving it between rows on a re-sort never rewraps a name. */}
                 {top && <span className="mb-1 inline-block rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground">{sort === "unit" ? "Best value" : "Cheapest"}</span>}
@@ -232,7 +220,7 @@ function HealthierChoices({ product, quantity, options, store, cheapest, optionS
                 </p>
               </div>
               <div className="w-20 shrink-0 text-right">
-                <p className="text-[15px] font-semibold tabular-nums">{cents !== null ? formatCents(cents) : loading ? "…" : "—"}</p>
+                <p className="font-display text-base font-extrabold tabular-nums">{cents !== null ? formatCents(cents) : loading ? "…" : "—"}</p>
                 {difference !== null && <p className={cn("text-xs font-semibold tabular-nums", difference < 0 ? "text-primary" : "text-muted-foreground")}>{differenceLabel(difference)}</p>}
               </div>
               <Button
@@ -274,6 +262,7 @@ export function SmartBasketPage({ serviceOverride }: { serviceOverride?: BasketS
 }
 
 function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: BasketService; basketItems: BasketItems }) {
+  usePageTitle("Smart basket")
   const [service] = useState(() => serviceOverride ?? createBasketService())
   const [products, setProducts] = useState<Product[]>([])
   const [imageRevision, setImageRevision] = useState(0)
@@ -423,34 +412,41 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
       : [...current, { productId, quantity: 1 }])
   }
 
-  // The swap keeps the line's place and quantity; if the alternative is already in the basket the two merge.
-  function swapProduct(fromId: string, toId: string) {
-    const fromIndex = items.findIndex((item) => item.productId === fromId)
-    if (fromIndex >= 0) {
-      const from = items[fromIndex]
-      const existing = items.find((item) => item.productId === toId)
+  // Each swap keeps its line's place and quantity; if the alternative is already in the basket the two merge.
+  // Several swaps (the healthier basket's button) apply one after another, each recorded so it can be undone.
+  function swapProducts(pairs: [fromId: string, toId: string][]) {
+    let working = items
+    const records: [string, SwapRecord][] = []
+    for (const [fromId, toId] of pairs) {
+      const fromIndex = working.findIndex((item) => item.productId === fromId)
+      if (fromIndex < 0) continue
+      const from = working[fromIndex]
+      const existing = working.find((item) => item.productId === toId)
       const toQuantity = existing ? Math.min(existing.quantity + from.quantity, MAX_QUANTITY) : from.quantity
-      const record: SwapRecord = {
+      records.push([toId, {
         fromId,
         fromQuantity: from.quantity,
         fromIndex,
         merged: Boolean(existing),
         added: existing ? toQuantity - existing.quantity : from.quantity,
         toQuantity,
-      }
-      setSwaps((current) => ({ ...current, [toId]: [...(current[toId] ?? []), record] }))
-      setToastFor(toId)
-    }
-    setItems((current) => {
-      const from = current.find((item) => item.productId === fromId)
-      if (!from) return current
-      const existing = current.find((item) => item.productId === toId)
-      return current
+      }])
+      working = working
         .filter((item) => !(existing && item.productId === fromId))
-        .map((item) => item.productId === (existing ? toId : fromId) ? { productId: toId, quantity: Math.min(item.quantity + (existing ? from.quantity : 0), MAX_QUANTITY) } : item)
-    })
+        .map((item) => item.productId === (existing ? toId : fromId) ? { productId: toId, quantity: toQuantity } : item)
+    }
     setSwapOpenFor(null)
+    if (!records.length) return
+    setItems(working)
+    setSwaps((current) => {
+      const next = { ...current }
+      for (const [toId, record] of records) next[toId] = [...(next[toId] ?? []), record]
+      return next
+    })
+    setToastFor(records[records.length - 1][0])
   }
+
+  function swapProduct(fromId: string, toId: string) { swapProducts([[fromId, toId]]) }
 
   // Undoes the latest swap into a product. An ordinary swap puts the original back in place of the line,
   // keeping its current quantity. A merge takes back only what it added and restores the original line,
@@ -499,6 +495,17 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
     ? comparison?.savings.find((saving) => saving.basis === "full-basket" && saving.savingsCents === maxSavingsCents) ?? null
     : null
   const recommendation = comparison?.recommendation ?? null
+  // The healthier basket's best store, and the swaps it makes there that can still be applied to this basket.
+  const healthier = basket.length ? result?.healthierBasket ?? null : null
+  const healthierStore = healthier?.recommendation
+    ? healthier.stores.find((store) => store.retailerId === healthier.recommendation!.retailerId)
+    : undefined
+  const healthierPairs: [string, string][] = (healthierStore?.lines ?? []).flatMap((line) =>
+    line.replacesProductId && basket.some((item) => item.productId === line.replacesProductId) && catalog.has(line.productId)
+      ? [[line.replacesProductId, line.productId] as [string, string]] : [])
+  const alreadyHealthier = healthier?.swaps.filter((swap) => swap.status === "already-hcs").length ?? 0
+  const healthierExtra = basket.length ? result?.healthierExtra ?? null : null
+
   const savingsMessage = !basket.length ? "Add groceries to see what you could save."
     : !comparison ? (comparing ? "Comparing store prices…" : "No savings to show yet.")
     : maxSavingsCents === 0 ? "Every store charges the same for this basket."
@@ -516,20 +523,17 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
   return (
     <AppShell>
       <div className="space-y-8">
-        <header className="flex flex-wrap items-end gap-6">
-          <div className="min-w-0 flex-[999_1_480px]">
-            <h1 className="mb-3 text-[clamp(28px,4vw,38px)] font-bold leading-tight tracking-tight">Smart basket comparison</h1>
-            <p className="max-w-[62ch] text-[15px] leading-relaxed text-muted-foreground">
-              Build your grocery list once and see what the whole basket costs at each supermarket, and how much you save by choosing the cheapest one.
-            </p>
-          </div>
-          <aside className="flex flex-[1_1_240px] items-center gap-4 rounded-[14px] border bg-card px-6 py-5 shadow-sm">
+        <PageHeader
+          title="Smart basket comparison"
+          description="Build your grocery list once and see what the whole basket costs at each supermarket, and how much you save by choosing the cheapest one."
+        >
+          <aside className="surface-card flex flex-[1_1_260px] items-center gap-4 px-6 py-5">
             <span className="grid size-14 shrink-0 place-items-center rounded-full bg-accent text-primary"><PiggyBank className="size-7" /></span>
             <div aria-live="polite">
               {maxSavingsCents && bestSaving && recommendation ? (
                 <>
                   <p className="text-[13px] font-medium text-muted-foreground">Save up to</p>
-                  <p className="my-1.5 text-[34px] font-bold leading-none tracking-tight text-primary tabular-nums">{formatCents(maxSavingsCents)}</p>
+                  <p className="my-1.5 font-display text-[36px] font-extrabold leading-none tracking-tight text-primary tabular-nums">{formatCents(maxSavingsCents)}</p>
                   <p className="text-[13px] text-muted-foreground">at {storeName(recommendation)} instead of {storeName(bestSaving)}</p>
                 </>
               ) : (
@@ -537,7 +541,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
               )}
             </div>
           </aside>
-        </header>
+        </PageHeader>
 
         <FormAlert message={catalogError ?? compareError} />
 
@@ -554,19 +558,21 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
 
             <label className="sr-only" htmlFor="product-search">Search groceries</label>
             <div className="relative my-[18px]">
-              <Search className="absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
-              <input
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
+              <Input
                 id="product-search"
                 ref={searchRef}
                 type="search"
-                className="h-12 w-full rounded-[10px] border bg-background pl-[42px] pr-4 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-12 pl-[42px] text-base"
                 placeholder="Search by product, brand or category"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
 
-            <ul className="flex max-h-[292px] flex-col gap-2.5 overflow-y-auto overscroll-contain pr-1.5 [scrollbar-gutter:stable] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} aria-label="Products">
+            {/* The list scrolls: a fade at the bottom edge and a count underneath say there's more. */}
+            <div className="relative">
+            <ul className="flex max-h-[300px] flex-col gap-2.5 overflow-y-auto overscroll-contain pb-10 pr-1.5 [scrollbar-gutter:stable] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} aria-label="Products">
               {catalogLoading ? (
                 <li className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading products…</li>
               ) : matches.length === 0 ? (
@@ -576,9 +582,9 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
               ) : matches.map((product) => {
                 const inBasket = basket.find((item) => item.productId === product.id)
                 return (
-                  <li key={product.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[10px] border border-border/60 bg-background px-4 py-3.5">
+                  <li key={product.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border bg-background/60 px-4 py-3">
                     <div className="flex min-w-0 flex-[999_1_200px] items-center gap-3">
-                      <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12 rounded-lg object-contain" />
+                      <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12" />
                       <div className="min-w-0">
                       <p className="mb-1 text-sm font-semibold leading-snug">{product.name}</p>
                       <p className="text-xs text-muted-foreground">{product.brand} · {packLabel(product)} · {product.category}</p>
@@ -588,7 +594,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                     <Button
                       type="button"
                       variant={inBasket ? "default" : "outline"}
-                      className={cn("h-11 rounded-lg px-[18px] text-[13px] font-semibold", !inBasket && "border-primary text-primary hover:bg-accent")}
+                      className={cn("h-11 px-[18px] text-[13px]", !inBasket && "border-primary text-primary hover:bg-accent")}
                       onClick={() => addProduct(product.id)}
                       aria-label={`Add ${product.name}`}
                     >
@@ -598,6 +604,13 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                 )
               })}
             </ul>
+            {matches.length > 3 && <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-card/0 to-card" />}
+            </div>
+            {!catalogLoading && matches.length > 0 && (
+              <p className="mt-2 text-center text-[13px] text-muted-foreground">
+                {plural(matches.length, "product")}{matches.length > 3 ? " · scroll the list for more" : ""}
+              </p>
+            )}
           </Card>
 
           <Card aria-labelledby="basket-heading">
@@ -645,15 +658,15 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                           onClick={() => setSelectedStoreId(store.retailerId)}
                           onKeyDown={(event) => retailerKeyDown(event, index)}
                           className={cn(
-                            "flex flex-col items-start gap-1 rounded-xl border bg-background px-4 py-3.5 text-left hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                            selected && "border-[1.5px] border-primary bg-accent/40 hover:border-primary",
+                            "flex flex-col items-start gap-1 rounded-2xl border bg-card px-4 py-3.5 text-left hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            selected && "border-2 border-primary bg-accent px-[15px] py-[13px] hover:border-primary",
                           )}
                         >
                           <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                             {storeName(store)}
                             {best && <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold tracking-wide text-primary-foreground">Cheapest</span>}
                           </span>
-                          <span className={cn("text-xl font-bold tracking-tight tabular-nums", selected && "text-primary")}>{formatCents(store.totalCents)}</span>
+                          <span className={cn("font-display text-2xl font-extrabold tracking-tight tabular-nums", selected && "text-accent-foreground")}>{formatCents(store.totalCents)}</span>
                           <span className={cn("text-xs text-muted-foreground", !store.complete && "font-medium text-amber-700 dark:text-amber-300")}>{retailerNote(store, cheapest!)}</span>
                         </button>
                       )
@@ -665,6 +678,33 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                   <p className="mb-[18px] flex gap-2 rounded-[10px] border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-[13px] leading-relaxed text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />No single store has a price for every item yet. Totals only include the items each store prices.
                   </p>
+                )}
+
+                {healthier && healthierPairs.length > 0 && (
+                  <div role="group" aria-labelledby="healthier-heading" className="mb-[18px] flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-dashed border-primary/45 bg-accent/40 px-4 py-4">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground"><Leaf className="size-5" /></span>
+                    <div className="min-w-0 flex-[1_1_240px]">
+                      <p id="healthier-heading" className="font-semibold">Healthier basket at {healthierStore ? storeName(healthierStore) : "the best store"}</p>
+                      <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+                        Swaps in {healthierPairs.map(([, toId]) => catalog.get(toId)!.name).join(", ")}.
+                        {alreadyHealthier > 0 && ` ${plural(alreadyHealthier, "item")} ${alreadyHealthier === 1 ? "is" : "are"} already Healthier Choice.`}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-display text-[22px] font-extrabold leading-tight text-accent-foreground tabular-nums">
+                        {formatCents(healthierExtra?.healthierTotalCents ?? healthierStore?.totalCents ?? 0)}
+                      </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {!healthierExtra ? "Not every store prices the swaps yet"
+                          : healthierExtra.extraCents > 0 ? `${formatCents(healthierExtra.extraCents)} more (${healthierExtra.extraPercent}%)`
+                          : healthierExtra.extraCents < 0 ? `${formatCents(-healthierExtra.extraCents)} less`
+                          : "Same as your basket"}
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" className="border-primary text-accent-foreground hover:bg-accent" onClick={() => swapProducts(healthierPairs)}>
+                      Swap {plural(healthierPairs.length, "item")}
+                    </Button>
+                  </div>
                 )}
 
                 {swappable > 0 && !noteDismissed && (
@@ -688,13 +728,13 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                       <li key={item.productId} className="py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 items-start gap-3">
-                            <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12 rounded-lg object-contain" />
+                            <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12" />
                             <div className="min-w-0">
-                              <p className="text-sm font-semibold leading-snug">{product.name}</p>
+                              <p className="font-display text-base font-extrabold leading-snug">{product.name}</p>
                               <p className="mt-1 text-xs text-muted-foreground">{product.brand} · {packLabel(product)}</p>
                             </div>
                           </div>
-                          <p className="whitespace-nowrap text-[15px] font-semibold tabular-nums">
+                          <p className="whitespace-nowrap font-display text-lg font-extrabold tabular-nums">
                             {line ? formatCents(line.subtotalCents) : <span className="text-xs font-medium text-muted-foreground">{comparing || !selectedStore ? "…" : "No price"}</span>}
                           </p>
                         </div>
@@ -738,7 +778,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                         ? `${selectedStore.complete ? "Total" : "Total for priced items"} at ${storeName(selectedStore)}${selectedStore.rank === 1 ? " · cheapest" : ""}`
                         : comparing ? "Comparing store prices…" : "No store prices yet"}
                     </p>
-                    <p className="text-2xl font-bold tracking-tight text-primary tabular-nums">{selectedStore ? formatCents(selectedStore.totalCents) : "—"}</p>
+                    <p className="font-display text-[26px] font-extrabold tracking-tight text-primary tabular-nums">{selectedStore ? formatCents(selectedStore.totalCents) : "—"}</p>
                   </div>
                   <p className="text-xs text-muted-foreground">{hcsCount} of {plural(basket.length, "item")} {hcsCount === 1 ? "is" : "are"} Healthier Choice.</p>
                 </div>
@@ -747,7 +787,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
           </Card>
 
           <Card aria-labelledby="per-item-heading">
-            <h2 id="per-item-heading" className="mb-1 text-lg font-semibold tracking-tight">Price per item</h2>
+            <h2 id="per-item-heading" className="mb-1 font-display text-xl font-extrabold tracking-tight">Price per item</h2>
             <p className="text-[13px] text-muted-foreground">Line totals for each product · lowest price highlighted</p>
             {basket.length === 0 || stores.length === 0 ? (
               <p className="mt-4 rounded-[10px] border border-dashed px-4 py-5 text-center text-[13px] text-muted-foreground">
@@ -829,7 +869,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
       <dialog
         ref={previewRef}
         aria-label={previewProduct ? `Enlarged image of ${previewProduct.name}` : "Enlarged image"}
-        className="max-h-[95vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-xl border border-border bg-card p-3 text-card-foreground shadow-2xl backdrop:bg-black/75"
+        className="max-h-[95vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl border border-border bg-card p-3 text-card-foreground shadow-2xl backdrop:bg-black/75"
         onClose={() => setPreviewId(null)}
         onClick={(event) => { if (event.target === previewRef.current) previewRef.current?.close() }}
       >
@@ -841,7 +881,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                 <X className="size-4" />
               </Button>
             </div>
-            <ProductImage url={previewProduct.imageUrl} fallback={getCategoryIcon(previewProduct.category)} name={previewProduct.name} onExpired={refreshImages} className="mx-auto max-h-[82vh] max-w-full object-contain" />
+            <ProductImage url={previewProduct.imageUrl} fallback={getCategoryIcon(previewProduct.category)} name={previewProduct.name} onExpired={refreshImages} className="mx-auto max-h-[82vh] max-w-full rounded-lg bg-white object-contain" />
           </>
         )}
       </dialog>

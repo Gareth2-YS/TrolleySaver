@@ -1,5 +1,5 @@
 import { ProductImage } from "../components/product-image"
-import { Filter, Plus, Search, X } from "lucide-react"
+import { Filter, LoaderCircle, Plus, Search, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
@@ -8,6 +8,10 @@ import { Label } from "../components/ui/label"
 import { useBasketItems } from "../basket/use-basket-items"
 import { getCategoryIcon, normalizeCategory } from "../lib/category-icons"
 import { formatCents } from "../lib/format"
+import { HcsBadge } from "../components/hcs-badge"
+import { PageHeader } from "../components/layout/page-header"
+import { Select } from "../components/ui/select"
+import { usePageTitle } from "../lib/use-page-title"
 
 interface StorePrice {
   priceCents: number
@@ -160,7 +164,7 @@ function ProductCard({
   return (
     <>
       <article
-        className="glass-panel flex h-full flex-col p-5 text-left transition hover:border-primary/50"
+        className="surface-card flex h-full flex-col p-5 text-left transition-colors hover:border-primary/50"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -171,7 +175,7 @@ function ProductCard({
               title="Click to enlarge image"
               onClick={openImagePreview}
             >
-              <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-12 object-contain" />
+              <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="product-tile size-14" />
             </button>
             <div className="min-w-0">
               <button
@@ -181,38 +185,30 @@ function ProductCard({
                 aria-label={`View details for ${product.name}`}
                 onClick={openDetails}
               >
-                <span className="block font-semibold leading-snug">{product.name}</span>
+                <span className="block font-display text-[17px] font-extrabold leading-snug">{product.name}</span>
                 <span className="mt-1 block text-sm text-muted-foreground">
                   {[product.brand, packDescription].filter(Boolean).join(" · ") || "Product details unavailable"}
                 </span>
               </button>
             </div>
           </div>
-          {product.hcs && (
-            <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-              Healthier Choice
-            </span>
-          )}
+          {product.hcs && <HcsBadge />}
         </div>
 
-        {lowestPrice && (
-          <div className="mt-4 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5">
-            <p className="mt-0.5 font-semibold text-[20px] text-primary">
-              {formatCents(lowestPrice.priceCents)}
-              <span className="ml-2 text-sm font-normal text-foreground">
-                at {lowestPrice.retailerName ?? retailerName(lowestPrice.retailerId)}
-              </span>
+        <div className="mt-4 border-t pt-3">
+          {lowestPrice ? (
+            <p className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className="text-[13px] text-muted-foreground">Lowest</span>
+              <span className="font-display text-[26px] font-extrabold leading-tight text-primary tabular-nums">{formatCents(lowestPrice.priceCents)}</span>
+              <span className="text-sm">at {lowestPrice.retailerName ?? retailerName(lowestPrice.retailerId)}</span>
             </p>
-          </div>
-        )}
-        {!lowestPrice && (
-          <p className="mt-4 rounded-lg border border-border/70 px-3 py-2.5 text-sm text-muted-foreground">
-            No current price available
-          </p>
-        )}
-        {priceUpdated && <p className="mt-2 text-xs text-muted-foreground">{priceUpdated}</p>}
+          ) : (
+            <p className="text-sm text-muted-foreground">No current price available</p>
+          )}
+          {priceUpdated && <p className="mt-0.5 text-xs text-muted-foreground">{priceUpdated}</p>}
+        </div>
 
-        <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-5">
+        <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-4">
           <div className="flex flex-wrap gap-2">
             {product.category && (
               <span className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
@@ -241,7 +237,7 @@ function ProductCard({
       <dialog
         ref={dialogRef}
         aria-labelledby={`product-title-${product.id}`}
-        className="max-h-[85vh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-xl border border-border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-black/60"
+        className="max-h-[85vh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-black/60"
         onClose={() => setDetailsOpen(false)}
         onClick={(event) => {
           if (event.target === dialogRef.current) dialogRef.current?.close()
@@ -257,10 +253,10 @@ function ProductCard({
                 title="Click to enlarge image"
                 onClick={openImagePreview}
               >
-                <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="size-14 object-contain" />
+                <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="product-tile size-16" />
               </button>
               <div>
-                <h2 id={`product-title-${product.id}`} className="text-2xl font-semibold">{product.name}</h2>
+                <h2 id={`product-title-${product.id}`} className="font-display text-2xl font-extrabold">{product.name}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {[product.brand, packDescription].filter(Boolean).join(" · ") || "Product details unavailable"}
                 </p>
@@ -283,7 +279,7 @@ function ProductCard({
                     <span className="font-medium">{retailerName(retailerId)}</span>
                     {hasPrice ? (
                       <div className="text-right">
-                        <p className="font-semibold">{formatCents(price.priceCents!)}</p>
+                        <p className="font-display text-lg font-extrabold tabular-nums">{formatCents(price.priceCents!)}</p>
                         <p className="text-xs text-muted-foreground">
                           {price.priceDate ? `Price date ${price.priceDate}` : "Date unavailable"}
                           {price.submissionCount ? ` · ${price.submissionCount} submission${price.submissionCount === 1 ? "" : "s"}` : ""}
@@ -313,7 +309,7 @@ function ProductCard({
       <dialog
         ref={imagePreviewRef}
         aria-label={`Enlarged image of ${product.name}`}
-        className="max-h-[95vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-xl border border-border bg-card p-3 text-card-foreground shadow-2xl backdrop:bg-black/75"
+        className="max-h-[95vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl border border-border bg-card p-3 text-card-foreground shadow-2xl backdrop:bg-black/75"
         onClick={(event) => {
           if (event.target === imagePreviewRef.current) imagePreviewRef.current?.close()
         }}
@@ -324,13 +320,14 @@ function ProductCard({
             <X className="size-4" />
           </Button>
         </div>
-        <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="mx-auto max-h-[82vh] max-w-full object-contain" />
+        <ProductImage url={product.imageUrl} fallback={categoryIcon} name={product.name} onExpired={onImageExpired} className="mx-auto max-h-[82vh] max-w-full rounded-lg bg-white object-contain" />
       </dialog>
     </>
   )
 }
 
 export function SearchProductsPage() {
+  usePageTitle("Search & filter")
   const [imageRevision, setImageRevision] = useState(0)
   const [result, setResult] = useState<SearchResult | null>(null)
   const [retailers, setRetailers] = useState<Retailer[]>([])
@@ -426,32 +423,30 @@ export function SearchProductsPage() {
   return (
     <AppShell>
       <section className="space-y-6 sm:space-y-8">
-        <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Search and filter groceries</h1>
-            <p className="mt-2 text-sm text-muted-foreground">Find a product by name or brand.</p>
-          </div>
-          <p className="text-sm text-muted-foreground" aria-live="polite">
+        <PageHeader title="Search and filter groceries" description="Find a product by name or brand.">
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+            {(loading || searching) && <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />}
             {loading ? "Loading…" : searching ? "Updating…" : `${result?.total ?? 0} of ${result?.catalogSize ?? 0} products`}
           </p>
-        </header>
+        </PageHeader>
 
-        <div className="glass-panel space-y-5 p-5 sm:p-7">
+        <div className="surface-card space-y-5 p-5 sm:p-6">
           <form onSubmit={(event) => event.preventDefault()} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search product or brand"
                 aria-label="Search products or brands"
-                className="pl-10"
+                className="h-12 pl-10 text-base"
               />
             </div>
             <Button
               type="button"
               variant="outline"
+              className="h-12"
               aria-expanded={filtersOpen}
               aria-controls="advanced-filters"
               onClick={() => setFiltersOpen((open) => !open)}
@@ -461,44 +456,44 @@ export function SearchProductsPage() {
           </form>
 
           <div className="flex flex-wrap gap-2" aria-label="Quick filters">
-            <Button type="button" size="sm" variant={category === null && !hcsOnly ? "default" : "outline"} onClick={() => { setCategory(null); setHcsOnly(false) }}>
+            <Button type="button" size="sm" className="rounded-full" variant={category === null && !hcsOnly ? "default" : "outline"} onClick={() => { setCategory(null); setHcsOnly(false) }}>
               All
             </Button>
             {quickCategories.map((value) => (
-              <Button key={value} type="button" size="sm" variant={category === value ? "default" : "outline"} onClick={() => { setCategory(category === value ? null : value); setHcsOnly(false) }}>
+              <Button key={value} type="button" size="sm" className="rounded-full" variant={category === value ? "default" : "outline"} onClick={() => { setCategory(category === value ? null : value); setHcsOnly(false) }}>
                 {formatLabel(value)}
               </Button>
             ))}
-            <Button type="button" size="sm" variant={hcsOnly ? "default" : "outline"} aria-pressed={hcsOnly} onClick={() => { setHcsOnly((value) => !value); setCategory(null) }}>
+            <Button type="button" size="sm" className="rounded-full" variant={hcsOnly ? "default" : "outline"} aria-pressed={hcsOnly} onClick={() => { setHcsOnly((value) => !value); setCategory(null) }}>
               Healthier Choice
             </Button>
           </div>
 
           {filtersOpen && (
-            <div id="advanced-filters" className="grid gap-4 rounded-xl border border-border/70 bg-card/30 p-4 sm:grid-cols-2">
+            <div id="advanced-filters" className="grid gap-4 rounded-xl border bg-background/60 p-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="type-filter">Type</Label>
-                <select id="type-filter" className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm" value={category ?? ""} onChange={(event) => { setCategory(event.target.value || null); setHcsOnly(false) }}>
+                <Select id="type-filter" value={category ?? ""} onChange={(event) => { setCategory(event.target.value || null); setHcsOnly(false) }}>
                   <option value="">All types</option>
                   {categories.map((value) => <option key={value} value={value}>{formatLabel(value)}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="brand-filter">Brand</Label>
-                <select id="brand-filter" className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm" value={brand} onChange={(event) => setBrand(event.target.value)}>
+                <Select id="brand-filter" value={brand} onChange={(event) => setBrand(event.target.value)}>
                   <option value="">All brands</option>
                   {brands.map((value) => <option key={value} value={value}>{value}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="dietary-filter">Dietary</Label>
-                <select id="dietary-filter" className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm" value={dietary} onChange={(event) => setDietary(event.target.value)}>
+                <Select id="dietary-filter" value={dietary} onChange={(event) => setDietary(event.target.value)}>
                   <option value="">All dietary options</option>
                   {dietaryOptions.map((value) => <option key={value} value={value}>{formatLabel(value)}</option>)}
-                </select>
+                </Select>
               </div>
               <fieldset className="space-y-2 sm:col-span-2">
-                <legend className="text-sm font-medium">Lowest price range ($)</legend>
+                <legend className="text-sm font-semibold">Lowest price range ($)</legend>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="minimum-price" className="text-xs text-muted-foreground">From</Label>
@@ -541,25 +536,27 @@ export function SearchProductsPage() {
         </div>
 
         {error ? (
-          <div role="alert" className="glass-panel p-10 text-center">
-            <h2 className="font-semibold">Catalogue unavailable</h2>
+          <div role="alert" className="surface-card p-10 text-center">
+            <h2 className="font-display text-lg font-extrabold">Catalogue unavailable</h2>
             <p className="mt-2 text-sm text-muted-foreground">{error}</p>
           </div>
         ) : loading ? (
-          <div className="glass-panel p-10 text-center text-sm text-muted-foreground" aria-live="polite">Loading products…</div>
+          <div className="surface-card flex flex-col items-center gap-3 p-12 text-center text-sm text-muted-foreground" aria-live="polite">
+            <LoaderCircle className="size-8 animate-spin text-primary" aria-hidden="true" />Loading products…
+          </div>
         ) : result?.catalogSize === 0 ? (
-          <div className="glass-panel p-10 text-center">
-            <h2 className="font-semibold">No products yet</h2>
+          <div className="surface-card p-10 text-center">
+            <h2 className="font-display text-lg font-extrabold">No products yet</h2>
             <p className="mt-2 text-sm text-muted-foreground">Products will appear here when the catalog API returns them.</p>
           </div>
         ) : products.length === 0 ? (
-          <div className="glass-panel p-10 text-center">
-            <h2 className="font-semibold">No matching products</h2>
+          <div className="surface-card p-10 text-center">
+            <h2 className="font-display text-lg font-extrabold">No matching products</h2>
             <p className="mt-2 text-sm text-muted-foreground">Try a different search or clear some filters.</p>
             <Button type="button" variant="outline" className="mt-4" onClick={clearFilters}>Clear search and filters</Button>
           </div>
         ) : (
-          <div className={`grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${searching ? "opacity-60" : ""}`} aria-live="polite" aria-busy={searching}>
+          <div className={`grid gap-5 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${searching ? "opacity-60" : ""}`} aria-live="polite" aria-busy={searching}>
             {products.map((product) => (
               <ProductCard
                 key={product.id}

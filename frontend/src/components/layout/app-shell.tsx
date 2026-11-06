@@ -1,8 +1,9 @@
-import { LogIn, LogOut, Menu, ShoppingCart, UserRound, X } from "lucide-react"
+import { LogIn, LogOut, Menu, UserRound, X } from "lucide-react"
 import { useState, type ReactNode } from "react"
-import { Link, NavLink, useNavigate } from "react-router-dom"
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom"
 import { useAuth } from "../../auth/auth-context"
 import { cn } from "../../lib/utils"
+import { Logo } from "../brand/logo"
 import { Button } from "../ui/button"
 
 const navigation = [
@@ -12,26 +13,67 @@ const navigation = [
 ] as const
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, signOut } = useAuth(); const navigate = useNavigate(); const [open, setOpen] = useState(false)
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [open, setOpen] = useState(false)
   const visibleNavigation = user?.role === "admin" ? navigation.filter(([, path]) => path === "/contribute") : navigation
   const homePath = user?.role === "admin" ? "/contribute" : "/basket"
+  // The log-in modal opens over the page you're on, which stays underneath it.
+  const loginState = { background: location }
+
   async function leave() { await signOut(); navigate("/basket"); setOpen(false) }
+
   return (
-    <main className="aurora-page min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-emerald-100/20 bg-card/45 shadow-[inset_0_-1px_0_hsl(0_0%_100%/0.06)] backdrop-blur-2xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
-          <Link to={homePath} className="flex items-center gap-2.5 font-semibold tracking-tight"><span className="grid size-9 place-items-center rounded-lg border-2 border-current bg-card/30"><ShoppingCart className="size-5" /></span>TrolleySaver</Link>
-          <nav className="hidden items-center gap-7 md:flex" aria-label="Main navigation">
-            {visibleNavigation.map(([label, path]) => <NavLink key={path} to={path} className={({ isActive }) => cn("border-b-2 border-transparent py-5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground", isActive && "border-primary text-foreground")}>{label}</NavLink>)}
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-40 bg-band text-white">
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6">
+          <Link to={homePath} className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-band-accent">
+            <Logo onBand />
+          </Link>
+          <nav className="hidden items-stretch gap-7 self-stretch md:flex" aria-label="Main navigation">
+            {visibleNavigation.map(([label, path]) => (
+              <NavLink key={path} to={path} className={({ isActive }) => cn(
+                "band-link flex items-center border-y-[3px] border-transparent text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-band-accent",
+                isActive && "border-b-band-accent font-semibold text-white",
+              )}>{label}</NavLink>
+            ))}
           </nav>
           <div className="hidden items-center gap-2 md:flex">
-            {user ? <><span className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-white/15 bg-secondary/60 px-3 py-1.5 text-xs text-muted-foreground" title={user.email}><UserRound className="size-3.5 shrink-0" /><span className="truncate">{user.name?.trim() || user.email}</span></span><Button variant="outline" size="sm" onClick={leave}><LogOut className="size-4" />Sign out</Button></> : <Button asChild size="sm"><Link to="/login"><LogIn className="size-4" />Log in</Link></Button>}
+            {user ? (
+              <>
+                <span className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[13px] text-white/90" title={user.email}>
+                  <UserRound className="size-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{user.name?.trim() || user.email}</span>
+                </span>
+                <Button variant="band-outline" size="sm" onClick={leave}><LogOut className="size-4" />Sign out</Button>
+              </>
+            ) : (
+              <Button asChild variant="band" size="sm"><Link to="/login" state={loginState}><LogIn className="size-4" />Log in</Link></Button>
+            )}
           </div>
-          <Button className="md:hidden" variant="ghost" size="icon" onClick={() => setOpen((value) => !value)} aria-label="Toggle navigation">{open ? <X /> : <Menu />}</Button>
+          <Button className="text-white hover:bg-white/10 hover:text-white md:hidden" variant="ghost" size="icon" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "Close menu" : "Open menu"}>
+            {open ? <X /> : <Menu />}
+          </Button>
         </div>
-        {open && <nav className="border-t border-emerald-100/15 bg-card/55 p-4 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.08)] backdrop-blur-2xl md:hidden" aria-label="Mobile navigation"><div className="grid gap-1">{visibleNavigation.map(([label, path]) => <NavLink key={path} to={path} onClick={() => setOpen(false)} className={({ isActive }) => cn("rounded-md px-3 py-3 text-sm text-muted-foreground", isActive && "bg-secondary text-foreground")}>{label}</NavLink>)}{user ? <Button className="mt-2" variant="outline" onClick={leave}>Sign out</Button> : <Button asChild className="mt-2"><Link to="/login" onClick={() => setOpen(false)}>Log in</Link></Button>}</div></nav>}
+        {open && (
+          <nav className="rounded-b-[20px] border-t border-white/10 bg-band px-3 pb-5 pt-2 md:hidden" aria-label="Mobile navigation">
+            <div className="grid gap-1">
+              {visibleNavigation.map(([label, path]) => (
+                <NavLink key={path} to={path} onClick={() => setOpen(false)} className={({ isActive }) => cn(
+                  "flex min-h-[52px] items-center rounded-lg px-3.5 text-base text-white/85",
+                  isActive && "bg-white/10 font-semibold text-white",
+                )}>{label}</NavLink>
+              ))}
+              {user ? (
+                <Button className="mt-3 h-12 text-base" variant="band-outline" onClick={leave}><LogOut className="size-4" />Sign out</Button>
+              ) : (
+                <Button asChild className="mt-3 h-12 text-base" variant="band"><Link to="/login" state={loginState} onClick={() => setOpen(false)}><LogIn className="size-4" />Log in</Link></Button>
+              )}
+            </div>
+          </nav>
+        )}
       </header>
-      <div className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">{children}</div>
-    </main>
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">{children}</main>
+    </div>
   )
 }

@@ -24,15 +24,21 @@ export default {
         destructive: "hsl(var(--destructive))",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))"
+        ring: "hsl(var(--ring))",
+        band: "hsl(var(--band))",
+        "band-accent": "hsl(var(--band-accent))",
+        "band-accent-foreground": "hsl(var(--band-accent-foreground))"
       },
+      fontFamily: {
+        // Inter for text; Nunito, close to the logo's rounded lettering, for headings, product names and prices.
+        sans: ["Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        display: ["Nunito Variable", "Nunito", "ui-rounded", "ui-sans-serif", "system-ui", "sans-serif"]
+      },
+      // Buttons and inputs: 12px corners. Cards use rounded-2xl (16px).
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)"
-      },
-      boxShadow: {
-        card: "0 32px 90px rgba(10, 35, 24, 0.16)"
       }
     }
   },

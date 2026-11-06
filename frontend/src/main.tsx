@@ -5,6 +5,7 @@ import { Toaster } from "sonner"
 import { App } from "./app"
 import { AuthProvider } from "./auth/auth-context"
 import "@fontsource-variable/inter"
+import "@fontsource-variable/nunito"
 import "./styles.css"
 
 createRoot(document.getElementById("root")!).render(

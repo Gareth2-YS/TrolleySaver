@@ -66,14 +66,17 @@ On the machine that deploys (Windows, macOS or Linux):
 | Node.js 22 or later | nodejs.org | `npm --version` |
 | Backend test environment | from `backend/`: `python -m venv .venv`, then `.venv\Scripts\python -m pip install -r requirements-dev.txt` | `backend/.venv` exists |
 
-**Signing in to AWS.** The team account uses AWS SSO. Sign in, then confirm who you are:
+**Signing in to AWS.** The team account gives each member temporary keys through the AWS access portal:
+
+1. Sign in to the AWS access portal and open **Access keys** for the team account.
+2. Copy **Option 2** (the credentials-file block) into `%USERPROFILE%\.aws\credentials`, under the profile name you pass to the deploy script with `--profile`.
+3. Confirm who you are:
 
 ```powershell
-aws sso login --profile <your SSO profile>
-aws sts get-caller-identity --profile <your SSO profile>
+aws sts get-caller-identity --profile <your profile> --region ap-southeast-1
 ```
 
-The session lasts a few hours. When a command says the token has expired, sign in again.
+The keys last a few hours. When a command says the token has expired, copy fresh ones from the portal. `aws sso login` only works for a profile set up with `aws configure sso`; a profile holding pasted keys has no SSO settings, so that command fails.
 
 **A brand-new environment** also needs its data. A redeploy of `dev` doesn't need this:
 - Load the catalog with `backend/scripts/seed_catalog.py`.
@@ -185,7 +188,7 @@ git checkout -     # back to where you were
 
 | Message | Fix |
 |---|---|
-| `Not signed in to AWS` / `ExpiredToken` | `aws sso login --profile <profile>`, then run the deploy again |
+| `Not signed in to AWS` / `ExpiredToken` | Copy fresh keys from the AWS access portal into `%USERPROFILE%\.aws\credentials` (see [2. One-time setup](#2-one-time-setup)), then run the deploy again |
 | `Can't see the stack's photo bucket` | You're signed in to the wrong account, or with the wrong profile |
 | `` `sam` isn't installed or isn't on PATH `` | Install the SAM CLI, then open a **new** terminal so PATH updates |
 | `backend/.venv is missing` | Set it up ([2. One-time setup](#2-one-time-setup)), or pass `--skip-tests` |

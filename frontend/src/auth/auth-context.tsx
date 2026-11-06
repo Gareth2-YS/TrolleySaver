@@ -7,7 +7,8 @@ interface AuthContextValue {
   loading: boolean
   /** Set when sign-in can't start at all, e.g. missing Cognito settings. */
   error: string | null
-  signIn(input: SignInInput, intendedRole: AuthRole): Promise<AuthNextStep & { authenticatedRole?: AuthRole }>
+  /** One log-in for everyone: the account's role comes from its Cognito group, never from the form. */
+  signIn(input: SignInInput): Promise<AuthNextStep & { authenticatedRole?: AuthRole }>
   signUp(input: SignUpInput): Promise<AuthNextStep>
   signOut(): Promise<void>
   getAccessToken(forceRefresh?: boolean): Promise<string | null>
@@ -51,18 +52,11 @@ export function AuthProvider({ children, serviceOverride }: { children: ReactNod
     user,
     loading,
     error,
-    async signIn(input, intendedRole) {
+    async signIn(input) {
       if (!service) throw new Error("Authentication is still loading.")
       const next = await service.signIn(input)
       if (next.type === "DONE") {
         const nextUser = await refreshUser()
-        if (nextUser?.role !== intendedRole) {
-          await service.signOut(); setUser(null)
-          const message = intendedRole === "admin"
-            ? "This account does not have administrator access."
-            : "Administrator accounts must log in through the Admin tab."
-          throw Object.assign(new Error(message), { name: "UnauthorizedRoleError" })
-        }
         return { ...next, authenticatedRole: nextUser?.role }
       }
       return next

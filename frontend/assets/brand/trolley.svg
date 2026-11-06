@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="566" height="482" viewBox="16 132 566 482" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">TrolleySaver trolley icon</title>
+  <desc id="desc">A green shopping trolley with a price-tag shaped basket and a white checkmark.</desc>
+  <g fill="#008326">
+    <path fill-rule="evenodd" d="M68 157H131C162 157 180 174 188 202L195 227L428 216C442 215 453 219 463 229L544 301C553 310 559 318 559 329C559 340 552 349 544 358L477 434C466 447 458 453 443 453H246C241 453 238 456 238 461C238 466 241 469 246 469H464C477 469 487 477 487 489C487 501 477 509 464 509H218C200 509 188 498 184 481L134 225C133 218 129 214 121 214H68C51 214 39 203 39 187C39 170 51 157 68 157ZM515 330A21 21 0 1 0 473 330A21 21 0 1 0 515 330Z"/>
+    <circle cx="216" cy="548" r="42"/>
+    <circle cx="411" cy="548" r="42"/>
+  </g>
+  <path d="M262 345L305 387L403 292" stroke="white" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

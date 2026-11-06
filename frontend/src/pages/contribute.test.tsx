@@ -355,6 +355,30 @@ describe("new products and deletion", () => {
     expect(screen.queryByRole("heading", { name: /Oat milk/ })).not.toBeInTheDocument()
   })
 
+  it("shows the product submissions as loading, not empty, until they arrive and while refreshing", async () => {
+    const user = userEvent.setup()
+    let finishLoad!: (items: typeof requestRecord[]) => void
+    const pending = () => new Promise<typeof requestRecord[]>((resolve) => { finishLoad = resolve })
+    const service = submissionService({ mode: "api", listMyProductRequests: vi.fn().mockImplementation(pending) })
+    renderContribution("user", service)
+
+    const section = await screen.findByRole("region", { name: "Your product submissions" })
+    expect(await within(section).findByText("Loading your product submissions…")).toBeInTheDocument()
+    expect(within(section).queryByText("New product submissions will appear here.")).not.toBeInTheDocument()
+    expect(within(section).getByRole("button", { name: "Refresh product submissions" })).toBeDisabled()
+    await act(async () => { finishLoad([requestRecord]) })
+    expect(await within(section).findByRole("heading", { name: /Oat milk/ })).toBeInTheDocument()
+    expect(section).toHaveAttribute("aria-busy", "false")
+
+    await user.click(within(section).getByRole("button", { name: "Refresh product submissions" }))
+    expect(section).toHaveAttribute("aria-busy", "true")
+    expect(within(section).getByRole("button", { name: "Refresh product submissions" })).toBeDisabled()
+    // The list stays on screen while it refreshes.
+    expect(within(section).getByRole("heading", { name: /Oat milk/ })).toBeInTheDocument()
+    await act(async () => { finishLoad([requestRecord]) })
+    await waitFor(() => expect(section).toHaveAttribute("aria-busy", "false"))
+  })
+
   it.each([
     { status: 404, code: "NOT_FOUND", message: "This request no longer exists.", refreshed: [] },
     { status: 409, code: "ALREADY_MODERATED", message: "This product request is already approved.", refreshed: [{ ...requestRecord, status: "approved" as const }] },
