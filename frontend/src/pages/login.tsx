@@ -6,7 +6,7 @@ import { Link, useLocation } from "react-router-dom"
 import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
 import { getAuthErrorMessage } from "../auth/errors"
-import { loginSchema, type LoginValues } from "../auth/schemas"
+import { loginSchema, MAX_EMAIL_LENGTH, type LoginValues } from "../auth/schemas"
 import { FormAlert } from "../components/auth/form-alert"
 import { FormField } from "../components/auth/form-field"
 import { PasswordField } from "../components/auth/password-field"
@@ -30,7 +30,7 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
       <FormAlert message={error} />
-      <FormField id="email" label="Email address" type="email" autoComplete="email" placeholder="you@example.com" registration={register("email")} error={errors.email} />
+      <FormField id="email" label="Email address" type="email" autoComplete="email" maxLength={MAX_EMAIL_LENGTH} placeholder="you@example.com" registration={register("email")} error={errors.email} />
       <PasswordField id="password" label="Password" registration={register("password")} error={errors.password} />
       <Button className="h-12 w-full text-base" type="submit" disabled={isSubmitting}>{isSubmitting && <LoaderCircle className="size-4 animate-spin" />}Log in<ArrowRight className="size-4" /></Button>
       <p className="text-center text-sm text-muted-foreground">New here? <Link to="/register" replace state={location.state} className="font-semibold text-primary underline-offset-4 hover:underline">Join the community</Link></p>

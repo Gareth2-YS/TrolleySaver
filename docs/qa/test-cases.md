@@ -30,18 +30,18 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 | Section | Cases | Key ⭐ | Done |
 |---|--:|--:|--:|
 | [1. Navigation and access](#1-navigation-and-access) | 12 | 6 | 0 |
-| [2. Register and log in](#2-register-and-log-in) | 15 | 5 | 1 |
-| [3. Search & filter](#3-search--filter) | 16 | 6 | 0 |
-| [4. Smart Basket](#4-smart-basket) | 20 | 9 | 0 |
-| [5. Contributor: submit a price](#5-contributor-submit-a-price) | 19 | 6 | 0 |
-| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 19 | 9 | 0 |
-| [7. Admin: price review](#7-admin-price-review) | 7 | 4 | 0 |
+| [2. Register and log in](#2-register-and-log-in) | 17 | 5 | 1 |
+| [3. Search & filter](#3-search--filter) | 19 | 7 | 0 |
+| [4. Smart Basket](#4-smart-basket) | 23 | 11 | 0 |
+| [5. Contributor: submit a price](#5-contributor-submit-a-price) | 25 | 10 | 0 |
+| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 23 | 10 | 0 |
+| [7. Admin: price review](#7-admin-price-review) | 8 | 4 | 0 |
 | [8. Admin: product request review](#8-admin-product-request-review) | 10 | 5 | 0 |
 | [9. Price freshness](#9-price-freshness) | 7 | 2 | 0 |
 | [10. Known issues](#10-known-issues) | 2 | 0 | 0 |
-| [11. Deployed site](#11-deployed-site) | 9 | 5 | 2 |
-| [12. Look and feel](#12-look-and-feel) | 9 | 3 | 0 |
-| **Total** | **145** | **60** | **3** |
+| [11. Deployed site](#11-deployed-site) | 10 | 6 | 1 |
+| [12. Look and feel](#12-look-and-feel) | 11 | 4 | 0 |
+| **Total** | **167** | **70** | **2** |
 
 ## 1. Navigation and access
 
@@ -81,6 +81,8 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | AUTH-13 | In the window, switch between the "Log in" and "Register" tabs, and use the "Join the community" and "Log in" links. Watch the browser tab. Close the window. | It switches in place without closing. The browser tab reads "Log in · TrolleySaver" or "Register · TrolleySaver", and the page's own title again once the window closes. | | Not done | Added 6 Nov. |
 | AUTH-14 | Open the window at 1440 px wide, then narrow the browser below 900 px, then to phone width. At 1440 px, click "Build a smarter basket". | Wide: "Good finds are better shared." on the left, with "Build a smarter basket", "Find your next good buy" and "Spotted a price worth sharing?". Below 900 px only the form shows; at phone width the window fills the screen. The shortcut closes the window and opens Smart basket. | | Not done | Added 6 Nov. |
 | AUTH-15 | Open `/login` directly in a new browser tab, then close the window. | The window opens over Smart basket. Closing it leaves you on `/basket`. | | Not done | Added 6 Nov. |
+| AUTH-16 | In Register, paste 100 characters into "Full name" and 300 into "Email address". | "Full name" stops at 80 characters and "Email address" at 254. The password boxes stop at 256. | | Not done | Added 6 Nov (security hardening). |
+| AUTH-17 | In the browser console, run `copy('Alex\u202eTan')`, then paste it into "Full name" (the text has a hidden right-to-left override in it). Fill in the rest and click "Create my account". | "Your name can't contain hidden or control characters", and no account is created. | | Not done | Added 6 Nov. The sign-up trigger refuses it too if the form is bypassed. |
 
 ## 3. Search & filter
 
@@ -88,11 +90,11 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 |---|---|---|:-:|---|---|
 | SRCH-01 | Signed out, open `/search`. | "Search and filter groceries", a count like "24 of 24 products", and a card per product: its picture or category icon on a white tile, the name, brand · pack size (e.g. "6 × 180 ml"), and under a thin line the lowest price, e.g. "Lowest $3.63 at FairPrice". Healthier Choice products have a "Healthier Choice" badge with a leaf. | ⭐ | Not done | |
 | SRCH-02 | Type "milk" in "Search product or brand". Then "magnolia milk". | About a third of a second after you stop typing, a spinner and "Updating…" show beside the count and the cards fade, then e.g. "5 of 24 products", with only matching products. "magnolia milk" shows only products matching **both** words. | ⭐ | Not done | |
-| SRCH-03 | Click the quick filters: a category (e.g. "Milk"), the same one again, then "Healthier Choice", then "All". | A category shows only that type, and clicking it again shows everything. "Healthier Choice" shows only products with the badge and clears the category (and the other way round). "All" clears both. Only categories in the catalog appear among "Cereal", "Milk", "Soft Drinks", "Cookies" and "Toilet Rolls". | | Not done | |
-| SRCH-04 | Click "Filters". Choose a Type and a Brand, then a Dietary option. | The panel has "Type", "Brand", "Dietary" and "Lowest price range ($)" with "From" and "To". Each choice narrows the results. The button reads "Filters (2)" after Type and Brand. | | Not done | The count includes Type, Healthier Choice and Brand only: Dietary and the price range don't add to it. |
+| SRCH-03 | Turn on the "Healthier Choice only" switch beside "Filters", then turn it off. Also choose a Type in Filters with the switch on. | On: only products with the "Healthier Choice" badge. Off: everything again. Choosing a Type keeps the switch on, and the two combine. There's no row of quick filter chips (All, Cereal, Milk…). | ⭐ | Not done | Changed 7 Nov: the hand-picked quick filters were removed, and Healthier Choice became a switch. |
+| SRCH-04 | Click "Filters". Choose a Type and a Brand, then a Dietary option. | The panel has "Type", "Brand", "Dietary" and "Lowest price range ($)" with "From" and "To". Each choice narrows the results. The button reads "Filters (2)" after Type and Brand. | | Not done | Changed 7 Nov: the count covers the panel's filters (Type, Brand, Dietary, each price box). The Healthier Choice switch shows its own state and isn't counted. |
 | SRCH-05 | In the price range, enter From `2` and To `5`. | Only products whose lowest current price is $2.00 to $5.00 inclusive. Products with no current price disappear. | ⭐ | Not done | |
 | SRCH-06 | Enter From `5` and To `2`. Then From `-1`. | "Minimum price must not be greater than maximum price." Then "Enter a valid minimum price of 0 or more." The results don't change while a message shows. | | Not done | |
-| SRCH-07 | With a search, a quick filter and panel filters set, click "Clear search and filters". | The search box, quick filters, Type, Brand, Dietary and both price boxes reset, and the whole catalog shows. | | Not done | |
+| SRCH-07 | With a search, the Healthier Choice switch on and panel filters set, click "Clear search and filters". | The search box, the switch, Type, Brand, Dietary and both price boxes reset, and the whole catalog shows. | | Not done | |
 | SRCH-08 | Search for "zzzz". | "No matching products", "Try a different search or clear some filters.", and a "Clear search and filters" button that resets everything. | | Not done | |
 | SRCH-09 | Click a product's name. Close the dialog with ✕, then reopen it and press Esc, then reopen it and click outside it. | A dialog with the name, "Current retailer prices" (every store, each with its price and "Price date YYYY-MM-DD · N submissions", or "No current price"), and "Product information" (Category, Pack size, Healthier Choice Yes/No, Dietary). All three ways close it. | ⭐ | Not done | Since 6 Nov the store names come from the catalogue. |
 | SRCH-10 | Find a product with no current price (e.g. one approved today). | Its card says "No current price available". | | Not done | |
@@ -102,6 +104,9 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | SRCH-14 | Click a product's picture on its card. Close it with ✕, Esc, and by clicking outside it. Then open the product's details and click the picture there. | The picture opens large with the product's name, from the card and from the details. All three ways close it. | | Not done | Added 5 Nov. |
 | SRCH-15 | Click the category icon of a product the team loaded (no picture). | The enlarged view shows the same category icon, not a broken image. | | Not done | |
 | SRCH-16 | In the network tools, set throttling to "Slow 4G" (or "3G"), then reload `/search`. Turn throttling off afterwards. | While the catalogue loads: a spinner beside "Loading…" at the top, and a large spinner with "Loading products…" where the cards go. | | Not done | Added 6 Nov. |
+| SRCH-17 | Paste 150 characters into "Search product or brand". | The box stops at 100 characters and results still load. There's no "Catalogue unavailable". | | Not done | Added 6 Nov. |
+| SRCH-18 | Find a Healthier Choice product with a long name (or look at one at phone width). | The "Healthier Choice" pill sits on its own line at the top of the card, above the picture and name. The name uses the card's full width. | | Not done | Added 7 Nov. |
+| SRCH-19 | Open Filters and type `3.639` into "From". | The box shows `3.63`: a third decimal place can't be entered. | | Not done | Added 7 Nov. |
 
 ## 4. Smart Basket
 
@@ -112,7 +117,7 @@ Rewritten 6 Nov for the redesigned page (pictures, Healthier options, per-accoun
 | BSK-01 | Open `/basket` with an empty basket. Click "Browse groceries". | "Smart basket comparison", "Your basket is empty" and "Add groceries to compare the full basket total at every supermarket." "Price per item" says "Add items to compare prices at each store." and the savings box says "Add groceries to see what you could save." "Browse groceries" puts the cursor in the search box. | | Not done | |
 | BSK-02 | Under "Add groceries", type "milk" in "Search by product, brand or category" and click "Add" on one. Then search "zzzz". | Only matching products are listed. The product joins "Your basket" ("1 product · 1 pack") and its button reads "Add (1)". "zzzz" shows "No products match “zzzz”." | ⭐ | Not done | |
 | BSK-03 | Choose a product type in "All product types", then a brand in "All brands". Set both back. | Each narrows the list (both together narrow further). With nothing left: "No products match these filters." | | Not done | |
-| BSK-04 | Use + and − on a basket item, press the bin at quantity 1, then add a few items and click "Reset". | + and − change the quantity and the totals. At 1 the − button is a bin ("Remove {product}") that removes the item. + stops at 99. "Reset" empties the basket. | | Not done | |
+| BSK-04 | Use + and − on a basket item, then press its bin. Add a few items and click "Reset". | + and − change the quantity and the totals; − stops at 1. The bin ("Remove {product} from basket") removes the whole line, at any quantity. + stops at 99. "Reset" empties the basket. | | Not done | Changed 7 Nov: the bin is always there, beside the quantity. |
 | BSK-05 | Add three or more products that every store prices. | "Compare by retailer" shows a card per store with its total. The cheapest has a "Cheapest" badge and "Lowest total"; the others show "+$X.XX more" (or "Same total"). Below the items: "Total at {store} · cheapest". The savings box at the top shows "Save up to $X.XX at {cheapest store} instead of {dearest store}". | ⭐ | Not done | |
 | BSK-06 | Click another store's card. Then press the arrow keys. | The card is selected, each item's price and the total switch to that store ("Total at {store}"), and the line above the cards reads "N priced · N missing at {store}". The arrow keys move between the cards in the same way, wrapping round. | ⭐ | Not done | |
 | BSK-07 | Add a product that one store has no price for. | That store's card shows "N priced · N missing" in amber, and isn't "Cheapest" over a store that has everything. If no store has every item: "No single store has a price for every item yet. Totals only include the items each store prices." With that store selected the item shows "No price" and the total reads "Total for priced items at {store}". | ⭐ | Not done | |
@@ -129,6 +134,9 @@ Rewritten 6 Nov for the redesigned page (pictures, Healthier options, per-accoun
 | BSK-18 | Add a product with the Healthier Choice Symbol. | It shows a "Healthier Choice" badge with a leaf in the search list and in the basket. | | Not done | |
 | BSK-19 | **API mode only.** Add a product that has a Healthier Choice alternative (e.g. white bread), one that is already Healthier Choice, and one with no alternative. Click "Swap N items". Then "Undo" under one item. | Under the store cards: "Healthier basket at {store}", "Swaps in {products}." and "1 item is already Healthier Choice.", its total, and "$X.XX more (N%)" (or "$X.XX less", or "Same as your basket"). The button swaps every item listed at once; each shows "Swapped from …", and the healthier basket line goes. "Undo" puts back just that item. | ⭐ | Not done | Added 6 Nov. The local demo mode has no healthier basket. |
 | BSK-20 | Under "Add groceries", clear the search so the whole catalogue is listed. | The list fades out at its bottom edge, and under it reads "N products · scroll the list for more". | | Not done | Added 6 Nov. |
+| BSK-21 | Under "Add groceries", type a search, and choose a product type and a brand. Click "Clear filters". Then search for "zzzz". | "Clear filters" is greyed out until something is set. It empties the search and sets both pickers back to "All", and the whole catalog shows. "zzzz" shows "No products match “zzzz”." with its own "Clear filters" button. | ⭐ | Not done | Added 7 Nov. |
+| BSK-22 | Put 3 of a product in the basket and press its bin. | The whole line goes at once, and the totals update. | ⭐ | Not done | Added 7 Nov. |
+| BSK-23 | Under "Add groceries", find a Healthier Choice product with a long name. | The "Healthier Choice" pill sits above the product's name, so the name isn't squeezed. | | Not done | Added 7 Nov. |
 
 ## 5. Contributor: submit a price
 
@@ -143,18 +151,24 @@ Log in as a contributor and open `/contribute`.
 | PRC-05 | Enter prices `0`, `1000.01`, then `1000`. | "Price must be greater than $0", then "Price must be $1,000 or less". `1000` is allowed. | | Not done | |
 | PRC-06 | Open the date picker. Then type tomorrow's date, then a date 31 days ago. | The picker only offers the last 30 days up to today. Typed dates give "Observed date cannot be in the future" and "Observed date must be within the last 30 days". | | Not done | |
 | PRC-07 | Submit a usual price with no photo: Magnolia Fresh Milk, FairPrice, $3.63, today. | A "Price accepted; public prices update after nightly aggregation" message, and the form clears. The price is first in "Your price submissions" with an "Accepted" badge, "Observed {date}" and "Submitted {time}". The "N total" count goes up. | ⭐ | Not done | |
-| PRC-08 | Submit an unusual price with a photo: the same milk at $20. | A "Submission sent for administrator review" message. The submission shows "Pending Review" and "Photo attached · visible to administrators". You can't see the photo. | ⭐ | Not done | |
+| PRC-08 | Submit an unusual price with a photo: the same milk at $20 at another store. | A "Submission sent for administrator review" message. The system flagged it, so it shows "Pending Review", with your photo as a thumbnail and a "Delete pending price submission" button. | ⭐ | Not done | Changed 7 Nov: contributors see their own photo. |
 | PRC-09 | Click "Add a price photo" and choose a JPG under 5 MB. Click "Remove". Then focus the photo area with Tab and press Enter. | A preview of the photo, then "Remove" clears it. Enter opens the file picker. | | Not done | |
 | PRC-10 | Choose a GIF (pick "All files" in the picker), then the empty PNG, then the PNG over 5 MB. | "Choose a JPG or PNG image", "Choose a non-empty image", then "Image must be 5 MB or smaller". "Submit price" is disabled while a message shows. | | Not done | |
 | PRC-11 | Submit a price with a photo of a few MB. | "Preparing image" with a percentage bar while it uploads, and the button reads "Saving...". | | Not done | |
-| PRC-12 | Submit exactly the same product, store and price as PRC-07 again, the same day. | "You have already submitted this price for this product and store today." | | Not done | |
+| PRC-12 | Submit the same product and store as PRC-07 again the same day, first at the same price, then at a different one. | Both times: "You've already submitted a price for this product at this store today." | ⭐ | Not done | Changed 7 Nov: one price per product, store and day, whatever the price. |
 | PRC-13 | Submit more than 30 prices within an hour. | "You can submit up to 30 prices per hour. Please try again later." | | Not done | Slow to set up. Run it last. |
 | PRC-14 | Fill in the form, choose a type filter and a photo, then click "Clear". | Every field, the type filter and the photo reset. | | Not done | |
-| PRC-15 | Look at the cards in "Your price submissions". | No delete or edit buttons. Prices can't be deleted, by design. | | Not done | |
+| PRC-15 | On a pending (flagged) price, click "Delete pending price submission" and cancel. Click it again and confirm. Then submit a price for the same product and store again. | The confirmation reads "Delete this price submission? Its photo will be removed too. This cannot be undone." Cancel changes nothing. Confirm shows "Deleting…", then the card disappears, and the new price is accepted. Accepted and rejected prices have no delete button. | ⭐ | Not done | Changed 7 Nov: pending prices can be deleted. |
 | PRC-16 | After an admin rejects your $20 price (ADP-04), reload. Do the same after an admin accepts one (ADP-03). | Rejected: a "Rejected" badge and "Rejection reason: {reason}". Accepted: an "Accepted" badge. | ⭐ | Not done | |
 | PRC-17 | **Missing API address.** Delete the `VITE_API_BASE_URL` value in `.env.local`, restart `npm run dev` and open `/contribute`. Put it back afterwards. | The header shows as normal, with "Price submissions are not configured. Set VITE_API_BASE_URL in frontend/.env.local, or set VITE_PRICE_SUBMISSION_MODE=local." The page isn't blank. | | Not done | Fixed 4 Nov: the page used to be blank. |
 | PRC-18 | In the afternoon, submit a usual price with the **earliest** date the picker allows (30 days ago). Do the same in "Upload a new product". | Both are accepted, any time of day. | | Not done | Fixed 6 Nov (backend): after 00:05 the earliest date used to be refused with "Observed date must be within the last 30 days". |
 | PRC-19 | Choose a photo, then in the browser's network tools block requests to `*.amazonaws.com` (the photo bucket) and submit. Unblock afterwards. | "The photo upload failed. Check your connection and try again." Nothing is saved, and submitting again after unblocking works. | | Not done | The server's own check for a photo that never arrived (`PHOTO_NOT_FOUND`) can't be reached from the UI. The smoke test covers it ("photo that was never uploaded"). |
+| PRC-20 | Enter the price `3.635` and submit. Then `3.6`. | `3.635`: "Enter the price in dollars and cents, e.g. 3.63". `3.6` is accepted as $3.60. | ⭐ | Not done | Added 6 Nov: it used to be rounded silently. |
+| PRC-21 | Rename a text file to `shelf.png` and choose it as the price photo. | "This file isn't a readable JPG or PNG image", no preview, and "Submit price" is disabled. | | Not done | Added 6 Nov. |
+| PRC-22 | Take a photo with a phone that records location (check it has GPS with any EXIF viewer). Submit an unusual price with it. As an admin, open the flagged price, save the evidence photo and check it in the EXIF viewer. Also try a photo over 2560 px wide. | The saved photo has no GPS or other EXIF data. A wide photo comes back at most 2560 px on its long side, the right way up. | ⭐ | Not done | Added 6 Nov: the browser redraws every photo before upload. |
+| PRC-23 | In "Your price submissions", click the thumbnail of a price you sent with a photo. Close it with ✕, Esc, or by clicking outside. | Your photo opens large, titled "Price evidence for {product}". All three ways close it. A price without a photo shows "No image". | | Not done | Added 7 Nov. |
+| PRC-24 | Open `/contribute` in two tabs. As an admin, accept a pending price. In the tab that hasn't refreshed, delete it. | "This submission is already accepted.", and the list refreshes, showing it accepted without a delete button. | | Not done | Added 7 Nov. |
+| PRC-25 | Have an admin reject one of your prices (ADP-04), then submit a corrected price for the same product and store that day. | It's accepted: a rejected price doesn't count toward one-a-day. | | Not done | Added 7 Nov. |
 
 ## 6. Contributor: new product requests
 
@@ -181,6 +195,10 @@ Log in as a contributor, open `/contribute` and click "Upload a new product". Us
 | NPR-17 | Open `/contribute` and watch "Your product submissions" as the page loads. Then click "Refresh product submissions". | While it loads: a spinner and "Loading your product submissions…", never "New product submissions will appear here." for an account that has requests. With none: "New product submissions will appear here." On refresh the button's icon spins and the button is disabled until the list comes back; any requests stay on screen, faded, meanwhile. | | Not done | Spinner added 6 Nov. |
 | NPR-18 | Propose an 11th product within 24 hours. | "You can propose up to 10 new products a day. Please try again tomorrow." | | Not done | Delete the test requests afterwards. |
 | NPR-19 | In "Upload a new product", click the Healthier Choice Symbol picture, then click it again. As an admin, open a request's corrections. | Clicking the symbol ticks and unticks "Healthier Choice Symbol". The admin's correction form shows the same symbol. | | Not done | Added 6 Nov. |
+| NPR-20 | In "Upload a new product", open the browser console, run `copy('Oat\u200bMilk')`, then paste it into "Product name" (it has a zero-width space). Fill in the rest and submit. | "Product name can't contain hidden or control characters". | | Not done | Added 6 Nov. Brand, Category and dietary tags have the same rule. |
+| NPR-21 | Choose a renamed text file (`pack.png`) as the product picture. | "This file isn't a readable JPG or PNG image", and no preview. | | Not done | Added 6 Nov. |
+| NPR-22 | Propose a product using a phone photo with GPS as its picture. After an admin approves it, open its picture on Search (open the image in a new tab and save it) and check it in an EXIF viewer. | The published picture has no GPS or other EXIF data. | ⭐ | Not done | Added 6 Nov. Product pictures are public. |
+| NPR-23 | Propose a product with both a product picture and a price evidence photo. Look at it in "Your product submissions". | The card shows the product picture and, beside it, your evidence photo. A request without evidence shows only the picture. | | Not done | Added 7 Nov: contributors see their own evidence photos. |
 
 ## 7. Admin: price review
 
@@ -195,6 +213,7 @@ Log in as an admin. You need a flagged price from PRC-08.
 | ADP-05 | Open the queue in two admin tabs. Accept a price in the first, then accept the same one in the second. | "This submission is already accepted." The second tab's queue refreshes. | | Not done | |
 | ADP-06 | Decide every flagged price. | "Review queue is clear" and "New submissions will appear here." The count shows 0. | | Not done | |
 | ADP-07 | Leave the queue open for more than 5 minutes (the photo link's lifetime), then reload a photo, e.g. by scrolling to one that hadn't loaded. | The photo still loads. If a link has expired, the page fetches fresh links once. | | Not done | |
+| ADP-08 | Click "Reject" on a flagged price. In the browser console, run `copy('Blurry\u202ephoto')`, then paste it into "Reason for rejection", then click "Confirm rejection". | "The reason can't contain hidden or control characters", and the price stays in the queue. Line breaks in a reason are fine. | | Not done | Added 6 Nov. Product request rejections have the same rule. |
 
 ## 8. Admin: product request review
 
@@ -238,7 +257,7 @@ Found by reading the code, and not fixed yet. Each case says what should happen.
 
 ## 11. Deployed site
 
-The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.net), built by `python infra\deploy.py` against the dev stack. Keep the browser's developer console open: it must show no CORS, mixed-content or "Failed to load resource" errors. See [docs/deployment.md](../deployment.md).
+The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.net), built by `python infra\deploy.py` against the dev stack. Keep the browser's developer console open: it must show no CORS, Content-Security-Policy, mixed-content or "Failed to load resource" errors. See [docs/deployment.md](../deployment.md).
 
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|
@@ -250,7 +269,8 @@ The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.n
 | DEP-06 | Propose a new product with a picture from the site. As an admin, open it in the review queue, then reject it. | It appears pending with its picture, in your list and in the admin queue. | | Not done | |
 | DEP-07 | Build a Smart basket and open Healthier options. | Prices and swaps work as in §4. | | Not done | |
 | DEP-08 | Note something visible, redeploy the frontend with a change (`python infra\deploy.py --frontend-only`), then reload the open tab normally. | The reload shows the new version, without clearing the cache. | | Not done | `index.html` is never cached; the other files have new names each build. |
-| DEP-09 | In the developer tools' Network tab, select the page's first request (the document) and look at its response headers. | `strict-transport-security`, `x-content-type-options: nosniff` and `x-frame-options` are present. | | Done 6 Nov | Also `referrer-policy`. From CloudFront's security headers policy. |
+| DEP-09 | In the developer tools' Network tab, select the page's first request (the document) and look at its response headers. | `content-security-policy` (starting `default-src 'self'; script-src 'self'`), `strict-transport-security`, `x-content-type-options: nosniff`, `x-frame-options: DENY`, `referrer-policy: strict-origin-when-cross-origin`, `permissions-policy` and `cross-origin-opener-policy: same-origin`. | | Not done | Changed 6 Nov: the site now has its own headers policy with a CSP (was Done 6 Nov with the AWS managed policy). |
+| DEP-10 | With the console open, go through every page: Smart basket, Search (open a product with a picture, and enlarge it), log in, Price & image upload (choose a photo and submit), Upload a new product (with a picture), and as an admin both review queues (evidence photos). | Everything works, and the console shows no `Refused to load`, `Refused to connect` or other Content-Security-Policy errors. | ⭐ | Not done | Added 6 Nov. A CSP error names the blocked host; add it to `FrontendSecurityHeaders` in `backend/template.yaml` only if it's meant to be used. |
 
 
 ## 12. Look and feel
@@ -268,6 +288,8 @@ The 6 Nov redesign, from the UI wireframes: logo green, a dark-green header band
 | LOOK-07 | Paste the site's link into a chat app that shows previews. | The preview reads "Compare grocery prices at FairPrice, Sheng Siong and Cold Storage, find the cheapest store for your whole basket, and share prices you spot." | | Not done | |
 | LOOK-08 | In a browser without Inter or Nunito installed (e.g. a phone), open the site. In the network tools, filter by "Font". | Text is in Inter, and headings, product names and prices in the rounded Nunito. The font files load from the site itself. | | Not done | Both fonts are bundled since 6 Nov. |
 | LOOK-09 | On a page long enough to scroll, open each window in turn: Log in, Register, "Upload a new product", a product's details and enlarged picture on Search, and Healthier choices and an enlarged picture on Smart basket. Scroll with the mouse wheel or a finger, inside the window and over the dimmed page, including past the end of the window's content. | The page behind never moves; only the window's own content scrolls. Closing the window leaves the page where it was, without jumping sideways. | ⭐ | Not done | Added 6 Nov. |
+| LOOK-10 | Click the moon button in the header (beside "Log in", or beside the menu button on a phone). Then the sun button. | The moon ("Switch to dark mode") turns every page dark, including toasts. The sun ("Switch to light mode") turns it back. | ⭐ | Not done | Added 7 Nov. |
+| LOOK-11 | Choose dark with the toggle, reload, and open the site in a new tab. Then clear the site's data and set your computer to dark mode. | The choice stays after a reload and in new tabs. With no choice saved, the site follows the computer's setting, with no light flash while it loads. | | Not done | Added 7 Nov. |
 
 ## Running the automated tests
 

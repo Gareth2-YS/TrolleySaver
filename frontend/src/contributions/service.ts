@@ -118,7 +118,7 @@ export class LocalSubmissionService implements SubmissionService {
     const fields = productFieldsSchema.parse(input)
     contributionSchema.parse({ productId: "new", storeId: input.retailerId, price: input.priceCents / 100, observedDate: input.observedAt })
     if (!input.productImageKey) throw new Error("Upload a picture of the product.")
-    const item: ProductRequest = { ...input, ...fields, id: crypto.randomUUID(), userId, status: "pending", submittedAt: new Date().toISOString(), productImageUrl: this.pictures.get(input.productImageKey), retailerName: localRetailers.find((r) => r.id === input.retailerId)?.name }
+    const item: ProductRequest = { ...input, ...fields, id: crypto.randomUUID(), userId, status: "pending", submittedAt: new Date().toISOString(), productImageUrl: this.pictures.get(input.productImageKey), photoUrl: input.photoKey ? this.pictures.get(input.photoKey) : undefined, retailerName: localRetailers.find((r) => r.id === input.retailerId)?.name }
     writeRequests([item, ...readRequests()]); return item
   }
   async listMyProductRequests(userId: string, token: string) { requireToken(token); return readRequests().filter((r) => r.userId === userId) }
@@ -164,6 +164,10 @@ export class LocalSubmissionService implements SubmissionService {
 
   async createSubmission(input: CreateSubmissionInput, accessToken: string): Promise<PriceSubmission> {
     requireToken(accessToken); await pause(140)
+    // The backend's rule: one price per person, product and store a day; a rejected one doesn't count.
+    const duplicate = readSubmissions().some((item) => item.submitterId === input.submitterId && item.productId === input.productId
+      && item.storeId === input.storeId && item.observedDate === input.observedDate && item.status !== "rejected")
+    if (duplicate) throw new SubmissionServiceError("You've already submitted a price for this product at this store today.", 409, "DUPLICATE_SUBMISSION")
     const product = (await this.listProducts()).find((item) => item.id === input.productId)
     const cents = Math.round(input.price * 100)
     const outOfRange = product && ((product.minCents !== undefined && cents < product.minCents) || (product.maxCents !== undefined && cents > product.maxCents))
@@ -249,11 +253,11 @@ export class ApiSubmissionService implements SubmissionService {
   }
   async createProductRequest(input: CreateProductRequestInput, _userId: string, token: string) {
     requireToken(token)
-    const record = await this.request<ProductRequest>("/product-requests", { method: "POST", body: JSON.stringify(input) }, token)
-    return { ...record, photoUrl: undefined }
+    // photoUrl is a short-lived link to the contributor's own evidence photo, if they attached one.
+    return this.request<ProductRequest>("/product-requests", { method: "POST", body: JSON.stringify(input) }, token)
   }
   async listMyProductRequests(_userId: string, token: string) {
-    return (await this.listAll<ProductRequest>("/product-requests/mine", token)).map((record) => ({ ...record, photoUrl: undefined }))
+    return this.listAll<ProductRequest>("/product-requests/mine", token)
   }
   async deleteProductRequest(id: string, _actor: SubmissionActor, token: string) {
     requireToken(token)
@@ -291,7 +295,8 @@ export class ApiSubmissionService implements SubmissionService {
     requireToken(accessToken)
     const body = { productId: input.productId, retailerId: input.storeId, priceCents: Math.round(input.price * 100), observedAt: input.observedDate, ...(input.photo?.photoKey ? { photoKey: input.photo.photoKey } : {}) }
     const record = await this.request<ApiSubmission>("/price-submissions", { method: "POST", body: JSON.stringify(body) }, accessToken)
-    return mapSubmission({ ...record, photoUrl: undefined })
+    // photoUrl here is a short-lived link to the contributor's own photo, so they can see what they sent.
+    return mapSubmission(record)
   }
 
   private async listAll<T>(path: string, accessToken: string) {
@@ -307,12 +312,12 @@ export class ApiSubmissionService implements SubmissionService {
     return records
   }
 
-  async deleteSubmission(_id: string, _actor: SubmissionActor, accessToken: string) {
+  async deleteSubmission(id: string, _actor: SubmissionActor, accessToken: string) {
     requireToken(accessToken)
-    throw new SubmissionServiceError("Withdrawal is not supported by the backend. Contact the team for removal.", undefined, "UNSUPPORTED")
+    await this.request<void>(`/price-submissions/${encodeURIComponent(id)}`, { method: "DELETE" }, accessToken)
   }
 
-  async listMySubmissions(_userId: string, accessToken: string) { return (await this.listAll<ApiSubmission>("/price-submissions/mine", accessToken)).map((record) => mapSubmission({ ...record, photoUrl: undefined })) }
+  async listMySubmissions(_userId: string, accessToken: string) { return (await this.listAll<ApiSubmission>("/price-submissions/mine", accessToken)).map(mapSubmission) }
   async listPendingSubmissions(_actor: SubmissionActor, accessToken: string) { return (await this.listAll<ApiSubmission>("/admin/price-submissions?status=flagged", accessToken)).map(mapSubmission) }
   async moderateSubmission(id: string, decision: "accepted" | "rejected", reason: string | undefined, _actor: SubmissionActor, accessToken: string) {
     requireToken(accessToken)

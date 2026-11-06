@@ -134,3 +134,40 @@ describe("log in and register modal", () => {
     expect(authService.signUp).toHaveBeenCalledWith({ fullName: "Alex Tan", email: "alex@example.com", password: "Str0ng!Pass" })
   })
 })
+
+describe("sign-in field limits", () => {
+  it("stops typing at the longest name, email and password the backend accepts", async () => {
+    renderApp("/register", service())
+    const dialog = within(await screen.findByRole("dialog", { name: "Create your account" }))
+    expect(dialog.getByRole("textbox", { name: /Full name/i })).toHaveAttribute("maxLength", "80")
+    expect(dialog.getByRole("textbox", { name: /Email address/i })).toHaveAttribute("maxLength", "254")
+    expect(dialog.getByLabelText("Password", { selector: "input" })).toHaveAttribute("maxLength", "256")
+    expect(dialog.getByLabelText("Confirm password", { selector: "input" })).toHaveAttribute("maxLength", "256")
+  })
+
+  it("shows the sign-up trigger's message when it refuses the details", async () => {
+    const user = userEvent.setup()
+    const authService = service()
+    authService.signUp = vi.fn().mockRejectedValue(Object.assign(new Error("PreSignUp failed with error Your name can't contain hidden or control characters."), { name: "UserLambdaValidationException" }))
+    renderApp("/register", authService)
+    const dialog = within(await screen.findByRole("dialog", { name: "Create your account" }))
+    await user.type(dialog.getByRole("textbox", { name: /Full name/i }), "Alex Tan")
+    await user.type(dialog.getByRole("textbox", { name: /Email address/i }), "alex@example.com")
+    await user.type(dialog.getByLabelText("Password", { selector: "input" }), "Str0ng!Pass")
+    await user.type(dialog.getByLabelText("Confirm password", { selector: "input" }), "Str0ng!Pass")
+    await user.click(dialog.getByRole("button", { name: /Create my account/ }))
+    expect(await dialog.findByRole("alert")).toHaveTextContent(/^Your name can't contain hidden or control characters\.$/)
+  })
+
+  it("switches between light and dark mode from the header", async () => {
+    const user = userEvent.setup()
+    renderApp("/basket", service())
+    const [toggle] = await screen.findAllByRole("button", { name: "Switch to dark mode" })
+    await user.click(toggle)
+    expect(document.documentElement).toHaveClass("dark")
+    expect(localStorage.getItem("trolleysaver.theme")).toBe("dark")
+    const [back] = screen.getAllByRole("button", { name: "Switch to light mode" })
+    await user.click(back)
+    expect(document.documentElement).toHaveClass("light")
+  })
+})

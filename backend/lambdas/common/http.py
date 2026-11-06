@@ -61,16 +61,21 @@ def _origin(event):
     return next((value for name, value in (event.get("headers") or {}).items() if name.lower() == "origin"), None)
 
 
+# On every response: browsers must treat it as the JSON it says it is, and nothing (browser or proxy)
+# may keep a copy, since many responses hold someone's own submissions or, for admins, people's emails.
+SECURITY_HEADERS = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"}
+
+
 def response(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", **cors_headers()},
+        "headers": {"Content-Type": "application/json", **SECURITY_HEADERS, **cors_headers()},
         "body": json.dumps(body, default=_json_default),
     }
 
 
 def no_content():
-    return {"statusCode": 204, "headers": cors_headers(), "body": ""}
+    return {"statusCode": 204, "headers": {**SECURITY_HEADERS, **cors_headers()}, "body": ""}
 
 
 def error_response(error, request_id):

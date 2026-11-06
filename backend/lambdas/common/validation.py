@@ -4,6 +4,7 @@ The frontend validates too, but anything from the client can be forged, so every
 """
 
 import os
+import unicodedata
 from datetime import datetime, time, timedelta, timezone
 
 from common.http import ApiError
@@ -16,10 +17,47 @@ CLOCK_SKEW = timedelta(minutes=5)
 MAX_BASKET_LINES = 50
 MAX_QUANTITY = 99
 MAX_SEARCH_LENGTH = 100
+MAX_REASON_LENGTH = 500
+HIDDEN_CHARACTERS = "Must not contain hidden or control characters"
+# Zero-width (non-)joiners are part of how some scripts are written, so they're allowed in text.
+JOINERS = "‌‍"
 
 
 def max_upload_bytes():
     return int(os.environ.get("MAX_UPLOAD_BYTES", 5 * 1024 * 1024))
+
+
+def _is_hidden(char):
+    category = unicodedata.category(char)
+    return category == "Cc" or (category == "Cf" and char not in JOINERS)
+
+
+def clean_text(value, multiline=False):
+    """`value` NFC-normalised and trimmed, with runs of whitespace collapsed to one space (or, with
+    multiline=True, line breaks kept).
+
+    Raises ValueError if it contains control characters or invisible formatting characters (Unicode
+    Cc and Cf, e.g. NUL, a zero-width space or a right-to-left override), which can disguise text
+    shown to other people or slip past the duplicate check."""
+    text = unicodedata.normalize("NFC", value)
+    text = text.strip() if multiline else " ".join(text.split())
+    allowed = "\n\r\t" if multiline else ""
+    if any(char not in allowed and _is_hidden(char) for char in text):
+        raise ValueError(HIDDEN_CHARACTERS)
+    return text
+
+
+def validate_reason(reason):
+    """An admin's reason for rejecting something: 1–500 characters, line breaks allowed."""
+    if not isinstance(reason, str) or not reason.strip():
+        _fail({"reason": "Enter a reason before rejecting"})
+    try:
+        reason = clean_text(reason, multiline=True)
+    except ValueError as error:
+        _fail({"reason": str(error)})
+    if len(reason) > MAX_REASON_LENGTH:
+        _fail({"reason": f"Keep the reason under {MAX_REASON_LENGTH} characters"})
+    return reason
 
 
 def to_iso(dt):
@@ -194,6 +232,9 @@ def validate_search(params):
     q = (params.get("q") or "").strip()
     if len(q) > MAX_SEARCH_LENGTH:
         errors["q"] = f"Keep the search under {MAX_SEARCH_LENGTH} characters"
+    for name in ("category", "brand", "dietary"):
+        if len((params.get(name) or "").strip()) > MAX_SEARCH_LENGTH:
+            errors[name] = f"Keep it under {MAX_SEARCH_LENGTH} characters"
 
     hcs = (params.get("hcs") or "").strip().lower()
     if hcs not in ("", "true", "false"):

@@ -241,7 +241,8 @@ All images are in the private photo bucket `trolleysaver-<env>-photos-<account>`
 
 - `productId` and `retailerId` must exist before an evidence upload link is given, and again before a submission is saved (price-only submissions never ask for a link).
 - Rate limit: 30 submissions per user per hour, counted with the `ByUser` index.
-- Duplicates: the same user, product, retailer and price on the same Singapore calendar day is refused.
+- Duplicates: one price per user, product and retailer per Singapore calendar day (the observed date), whatever the price. A rejected or deleted price doesn't count.
+- Withdrawing: a contributor can delete their own price only while it's `flagged` (pending review). The row and its photo are removed, and `submissionCount` goes down by one.
 - `observedAt` cannot be in the future or more than 30 days old.
 - `photoKey` must point at an object the same user uploaded **for that product** (`price-evidence/<userId>/<productId>/…`), which must be a JPEG or PNG of at most 5 MiB. Photos uploaded before 29 Oct 2026 sit at `price-evidence/<userId>/<uuid>`; they stay attached to their submissions, but can't be attached to new ones.
 - The `user` row is created at sign-up. `submissionCount` goes up by one with each submission.

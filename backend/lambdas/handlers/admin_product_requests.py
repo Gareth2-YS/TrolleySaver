@@ -21,11 +21,10 @@ from common.auth import require_admin
 from common.http import ApiError, api_handler, parse_json_body, response
 from common.images import delete_quietly, product_image_key
 from common.product_requests import PRODUCT_FIELDS, find_existing_product, to_records, validate_approval_changes
-from common.validation import MAX_OBSERVED_AGE_DAYS, observed_too_old, to_iso
+from common.validation import MAX_OBSERVED_AGE_DAYS, observed_too_old, to_iso, validate_reason
 
 STATUSES = ("pending", "approved", "rejected")
 DECISIONS = ("approved", "rejected")
-MAX_REASON_LENGTH = 500
 
 
 def list_requests(event):
@@ -163,12 +162,7 @@ def moderate(event, admin):
         _already_decided(item["requestId"])
     now = to_iso(datetime.now(timezone.utc))
     if decision == "rejected":
-        reason = body.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"reason": "Enter a reason before rejecting"})
-        if len(reason.strip()) > MAX_REASON_LENGTH:
-            raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"reason": f"Keep the reason under {MAX_REASON_LENGTH} characters"})
-        updated = reject(item, reason.strip(), admin, now)
+        updated = reject(item, validate_reason(body.get("reason")), admin, now)
     else:
         updated = approve(item, body.get("changes"), admin, now)
     return response(200, to_records([updated], admin=True)[0])

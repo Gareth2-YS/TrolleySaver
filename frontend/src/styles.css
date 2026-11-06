@@ -37,8 +37,11 @@
     --logo-tick: 0 0% 100%;
   }
 
+  /* Dark colours: chosen with the header's toggle (.dark on <html>, see lib/theme.ts), or the system
+     setting when nobody has chosen light. The media query also covers the moment before the script
+     sets the class, so people using dark mode never see a light flash. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not(.light) {
       color-scheme: dark;
       --background: 140 20% 6%;
       --foreground: 133 21% 92%;
@@ -65,6 +68,34 @@
       --logo-trolley: 133 21% 92%;
       --logo-tick: 135 16% 10%;
     }
+  }
+
+  :root.dark {
+    color-scheme: dark;
+    --background: 140 20% 6%;
+    --foreground: 133 21% 92%;
+    --card: 135 16% 10%;
+    --card-foreground: 133 21% 92%;
+    --popover: 135 16% 10%;
+    --popover-foreground: 133 21% 92%;
+    --primary: 135 50% 52%;
+    --primary-foreground: 138 75% 8%;
+    --secondary: 137 15% 13%;
+    --secondary-foreground: 133 18% 88%;
+    --muted: 137 15% 13%;
+    --muted-foreground: 138 9% 64%;
+    --accent: 138 37% 14%;
+    --accent-foreground: 136 56% 64%;
+    --destructive: 0 62% 58%;
+    --border: 131 12% 18%;
+    --input: 138 8% 39%;
+    --ring: 135 50% 52%;
+    --band: 139 58% 9%;
+    --band-accent: 135 58% 60%;
+    --band-accent-foreground: 138 75% 8%;
+    /* The logo's dark-green "Trolley" can't be read on a dark page */
+    --logo-trolley: 133 21% 92%;
+    --logo-tick: 135 16% 10%;
   }
 
   * { @apply border-border; }

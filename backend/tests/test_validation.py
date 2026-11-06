@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from common.validation import SGT, observed_too_old, parse_observed_at
+from common.validation import SGT, clean_text, observed_too_old, parse_observed_at
 
 
 def sgt(*args):
@@ -52,3 +52,26 @@ def test_observed_too_old_compares_singapore_days():
     assert observed_too_old(sgt(2026, 10, 6, 23, 59), now)
     # Stored observedAt values are UTC: 16:00Z on 6 Oct is midnight 7 Oct in Singapore.
     assert not observed_too_old(datetime(2026, 10, 6, 16, 0, tzinfo=timezone.utc), now)
+
+
+@pytest.mark.parametrize("value, cleaned", [
+    ("  Fresh   Milk ", "Fresh Milk"),
+    ("Fresh\tMilk\n", "Fresh Milk"),
+    ("Café", "Café"),                    # combining accent folded into one character
+    ("முருகன்", "முருகன்"),  # Tamil
+    ("क्‍ष", "क्‍ष"),  # a zero-width joiner some scripts need
+])
+def test_clean_text_tidies_ordinary_text(value, cleaned):
+    assert clean_text(value) == cleaned
+
+
+@pytest.mark.parametrize("value", ["a\x00b", "a​b", "a‮b", "a⁦b", "﻿ab", "a­b", "a\x7fb"])
+def test_clean_text_refuses_hidden_characters(value):
+    with pytest.raises(ValueError, match="Must not contain hidden or control characters"):
+        clean_text(value)
+
+
+def test_multiline_text_keeps_line_breaks_but_not_other_controls():
+    assert clean_text("  one\ntwo  ", multiline=True) == "one\ntwo"
+    with pytest.raises(ValueError):
+        clean_text("one\x1btwo", multiline=True)

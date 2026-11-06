@@ -1,4 +1,5 @@
-"""GET /price-submissions/mine: the caller's own submissions, newest first."""
+"""GET /price-submissions/mine: the caller's own submissions, newest first, each with a 5-minute link
+to its evidence photo if it has one."""
 
 from boto3.dynamodb.conditions import Key
 
@@ -19,4 +20,4 @@ def handler(event, context):
     }
     token = (event.get("queryStringParameters") or {}).get("nextToken")
     items, next_token = db.query_page(db.submissions(), query, token, ("productId", "sk", "userId", "submittedAt"))
-    return response(200, {"items": to_records(items), "nextToken": next_token})
+    return response(200, {"items": to_records(items, own=True), "nextToken": next_token})

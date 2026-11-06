@@ -1,8 +1,8 @@
 import type { Config } from "tailwindcss"
 
 export default {
-  // The colours in styles.css follow the system setting, so `dark:` classes must follow it too.
-  darkMode: "media",
+  // `dark:` classes follow the `dark` class lib/theme.ts puts on <html> (the toggle, else the system setting).
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {

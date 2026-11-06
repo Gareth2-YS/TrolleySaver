@@ -1,7 +1,7 @@
 """Shaping stored price-submission items into API records.
 
-Evidence photos are only for admin verification: contributors see that a photo is attached
-(photoKey and its type/size) but only admin views get a signed `photoUrl` to look at it.
+An evidence photo can be seen (a signed `photoUrl`) by admins, who verify it, and by the contributor
+who took it. Other contributors never see anyone else's submissions.
 """
 
 from common import db
@@ -30,9 +30,9 @@ def to_record(item, products=None, retailers=None, users=None, include_photo_url
     return record
 
 
-def to_records(items, admin=False):
+def to_records(items, admin=False, own=False):
     """Hydrate product/retailer names in a few batch reads. Admin views also get the submitter's name
-    and email and a signed link to the evidence photo."""
+    and email; admin views and the contributor's own list (`own`) get a signed link to the evidence photo."""
     if not items:
         return []
     products = db.batch_get(db.products(), "id", [i["productId"] for i in items], ["id", "name"])
@@ -40,4 +40,4 @@ def to_records(items, admin=False):
     users = None
     if admin:
         users = db.batch_get(db.users(), "userId", [i["userId"] for i in items], ["userId", "displayName", "email"])
-    return [to_record(i, products, retailers, users, include_photo_url=admin) for i in items]
+    return [to_record(i, products, retailers, users, include_photo_url=admin or own) for i in items]

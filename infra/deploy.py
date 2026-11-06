@@ -217,10 +217,14 @@ def check_site(site):
             with urllib.request.urlopen(url, timeout=30) as response:
                 body = response.read().decode("utf-8", "replace")
                 ok = response.status == 200 and '<div id="root">' in body
+                csp = response.headers.get("Content-Security-Policy") or ""
         except urllib.error.URLError as error:
             raise DeployError(f"{url} didn't answer: {error}")
         if not ok:
             raise DeployError(f"{url} answered, but not with the app's page.")
+        # The distribution's response headers policy (FrontendSecurityHeaders in template.yaml) adds it.
+        if "script-src 'self'" not in csp:
+            raise DeployError(f"{url} has no Content-Security-Policy header. Check FrontendSecurityHeaders in backend/template.yaml.")
         print(f"OK  {url}")
 
 

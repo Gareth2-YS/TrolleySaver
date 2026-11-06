@@ -9,10 +9,21 @@ from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
 from common import db
-from common.validation import to_iso
+from common.validation import clean_text, to_iso
+from handlers.cognito_pre_signup import MAX_NAME_LENGTH
 
 logger = logging.getLogger()
 USER_GROUP = "user"
+
+
+def _display_name(attributes, email):
+    """The name admins see next to this user's submissions. PreSignUp has already checked public
+    sign-ups; this also covers accounts created another way."""
+    try:
+        name = clean_text(attributes.get("name") or "")[:MAX_NAME_LENGTH].strip()
+    except ValueError:
+        name = ""
+    return name or email.split("@")[0]
 
 
 def handler(event, context):
@@ -29,7 +40,7 @@ def handler(event, context):
         db.users().put_item(
             Item={
                 "userId": user_id,
-                "displayName": attributes.get("name") or email.split("@")[0],
+                "displayName": _display_name(attributes, email),
                 "email": email,
                 "submissionCount": 0,
                 "createdAt": to_iso(datetime.now(timezone.utc)),
