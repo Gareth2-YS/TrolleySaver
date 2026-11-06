@@ -1,7 +1,8 @@
 import type { Config } from "tailwindcss"
 
 export default {
-  darkMode: ["class"],
+  // The colours in styles.css follow the system setting, so `dark:` classes must follow it too.
+  darkMode: "media",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
@@ -10,6 +11,8 @@ export default {
         foreground: "hsl(var(--foreground))",
         card: "hsl(var(--card))",
         "card-foreground": "hsl(var(--card-foreground))",
+        popover: "hsl(var(--popover))",
+        "popover-foreground": "hsl(var(--popover-foreground))",
         primary: "hsl(var(--primary))",
         "primary-foreground": "hsl(var(--primary-foreground))",
         secondary: "hsl(var(--secondary))",

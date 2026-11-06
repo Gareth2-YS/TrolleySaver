@@ -8,6 +8,7 @@ import { ProductImage } from "../components/product-image"
 import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage, validationMessages } from "../contributions/schema"
 import { SubmissionServiceError } from "../contributions/service"
 import type { CatalogRetailer, ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
+import { formatCents } from "../lib/format"
 
 const emptyProduct: ProductFields = { name: "", brand: "", category: "", packQty: 0, packUnit: "ml", packCount: 1, hcs: false, dietary: [] }
 type Facets = { categories: string[]; dietary: string[] }
@@ -163,7 +164,7 @@ export function ProductRequestHistory({ service, refreshKey }: { service: Submis
     {items.length === 0 && <p className="text-sm text-muted-foreground">New product submissions will appear here.</p>}
     <div className="grid gap-4">{items.map((item) => <article key={item.id} className="space-y-3 rounded-xl border p-4">
       <h3 className="font-semibold">{item.name} · <span className="capitalize">{item.status}</span></h3>
-      <p>{item.brand} · {item.packCount} × {item.packQty} {item.packUnit} · {item.retailerName ?? item.retailerId} · ${(item.priceCents / 100).toFixed(2)}</p>
+      <p>{item.brand} · {item.packCount} × {item.packQty} {item.packUnit} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)}</p>
       <RequestImages item={item} admin={false} refresh={() => void load()} />
       {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
       {item.status === "pending" && <Button variant="outline" disabled={deletingId !== null} onClick={() => void deletePending(item.id)}>{deletingId === item.id ? "Deleting…" : "Delete pending product request"}</Button>}
@@ -203,7 +204,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
   }
   return <article className="space-y-5 rounded-xl border p-5">
     <h3 className="text-lg font-semibold">{item.name} · {item.status}</h3>
-    <p className="text-sm">{item.submitterName ?? item.userId} {item.submitterEmail} · {item.retailerName ?? item.retailerId} · ${(item.priceCents / 100).toFixed(2)} · observed {singaporeDateString(new Date(item.observedAt))}</p>
+    <p className="text-sm">{item.submitterName ?? item.userId} {item.submitterEmail} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)} · observed {singaporeDateString(new Date(item.observedAt))}</p>
     <RequestImages item={item} admin refresh={() => void refresh()} />
     <FormAlert message={error} />
     {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}

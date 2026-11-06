@@ -35,9 +35,10 @@ import {
 } from "../contributions/schema"
 import { createSubmissionService, SubmissionServiceError } from "../contributions/service"
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, SubmissionService, SubmissionStatus } from "../contributions/types"
+import { formatDollars } from "../lib/format"
 import { cn } from "../lib/utils"
 
-const selectClass = "flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+const selectClass = "flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`))
@@ -110,7 +111,7 @@ function SubmissionDetails({ submission }: { submission: PriceSubmission }) {
         <StatusBadge status={submission.status} />
       </div>
       <p className="mt-2 text-2xl font-semibold tabular-nums text-primary">
-        ${submission.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">SGD</span>
+        {formatDollars(submission.price)}
       </p>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5"><Store className="size-3.5" />{submission.storeName}</span>
@@ -528,7 +529,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
             tabIndex={0}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); photoInput.current?.click() } }}
             className={cn(
-              "mt-5 grid min-h-56 flex-1 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed bg-secondary/35 text-center transition-colors hover:border-primary/50 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              "mt-5 grid min-h-56 flex-1 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed bg-secondary/35 text-center transition-colors hover:border-primary/50 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
               imageError ? "border-destructive/50" : "border-border",
             )}
           >
@@ -759,6 +760,6 @@ export function ContributePage({ serviceOverride, createService = createSubmissi
       return { service: null, configError: SUBMISSIONS_NOT_CONFIGURED }
     }
   }, [createService, getAccessToken, serviceOverride, signOut])
-  if (!service) return <AppShell><main className="mx-auto max-w-3xl px-4 py-10"><FormAlert message={configError} /></main></AppShell>
+  if (!service) return <AppShell><div className="mx-auto max-w-3xl px-4 py-10"><FormAlert message={configError} /></div></AppShell>
   return <AppShell>{user?.role === "admin" ? <AdminWorkspace service={service} /> : <ContributorWorkspace service={service} />}</AppShell>
 }
