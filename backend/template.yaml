@@ -43,6 +43,8 @@ Globals:
         MAX_UPLOAD_BYTES: "5242880"
         RATE_LIMIT_PER_HOUR: "30"
         PRODUCT_REQUESTS_PER_DAY: "10"
+        # Photo upload links per user per hour, for price photos and product requests together.
+        UPLOAD_LINKS_PER_HOUR: "60"
         LOG_LEVEL: INFO
 
 Resources:
@@ -251,10 +253,9 @@ Resources:
           AllowedMethods: [GET, HEAD]
           CachedMethods: [GET, HEAD]
           Compress: true
-          # AWS managed policies: CachingOptimized (follows each file's Cache-Control, set by
-          # infra/deploy.py) and SecurityHeadersPolicy (HSTS, nosniff, frame options, referrer policy).
+          # AWS managed CachingOptimized: follows each file's Cache-Control, set by infra/deploy.py.
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+          ResponseHeadersPolicyId: !Ref FrontendSecurityHeaders
         # The app routes in the browser (/search, /contribute, ...). Those paths aren't files, so the
         # bucket answers 403/404; serve index.html instead and let the app show the page.
         CustomErrorResponses:
@@ -266,6 +267,57 @@ Resources:
             ResponseCode: 200
             ResponsePagePath: /index.html
             ErrorCachingMinTTL: 0
+
+  # Security headers on every page and file of the site. The Content-Security-Policy lists every place
+  # the app may load from or send to: the site itself, the API, Cognito and the photo bucket. A new
+  # external host (another API, a font or image CDN) must be added here, or browsers will block it.
+  # Hosts are written out rather than referenced: the API and photo bucket already depend on the
+  # distribution (for CORS), so referencing them here would be a cycle.
+  FrontendSecurityHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub trolleysaver-${Env}-site-security-headers
+        Comment: TrolleySaver web app security headers, including the Content-Security-Policy
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            # 'unsafe-inline' styles only: the toast library adds a <style> tag. Scripts must be the
+            # app's own files, so injected script can't run.
+            ContentSecurityPolicy: !Sub >-
+              default-src 'self';
+              script-src 'self';
+              style-src 'self' 'unsafe-inline';
+              img-src 'self' data: blob: https://trolleysaver-${Env}-photos-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com;
+              font-src 'self' data:;
+              connect-src 'self' https://*.execute-api.${AWS::Region}.amazonaws.com https://cognito-idp.${AWS::Region}.amazonaws.com https://trolleysaver-${Env}-photos-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com;
+              object-src 'none';
+              base-uri 'self';
+              form-action 'self';
+              frame-ancestors 'none';
+              upgrade-insecure-requests
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            # The app uses none of these browser features; nothing loaded into it may either.
+            - Header: Permissions-Policy
+              Value: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+              Override: true
+            - Header: Cross-Origin-Opener-Policy
+              Value: same-origin
+              Override: true
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -300,6 +352,9 @@ Resources:
     Properties:
       TableName: !Sub trolleysaver-${Env}-product
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: any table can be restored to a moment in the last 35 days.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -313,6 +368,9 @@ Resources:
     Properties:
       TableName: !Sub trolleysaver-${Env}-retailer
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: any table can be restored to a moment in the last 35 days.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -326,6 +384,9 @@ Resources:
     Properties:
       TableName: !Sub trolleysaver-${Env}-user
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: any table can be restored to a moment in the last 35 days.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: userId
           AttributeType: S
@@ -339,6 +400,9 @@ Resources:
     Properties:
       TableName: !Sub trolleysaver-${Env}-price-submission
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: any table can be restored to a moment in the last 35 days.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: productId
           AttributeType: S
@@ -392,6 +456,9 @@ Resources:
     Properties:
       TableName: !Sub trolleysaver-${Env}-retailer-price
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: any table can be restored to a moment in the last 35 days.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: productId
           AttributeType: S
@@ -410,6 +477,9 @@ Resources:
     Properties:
       TableName: !Sub trolleysaver-${Env}-product-request
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: any table can be restored to a moment in the last 35 days.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: requestId
           AttributeType: S
@@ -446,6 +516,13 @@ Resources:
     Properties:
       Name: !Sub trolleysaver-${Env}-api
       StageName: !Ref Env
+      # A ceiling on all callers together (the account default is 10,000 a second), so nobody can run up
+      # cost or load with the public routes, which read whole tables. Over it, API Gateway answers 429.
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingRateLimit: 20
+          ThrottlingBurstLimit: 40
       # Preflight (OPTIONS) and the gateway's own errors below are static responses that can name only
       # one origin, so they allow any; they carry no data. Every Lambda response names the caller's
       # origin only if it is in ALLOWED_ORIGINS (common/http.py), so other sites still can't read the API.
@@ -616,6 +693,10 @@ Resources:
             - Effect: Allow
               Action: s3:PutObject
               Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+            # Only to count the caller's upload links (uploadWindow / uploadCount on their row).
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/trolleysaver-${Env}-user
       Events:
         RequestUploadUrl:
           Type: Api
@@ -644,6 +725,10 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+            # Only to remove an upload whose bytes aren't the JPG or PNG it claims to be (images.check_upload).
+            - Effect: Allow
+              Action: s3:DeleteObject
               Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
             # Without ListBucket, S3 answers 403 instead of 404 for a photo that was never uploaded,
             # so a missing upload would surface as a 500 rather than PHOTO_NOT_FOUND. Nothing lists the bucket.
@@ -750,6 +835,10 @@ Resources:
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt PhotoBucket.Arn
+            # Only to count the caller's upload links (uploadWindow / uploadCount on their row).
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/trolleysaver-${Env}-user
       Events:
         RequestImageUploadUrl:
           Type: Api

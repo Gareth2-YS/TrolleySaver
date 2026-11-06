@@ -6,7 +6,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
 import { getAuthErrorMessage } from "../auth/errors"
-import { registrationSchema, type RegistrationValues } from "../auth/schemas"
+import { MAX_EMAIL_LENGTH, MAX_NAME_LENGTH, registrationSchema, type RegistrationValues } from "../auth/schemas"
 import { FormAlert } from "../components/auth/form-alert"
 import { FormField } from "../components/auth/form-field"
 import { PasswordField } from "../components/auth/password-field"
@@ -33,8 +33,8 @@ export function RegisterForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5" noValidate>
       <FormAlert message={error} />
-      <FormField id="fullName" label="Full name" autoComplete="name" placeholder="Alex Tan" registration={register("fullName")} error={errors.fullName} />
-      <FormField id="email" label="Email address" type="email" autoComplete="email" placeholder="you@example.com" registration={register("email")} error={errors.email} />
+      <FormField id="fullName" label="Full name" autoComplete="name" maxLength={MAX_NAME_LENGTH} placeholder="Alex Tan" registration={register("fullName")} error={errors.fullName} />
+      <FormField id="email" label="Email address" type="email" autoComplete="email" maxLength={MAX_EMAIL_LENGTH} placeholder="you@example.com" registration={register("email")} error={errors.email} />
       <div className="grid gap-3.5 sm:grid-cols-2">
         <PasswordField id="password" label="Password" autoComplete="new-password" registration={register("password")} error={errors.password} />
         <PasswordField id="confirmPassword" label="Confirm password" autoComplete="new-password" registration={register("confirmPassword")} error={errors.confirmPassword} />

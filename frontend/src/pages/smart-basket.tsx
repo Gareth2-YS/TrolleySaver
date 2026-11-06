@@ -563,6 +563,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                 id="product-search"
                 ref={searchRef}
                 type="search"
+                maxLength={100}
                 className="h-12 pl-[42px] text-base"
                 placeholder="Search by product, brand or category"
                 value={query}

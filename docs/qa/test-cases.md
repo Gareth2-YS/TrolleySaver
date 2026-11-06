@@ -30,18 +30,18 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 | Section | Cases | Key ⭐ | Done |
 |---|--:|--:|--:|
 | [1. Navigation and access](#1-navigation-and-access) | 12 | 6 | 0 |
-| [2. Register and log in](#2-register-and-log-in) | 15 | 5 | 1 |
-| [3. Search & filter](#3-search--filter) | 16 | 6 | 0 |
+| [2. Register and log in](#2-register-and-log-in) | 17 | 5 | 1 |
+| [3. Search & filter](#3-search--filter) | 17 | 6 | 0 |
 | [4. Smart Basket](#4-smart-basket) | 20 | 9 | 0 |
-| [5. Contributor: submit a price](#5-contributor-submit-a-price) | 19 | 6 | 0 |
-| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 19 | 9 | 0 |
-| [7. Admin: price review](#7-admin-price-review) | 7 | 4 | 0 |
+| [5. Contributor: submit a price](#5-contributor-submit-a-price) | 22 | 8 | 0 |
+| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 22 | 10 | 0 |
+| [7. Admin: price review](#7-admin-price-review) | 8 | 4 | 0 |
 | [8. Admin: product request review](#8-admin-product-request-review) | 10 | 5 | 0 |
 | [9. Price freshness](#9-price-freshness) | 7 | 2 | 0 |
 | [10. Known issues](#10-known-issues) | 2 | 0 | 0 |
-| [11. Deployed site](#11-deployed-site) | 9 | 5 | 2 |
+| [11. Deployed site](#11-deployed-site) | 10 | 6 | 1 |
 | [12. Look and feel](#12-look-and-feel) | 9 | 3 | 0 |
-| **Total** | **145** | **60** | **3** |
+| **Total** | **156** | **64** | **2** |
 
 ## 1. Navigation and access
 
@@ -81,6 +81,8 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | AUTH-13 | In the window, switch between the "Log in" and "Register" tabs, and use the "Join the community" and "Log in" links. Watch the browser tab. Close the window. | It switches in place without closing. The browser tab reads "Log in · TrolleySaver" or "Register · TrolleySaver", and the page's own title again once the window closes. | | Not done | Added 6 Nov. |
 | AUTH-14 | Open the window at 1440 px wide, then narrow the browser below 900 px, then to phone width. At 1440 px, click "Build a smarter basket". | Wide: "Good finds are better shared." on the left, with "Build a smarter basket", "Find your next good buy" and "Spotted a price worth sharing?". Below 900 px only the form shows; at phone width the window fills the screen. The shortcut closes the window and opens Smart basket. | | Not done | Added 6 Nov. |
 | AUTH-15 | Open `/login` directly in a new browser tab, then close the window. | The window opens over Smart basket. Closing it leaves you on `/basket`. | | Not done | Added 6 Nov. |
+| AUTH-16 | In Register, paste 100 characters into "Full name" and 300 into "Email address". | "Full name" stops at 80 characters and "Email address" at 254. The password boxes stop at 256. | | Not done | Added 6 Nov (security hardening). |
+| AUTH-17 | In the browser console, run `copy('Alex\u202eTan')`, then paste it into "Full name" (the text has a hidden right-to-left override in it). Fill in the rest and click "Create my account". | "Your name can't contain hidden or control characters", and no account is created. | | Not done | Added 6 Nov. The sign-up trigger refuses it too if the form is bypassed. |
 
 ## 3. Search & filter
 
@@ -102,6 +104,7 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | SRCH-14 | Click a product's picture on its card. Close it with ✕, Esc, and by clicking outside it. Then open the product's details and click the picture there. | The picture opens large with the product's name, from the card and from the details. All three ways close it. | | Not done | Added 5 Nov. |
 | SRCH-15 | Click the category icon of a product the team loaded (no picture). | The enlarged view shows the same category icon, not a broken image. | | Not done | |
 | SRCH-16 | In the network tools, set throttling to "Slow 4G" (or "3G"), then reload `/search`. Turn throttling off afterwards. | While the catalogue loads: a spinner beside "Loading…" at the top, and a large spinner with "Loading products…" where the cards go. | | Not done | Added 6 Nov. |
+| SRCH-17 | Paste 150 characters into "Search product or brand". | The box stops at 100 characters and results still load. There's no "Catalogue unavailable". | | Not done | Added 6 Nov. |
 
 ## 4. Smart Basket
 
@@ -155,6 +158,9 @@ Log in as a contributor and open `/contribute`.
 | PRC-17 | **Missing API address.** Delete the `VITE_API_BASE_URL` value in `.env.local`, restart `npm run dev` and open `/contribute`. Put it back afterwards. | The header shows as normal, with "Price submissions are not configured. Set VITE_API_BASE_URL in frontend/.env.local, or set VITE_PRICE_SUBMISSION_MODE=local." The page isn't blank. | | Not done | Fixed 4 Nov: the page used to be blank. |
 | PRC-18 | In the afternoon, submit a usual price with the **earliest** date the picker allows (30 days ago). Do the same in "Upload a new product". | Both are accepted, any time of day. | | Not done | Fixed 6 Nov (backend): after 00:05 the earliest date used to be refused with "Observed date must be within the last 30 days". |
 | PRC-19 | Choose a photo, then in the browser's network tools block requests to `*.amazonaws.com` (the photo bucket) and submit. Unblock afterwards. | "The photo upload failed. Check your connection and try again." Nothing is saved, and submitting again after unblocking works. | | Not done | The server's own check for a photo that never arrived (`PHOTO_NOT_FOUND`) can't be reached from the UI. The smoke test covers it ("photo that was never uploaded"). |
+| PRC-20 | Enter the price `3.635` and submit. Then `3.6`. | `3.635`: "Enter the price in dollars and cents, e.g. 3.63". `3.6` is accepted as $3.60. | ⭐ | Not done | Added 6 Nov: it used to be rounded silently. |
+| PRC-21 | Rename a text file to `shelf.png` and choose it as the price photo. | "This file isn't a readable JPG or PNG image", no preview, and "Submit price" is disabled. | | Not done | Added 6 Nov. |
+| PRC-22 | Take a photo with a phone that records location (check it has GPS with any EXIF viewer). Submit an unusual price with it. As an admin, open the flagged price, save the evidence photo and check it in the EXIF viewer. Also try a photo over 2560 px wide. | The saved photo has no GPS or other EXIF data. A wide photo comes back at most 2560 px on its long side, the right way up. | ⭐ | Not done | Added 6 Nov: the browser redraws every photo before upload. |
 
 ## 6. Contributor: new product requests
 
@@ -181,6 +187,9 @@ Log in as a contributor, open `/contribute` and click "Upload a new product". Us
 | NPR-17 | Open `/contribute` and watch "Your product submissions" as the page loads. Then click "Refresh product submissions". | While it loads: a spinner and "Loading your product submissions…", never "New product submissions will appear here." for an account that has requests. With none: "New product submissions will appear here." On refresh the button's icon spins and the button is disabled until the list comes back; any requests stay on screen, faded, meanwhile. | | Not done | Spinner added 6 Nov. |
 | NPR-18 | Propose an 11th product within 24 hours. | "You can propose up to 10 new products a day. Please try again tomorrow." | | Not done | Delete the test requests afterwards. |
 | NPR-19 | In "Upload a new product", click the Healthier Choice Symbol picture, then click it again. As an admin, open a request's corrections. | Clicking the symbol ticks and unticks "Healthier Choice Symbol". The admin's correction form shows the same symbol. | | Not done | Added 6 Nov. |
+| NPR-20 | In "Upload a new product", open the browser console, run `copy('Oat\u200bMilk')`, then paste it into "Product name" (it has a zero-width space). Fill in the rest and submit. | "Product name can't contain hidden or control characters". | | Not done | Added 6 Nov. Brand, Category and dietary tags have the same rule. |
+| NPR-21 | Choose a renamed text file (`pack.png`) as the product picture. | "This file isn't a readable JPG or PNG image", and no preview. | | Not done | Added 6 Nov. |
+| NPR-22 | Propose a product using a phone photo with GPS as its picture. After an admin approves it, open its picture on Search (open the image in a new tab and save it) and check it in an EXIF viewer. | The published picture has no GPS or other EXIF data. | ⭐ | Not done | Added 6 Nov. Product pictures are public. |
 
 ## 7. Admin: price review
 
@@ -195,6 +204,7 @@ Log in as an admin. You need a flagged price from PRC-08.
 | ADP-05 | Open the queue in two admin tabs. Accept a price in the first, then accept the same one in the second. | "This submission is already accepted." The second tab's queue refreshes. | | Not done | |
 | ADP-06 | Decide every flagged price. | "Review queue is clear" and "New submissions will appear here." The count shows 0. | | Not done | |
 | ADP-07 | Leave the queue open for more than 5 minutes (the photo link's lifetime), then reload a photo, e.g. by scrolling to one that hadn't loaded. | The photo still loads. If a link has expired, the page fetches fresh links once. | | Not done | |
+| ADP-08 | Click "Reject" on a flagged price. In the browser console, run `copy('Blurry\u202ephoto')`, then paste it into "Reason for rejection", then click "Confirm rejection". | "The reason can't contain hidden or control characters", and the price stays in the queue. Line breaks in a reason are fine. | | Not done | Added 6 Nov. Product request rejections have the same rule. |
 
 ## 8. Admin: product request review
 
@@ -238,7 +248,7 @@ Found by reading the code, and not fixed yet. Each case says what should happen.
 
 ## 11. Deployed site
 
-The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.net), built by `python infra\deploy.py` against the dev stack. Keep the browser's developer console open: it must show no CORS, mixed-content or "Failed to load resource" errors. See [docs/deployment.md](../deployment.md).
+The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.net), built by `python infra\deploy.py` against the dev stack. Keep the browser's developer console open: it must show no CORS, Content-Security-Policy, mixed-content or "Failed to load resource" errors. See [docs/deployment.md](../deployment.md).
 
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|
@@ -250,7 +260,8 @@ The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.n
 | DEP-06 | Propose a new product with a picture from the site. As an admin, open it in the review queue, then reject it. | It appears pending with its picture, in your list and in the admin queue. | | Not done | |
 | DEP-07 | Build a Smart basket and open Healthier options. | Prices and swaps work as in §4. | | Not done | |
 | DEP-08 | Note something visible, redeploy the frontend with a change (`python infra\deploy.py --frontend-only`), then reload the open tab normally. | The reload shows the new version, without clearing the cache. | | Not done | `index.html` is never cached; the other files have new names each build. |
-| DEP-09 | In the developer tools' Network tab, select the page's first request (the document) and look at its response headers. | `strict-transport-security`, `x-content-type-options: nosniff` and `x-frame-options` are present. | | Done 6 Nov | Also `referrer-policy`. From CloudFront's security headers policy. |
+| DEP-09 | In the developer tools' Network tab, select the page's first request (the document) and look at its response headers. | `content-security-policy` (starting `default-src 'self'; script-src 'self'`), `strict-transport-security`, `x-content-type-options: nosniff`, `x-frame-options: DENY`, `referrer-policy: strict-origin-when-cross-origin`, `permissions-policy` and `cross-origin-opener-policy: same-origin`. | | Not done | Changed 6 Nov: the site now has its own headers policy with a CSP (was Done 6 Nov with the AWS managed policy). |
+| DEP-10 | With the console open, go through every page: Smart basket, Search (open a product with a picture, and enlarge it), log in, Price & image upload (choose a photo and submit), Upload a new product (with a picture), and as an admin both review queues (evidence photos). | Everything works, and the console shows no `Refused to load`, `Refused to connect` or other Content-Security-Policy errors. | ⭐ | Not done | Added 6 Nov. A CSP error names the blocked host; add it to `FrontendSecurityHeaders` in `backend/template.yaml` only if it's meant to be used. |
 
 
 ## 12. Look and feel

@@ -25,11 +25,12 @@ import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
+import { prepareImage } from "../contributions/image"
 import {
   contributionSchema,
   earliestObservedDate,
+  reasonError,
   singaporeDateString,
-  validateImage,
   type ContributionInput,
   type ContributionValues,
 } from "../contributions/schema"
@@ -172,6 +173,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
+  const [preparingImage, setPreparingImage] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
   const photoInput = useRef<HTMLInputElement>(null)
   const [showNewProduct, setShowNewProduct] = useState(false)
@@ -267,19 +269,23 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     setLoadError(null)
   }
 
-  function onImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0]
+  async function onImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.target
+    const next = input.files?.[0]
     if (!next) return
-    const validationError = validateImage(next)
-    if (validationError) {
+    // Checked, and redrawn without its metadata (e.g. GPS location), before anything is uploaded.
+    setPreparingImage(true)
+    const prepared = await prepareImage(next)
+    setPreparingImage(false)
+    if (prepared.error !== undefined) {
       clearImage()
-      setImageError(validationError)
-      event.target.value = ""
+      setImageError(prepared.error)
+      input.value = ""
       return
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setFile(next)
-    setPreviewUrl(URL.createObjectURL(next))
+    setFile(prepared.file)
+    setPreviewUrl(URL.createObjectURL(prepared.file))
     setImageError(null)
   }
 
@@ -365,6 +371,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
                     <Input
                       id="product-search"
                       type="search"
+                      maxLength={100}
                       role="combobox"
                       aria-autocomplete="list"
                       aria-expanded={showProductOptions}
@@ -556,7 +563,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           </div>
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="outline" onClick={clearForm}>Clear</Button>
-            <Button type="submit" disabled={isSubmitting || Boolean(imageError)}>
+            <Button type="submit" disabled={isSubmitting || preparingImage || Boolean(imageError)}>
               {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <ImageUp className="size-4" />}
               {isSubmitting ? "Saving..." : "Submit price"}
             </Button>
@@ -634,6 +641,11 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
     if (!user) return
     if (decision === "rejected" && !reason.trim()) {
       setError("Enter a reason before rejecting this submission.")
+      return
+    }
+    const invalidReason = decision === "rejected" ? reasonError(reason) : null
+    if (invalidReason) {
+      setError(invalidReason)
       return
     }
     setError(null)

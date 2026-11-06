@@ -34,6 +34,9 @@ How the frontend should adopt it is described in the feature handoffs:
 | **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
 | **Ids** | Product ids are UUIDs. Retailer ids are `fairprice`, `shengsiong` and `coldstorage`. A submission `id` is an opaque string: store it and pass it back, never build or parse it. |
 | **Pagination** | List endpoints take `limit` (default 50, max 100) and return `nextToken`. Pass it back as `?nextToken=…` to get the next page. `null` means there are no more pages. |
+| **Text** | Names, brands, categories, tags, search terms and rejection reasons can't contain control characters or invisible formatting characters (e.g. a zero-width space or a right-to-left override): `fieldErrors` says "Must not contain hidden or control characters". Zero-width joiners are allowed. Text is stored in Unicode NFC form. |
+| **Response headers** | Every backend response has `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. |
+| **Throttling** | 20 requests a second across all callers, bursts up to 40. Over it, API Gateway answers `429` (see [5. Errors](#5-errors)). |
 
 Get the environment values (`ApiUrl`, `UserPoolId`, `UserPoolClientId`) from Gareth, or run:
 
@@ -165,7 +168,7 @@ GET /products/search?q=milk&hcs=false&maxPriceCents=500
 - **`total`** is the number of results and **`catalogSize`** the number of products, for "12 of 42 products".
 - No pagination: every match is returned.
 
-Errors: `400 VALIDATION_ERROR` (`q`, `hcs`, `minPriceCents`, `maxPriceCents`; `maxPriceCents` also when it's below `minPriceCents`).
+Errors: `400 VALIDATION_ERROR` (`q`, `category`, `brand` or `dietary` over 100 characters, `hcs`, `minPriceCents`, `maxPriceCents`; `maxPriceCents` also when it's below `minPriceCents`).
 
 ### `POST /price-submissions/image-upload-url`
 
@@ -211,6 +214,7 @@ Errors:
 - `400 VALIDATION_ERROR` naming each bad field together: `productId`, `retailerId`, `contentType`, `sizeBytes`. An unknown id gives `"productId": "Unknown product"` or `"retailerId": "Unknown store"`.
 - `400 IMAGE_TOO_LARGE`
 - `401`
+- `429 UPLOAD_RATE_LIMITED`: more than 60 upload links this clock hour (UTC), counting product-request uploads too. Each link counts when it's issued, used or not.
 
 ### Uploading the photo to S3
 
@@ -293,7 +297,7 @@ Errors, in the order they're checked:
 | 409 | `DUPLICATE_SUBMISSION` | This user already submitted the same product, store and price for the same Singapore day |
 | 400 | `VALIDATION_ERROR` | `photoKey` isn't one of the caller's own uploads **for this product** |
 | 400 | `PHOTO_NOT_FOUND` | Nothing was uploaded for that `photoKey` |
-| 400 | `INVALID_PHOTO` | The uploaded object isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `INVALID_PHOTO` | The uploaded object isn't a JPEG/PNG of 5 MiB or less, or its bytes aren't the image type it was uploaded as. A file that fails the second check is deleted. |
 
 ### `GET /price-submissions/mine`
 
@@ -366,7 +370,7 @@ User. Returns a one-time, 5-minute upload form, exactly like the [evidence uploa
 
 The response is the same as the evidence upload link's. It carries `productImageKey` when `purpose` is `product-image`, or `photoKey` when it is `evidence`. Keep the key for `POST /product-requests`.
 
-Errors: `400 VALIDATION_ERROR` (`purpose`, `contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`.
+Errors: `400 VALIDATION_ERROR` (`purpose`, `contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`, `429 UPLOAD_RATE_LIMITED` (the same hourly allowance as price photos).
 
 ### `POST /product-requests`
 
@@ -418,7 +422,7 @@ Errors, in the order they're checked:
 | 409 | `PRODUCT_EXISTS` | The catalog already has this product (same name, brand, pack size and units per pack, ignoring case and spacing; a 6 × 1 L pack is not a duplicate of a single 1 L). The response includes **`productId`** so the user can submit a price for it instead. |
 | 409 | `PRODUCT_ALREADY_REQUESTED` | Someone has already proposed this product and it's waiting for an admin |
 | 400 | `VALIDATION_ERROR` | `productImageKey` or `photoKey` isn't one of the caller's own uploads for a product request |
-| 400 | `PHOTO_NOT_FOUND` / `INVALID_PHOTO` | Nothing was uploaded for that key, or it isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `PHOTO_NOT_FOUND` / `INVALID_PHOTO` | Nothing was uploaded for that key, or it isn't a real JPEG/PNG of 5 MiB or less |
 
 ### `GET /product-requests/mine`
 
@@ -818,7 +822,7 @@ Errors from the backend always have this shape:
 | 400 | `VALIDATION_ERROR` | See `fieldErrors` |
 | 400 | `IMAGE_TOO_LARGE` | Upload request over 5 MiB |
 | 400 | `PHOTO_NOT_FOUND` | `photoKey` or `productImageKey` has no uploaded file |
-| 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less, or its bytes aren't the image type it was uploaded as (the file is then deleted) |
 | 400 | `INVALID_PAGE_TOKEN` | `nextToken` was altered, or came from a different list |
 | 401 | `UNAUTHENTICATED` | Token missing its user (rare, see below) |
 | 403 | `FORBIDDEN` | Admin route called by a non-admin |
@@ -830,6 +834,7 @@ Errors from the backend always have this shape:
 | 409 | `PRODUCT_IMAGE_MISSING` | A pending request's picture is gone; the admin should reject it |
 | 409 | `OBSERVATION_TOO_OLD` | A pending request's price is more than 30 days old; the admin should reject it |
 | 429 | `RATE_LIMITED` | Too many submissions this hour, or product requests today |
+| 429 | `UPLOAD_RATE_LIMITED` | More than 60 photo upload links in this clock hour |
 | 500 | `INTERNAL_ERROR` | Backend bug. Report the `requestId` to Gareth. |
 
 **API Gateway errors don't use that shape.** They come before the backend runs and contain only `{"message": "…"}`:
@@ -838,6 +843,7 @@ Errors from the backend always have this shape:
 |---|---|---|
 | 401 | `Unauthorized` (or `The incoming token has expired`) | No token, an expired or invalid token, or an ID token instead of an access token. Refresh the session or send the user to log in. |
 | 403 | `Missing Authentication Token`, or `Invalid key=value pair … in Authorization header` when a token was sent | **Wrong path or method.** API Gateway reports unknown routes this way; it isn't a login problem. |
+| 429 | `Too Many Requests` | Over the API's throttle (20 a second, bursts of 40, for all callers together). Wait a moment and retry. |
 | 502 / 504 | `Internal server error` / timeout | Backend crashed or timed out |
 
 ## 6. Limits
@@ -853,6 +859,9 @@ Errors from the backend always have this shape:
 | `observedAt` | Not in the future (5-minute clock tolerance). A date: up to 30 days before today (Singapore time). A datetime: at most 30 days old. A product request can only be approved while its price is still within those 30 days. |
 | Submissions per user | 30 per rolling hour (counts every status) |
 | Product requests per user | 10 per rolling 24 hours (counts every status) |
+| Photo upload links per user | 60 per clock hour (UTC), price photos and product requests together |
+| API throughput | 20 requests a second, bursts of 40, all callers together |
+| Search filters (`q`, `category`, `brand`, `dietary`) | 100 characters each |
 | Duplicate rule | One submission per user, product, store, price and Singapore day |
 | Rejection reason | 500 characters |
 | Page size | Default 50, max 100 |

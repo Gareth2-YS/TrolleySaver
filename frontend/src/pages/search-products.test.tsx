@@ -47,6 +47,11 @@ function renderSearch(items: object[], retailers: object[] = catalogRetailers) {
 }
 
 describe("search page", () => {
+  it("limits the search box to what the backend accepts", async () => {
+    renderSearch([milk])
+    expect(await screen.findByRole("searchbox", { name: "Search products or brands" })).toHaveAttribute("maxLength", "100")
+  })
+
   it("shows when each product's prices were last updated, in Singapore time", async () => {
     const user = userEvent.setup()
     renderSearch([bread, milk])

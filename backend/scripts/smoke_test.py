@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
+from botocore.exceptions import ClientError
 
 from create_admin import create_admin
 from invoke import cleanup as delete_user_data
@@ -131,6 +132,8 @@ def main():
             t.check(f"GET /products from {origin} -> allowed", r.headers.get("Access-Control-Allow-Origin") == origin, r.headers)
         r = requests.get(f"{api}/products", headers={"Origin": "https://evil.example"}, timeout=TIMEOUT)
         t.check("GET /products from another site -> not allowed", "Access-Control-Allow-Origin" not in r.headers, r.headers)
+        t.check("API responses say nosniff and no-store",
+                r.headers.get("X-Content-Type-Options") == "nosniff" and r.headers.get("Cache-Control") == "no-store", r.headers)
 
         # --- Authorizer ---
         upload_body = {"productId": product["id"], "retailerId": "fairprice", "fileName": "shelf.png",
@@ -187,6 +190,18 @@ def main():
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid + 1, "photoKey": never_uploaded})
         t.check("photo that was never uploaded -> 400 PHOTO_NOT_FOUND",
                 r.status_code == 400 and r.json().get("code") == "PHOTO_NOT_FOUND", r.text[:300])
+        # A web page uploaded as "image/png": S3 only checks the declared type, the backend checks the bytes.
+        fake = call("POST", "/price-submissions/image-upload-url", access, json=upload_body).json()
+        requests.post(fake["uploadUrl"], data=fake["fields"], files={"file": ("shelf.png", b"<html>not an image</html>", "image/png")}, timeout=TIMEOUT)
+        r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid + 2, "photoKey": fake["photoKey"]})
+        t.check("a file that isn't really a PNG -> 400 INVALID_PHOTO",
+                r.status_code == 400 and r.json().get("code") == "INVALID_PHOTO", r.text[:300])
+        try:
+            boto3.client("s3", region_name=args.region).head_object(Bucket=bucket, Key=fake["photoKey"])
+            fake_deleted = False
+        except ClientError:
+            fake_deleted = True
+        t.check("...and the fake file is deleted", fake_deleted, fake["photoKey"])
 
         r = call("GET", "/price-submissions/mine", access)
         mine = r.json().get("items", []) if r.ok else []

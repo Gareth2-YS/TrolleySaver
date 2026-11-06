@@ -187,3 +187,11 @@ def test_catalog_signs_product_pictures(aws):
     picture = next(p for p in body["items"] if p["id"] == "p-1")
     assert status == 200
     assert "product-images/p-1.png" in picture["imageUrl"] and "X-Amz-Expires=3600" in picture["imageUrl"]
+
+
+def test_rejection_reason_with_hidden_characters_is_refused(aws):
+    flagged = submit(9999)
+    status, error = moderate(flagged["id"], {"decision": "rejected", "reason": "Label​ unreadable"})
+    assert status == 400 and error["fieldErrors"]["reason"] == "Must not contain hidden or control characters"
+    status, record = moderate(flagged["id"], {"decision": "rejected", "reason": "Label unreadable.\nPlease retake."})
+    assert status == 200 and record["rejectionReason"] == "Label unreadable.\nPlease retake."

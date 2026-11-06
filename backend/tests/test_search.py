@@ -102,6 +102,9 @@ def test_empty_catalog(aws):
 
 @pytest.mark.parametrize("query, field", [
     ({"q": "x" * 101}, "q"),
+    ({"category": "x" * 101}, "category"),
+    ({"brand": "x" * 101}, "brand"),
+    ({"dietary": "x" * 101}, "dietary"),
     ({"hcs": "yes"}, "hcs"),
     ({"minPriceCents": "-1"}, "minPriceCents"),
     ({"minPriceCents": "1.50"}, "minPriceCents"),

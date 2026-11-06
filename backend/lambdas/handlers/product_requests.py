@@ -21,7 +21,7 @@ from common import db
 from common.auth import get_caller
 from common.http import ApiError, api_handler, no_content, parse_json_body, response
 from common.images import (NEW_PRODUCT, check_upload, delete_quietly, evidence_prefix, new_key, pending_product_image_prefix,
-                           presigned_upload)
+                           presigned_upload, reserve_upload_link)
 from common.product_requests import PRODUCT_FIELDS, duplicate_key, find_existing_product, to_record, to_records, validate_request
 from common.validation import to_iso, validate_upload_request
 
@@ -38,6 +38,7 @@ def upload_url(event, caller):
     if purpose not in PURPOSES:
         raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"purpose": "Must be product-image or evidence"})
     content_type, _ = validate_upload_request(body)
+    reserve_upload_link(caller.user_id)
     if purpose == "product-image":
         key = new_key(pending_product_image_prefix(caller.user_id), content_type)
         return response(200, {**presigned_upload(key, content_type), "productImageKey": key})

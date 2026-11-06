@@ -7,6 +7,7 @@ Two kinds live in the bucket:
   product-images/<productId>.<ext>                    an approved product's picture, shown in the catalog
 """
 
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +21,53 @@ UPLOAD_URL_TTL_SECONDS = 300
 EVIDENCE_URL_TTL_SECONDS = 300
 PRODUCT_IMAGE_URL_TTL_SECONDS = 3600
 NEW_PRODUCT = "new-product"
+# The first bytes of every file of each type. S3 only checks the declared Content-Type, so these prove
+# the upload really is that kind of image.
+IMAGE_SIGNATURES = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG\r\n\x1a\n"}
+
+
+def _upload_link_limit():
+    return int(os.environ.get("UPLOAD_LINKS_PER_HOUR", 60))
+
+
+def _condition_failed(error):
+    return error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
+
+
+def reserve_upload_link(user_id):
+    """Count one upload link against the caller's allowance for this clock hour (UTC), or refuse it.
+
+    Each link lets its holder put up to 5 MB in the bucket, used or not, so without a limit anyone
+    could fill it. The count lives on the user's row: uploadWindow (the hour) and uploadCount."""
+    window = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    limit = _upload_link_limit()
+    # Two tries: if another request starts the new hour between our two updates, the first update
+    # succeeds on the second try.
+    for _ in range(2):
+        try:
+            db.users().update_item(
+                Key={"userId": user_id},
+                UpdateExpression="ADD uploadCount :one",
+                ConditionExpression="uploadWindow = :window AND uploadCount < :limit",
+                ExpressionAttributeValues={":one": 1, ":window": window, ":limit": limit},
+            )
+            return
+        except ClientError as error:
+            if not _condition_failed(error):
+                raise
+        try:
+            db.users().update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET uploadWindow = :window, uploadCount = :one",
+                ConditionExpression="attribute_not_exists(uploadWindow) OR uploadWindow <> :window",
+                ExpressionAttributeValues={":one": 1, ":window": window},
+            )
+            return
+        except ClientError as error:
+            if not _condition_failed(error):
+                raise
+    raise ApiError(429, "UPLOAD_RATE_LIMITED",
+                   "You have requested too many photo uploads in the last hour. Please try again later.")
 
 
 def evidence_prefix(user_id, product_id):
@@ -58,7 +106,8 @@ def presigned_upload(key, content_type):
 
 
 def check_upload(key, prefix, field):
-    """Confirm the client uploaded `key` itself, under the folder it was given, as a valid image.
+    """Confirm the client uploaded `key` itself, under the folder it was given, as a valid image: a
+    JPG or PNG of at most 5 MB whose bytes match its declared type. A file that isn't is deleted.
 
     Returns (content type, size in bytes).
     """
@@ -76,6 +125,11 @@ def check_upload(key, prefix, field):
     if content_type not in IMAGE_EXTENSIONS or size > max_upload_bytes():
         raise ApiError(400, "INVALID_PHOTO", "The uploaded image must be a JPG or PNG of 5 MB or less.",
                        {field: "Invalid image"})
+    start = db.s3().get_object(Bucket=db.photo_bucket(), Key=key, Range="bytes=0-15")["Body"].read()
+    if not start.startswith(IMAGE_SIGNATURES[content_type]):
+        delete_quietly(key)
+        raise ApiError(400, "INVALID_PHOTO", "The uploaded file isn't a JPG or PNG image.",
+                       {field: "Not a JPG or PNG image"})
     return content_type, size
 
 

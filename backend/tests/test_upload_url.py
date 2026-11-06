@@ -1,6 +1,6 @@
 import pytest
 
-from conftest import MILK_ID, USER_ID, api_event, call
+from conftest import MILK_ID, OTHER_USER_ID, USER_ID, api_event, call
 from handlers import upload_url
 
 
@@ -61,3 +61,30 @@ def test_rejects_oversized(aws):
 def test_requires_auth(aws):
     status, _ = request(body(), user_id=None)
     assert status == 401
+
+
+# ---------- how many links one person can ask for ----------
+
+def test_sixty_upload_links_an_hour_then_429(aws):
+    for _ in range(60):
+        assert request(body())[0] == 200
+    status, error = request(body())
+    assert status == 429 and error["code"] == "UPLOAD_RATE_LIMITED"
+    # Everyone has their own allowance.
+    assert request(body(), user_id=OTHER_USER_ID)[0] == 200
+
+
+def test_the_allowance_starts_again_each_hour(aws, monkeypatch):
+    monkeypatch.setenv("UPLOAD_LINKS_PER_HOUR", "1")
+    assert request(body())[0] == 200
+    assert request(body())[0] == 429
+    aws.Table("unit-user").update_item(Key={"userId": USER_ID}, UpdateExpression="SET uploadWindow = :hour",
+                                       ExpressionAttributeValues={":hour": "2026-01-01T00"})
+    assert request(body())[0] == 200
+
+
+def test_refused_requests_dont_use_the_allowance(aws, monkeypatch):
+    monkeypatch.setenv("UPLOAD_LINKS_PER_HOUR", "1")
+    assert request(body(contentType="image/gif"))[0] == 400
+    assert request(body(productId="no-such-product"))[0] == 400
+    assert request(body())[0] == 200

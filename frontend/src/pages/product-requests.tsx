@@ -6,7 +6,8 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { ProductImage } from "../components/product-image"
-import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage, validationMessages } from "../contributions/schema"
+import { prepareImage } from "../contributions/image"
+import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, reasonError, singaporeDateString, validationMessages } from "../contributions/schema"
 import { SubmissionServiceError } from "../contributions/service"
 import type { CatalogRetailer, ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 import { formatCents } from "../lib/format"
@@ -48,18 +49,25 @@ function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFiel
 function ImagePicker({ label, file, onChange, id }: { label: string; file: File | null; onChange: (file: File | null) => void; id: string }) {
   const [preview, setPreview] = useState<string>()
   const [error, setError] = useState<string | null>(null)
+  const [preparing, setPreparing] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
-  function select(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0] ?? null
-    const message = next ? validateImage(next) : null
-    setError(message); onChange(message ? null : next)
-    setPreview(next && !message ? URL.createObjectURL(next) : undefined)
-    if (message) event.target.value = ""
+  async function select(event: ChangeEvent<HTMLInputElement>) {
+    const field = event.target
+    const next = field.files?.[0] ?? null
+    // Checked, and redrawn without its metadata (e.g. GPS location), before anything is uploaded.
+    setPreparing(Boolean(next))
+    const prepared = next ? await prepareImage(next) : null
+    setPreparing(false)
+    const chosen = prepared?.file ?? null
+    setError(prepared?.error ?? null); onChange(chosen)
+    setPreview(chosen ? URL.createObjectURL(chosen) : undefined)
+    if (prepared?.error) field.value = ""
   }
   return <div className="space-y-3 rounded-xl border p-4">
     <Label htmlFor={id}>{label}</Label><p id={`${id}-help`} className="text-sm text-muted-foreground">JPG or PNG · Up to 5 MB</p>
-    <Input ref={input} id={id} type="file" accept="image/jpeg,image/png" aria-describedby={`${id}-help`} onChange={select} />
+    <Input ref={input} id={id} type="file" accept="image/jpeg,image/png" aria-describedby={`${id}-help`} disabled={preparing} onChange={select} />
+    {preparing && <p className="text-sm text-muted-foreground" aria-live="polite">Preparing image…</p>}
     {preview && <img src={preview} alt={`Selected ${label.toLowerCase()} preview`} className="max-h-64 w-full rounded-lg object-contain" />}
     {file && <Button type="button" variant="outline" onClick={() => { onChange(null); setPreview(undefined); if (input.current) input.current.value = "" }}>Remove {label.toLowerCase()}</Button>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -209,6 +217,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
       if (!result.success) { setError(validationMessages(result.error.issues)); return }
       changes = result.data
     } else if (!reason.trim() || reason.trim().length > 500) { setError("Enter a reason of 1–500 characters before rejecting."); return }
+    else if (reasonError(reason)) { setError(reasonError(reason)); return }
     setBusy(true)
     try {
       const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
@@ -229,7 +238,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
       <ProductEditor value={fields} onChange={setFields} facets={facets} prefix={`review-${item.id}`} />
       <p className="text-sm text-muted-foreground">Suggested range: {item.suggestedMinCents}–{item.suggestedMaxCents} cents. Review this range before approval; it applies across stores.</p>
       <div className="grid gap-4 sm:grid-cols-2">{([["Minimum cents", min, setMin], ["Maximum cents", max, setMax]] as const).map(([label, value, set]) => <label key={label} className="space-y-2">{label}<Input type="number" min="1" max="100000" step="1" value={value || ""} onChange={(e) => set(Number(e.target.value))} /></label>)}</div>
-      <label className="block space-y-2">Search terms (comma separated)<Input value={terms} onChange={(e) => setTerms(e.target.value)} /></label>
+      <label className="block space-y-2">Search terms (comma separated)<Input value={terms} maxLength={320} onChange={(e) => setTerms(e.target.value)} /></label>
       <label className="flex min-h-12 items-start gap-3 rounded-xl border bg-accent/40 p-4"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /><span>I reviewed the packaging, product fields, HCS and dietary claims, and price range. Correct unsupported claims before approval. If evidence is unclear, leave the request pending or reject it with a reason.</span></label>
       <label className="block space-y-2">Reason for rejection<textarea maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className={cn(inputClass, "h-auto min-h-24 resize-y")} /></label>
       <div className="flex flex-wrap gap-3"><Button disabled={!checked} onClick={() => void decide("approved")}>Approve product</Button><Button variant="destructive" onClick={() => void decide("rejected")}>Reject product</Button></div>

@@ -6,12 +6,13 @@ product and its price are then created) or rejects it.
 """
 
 import math
+import unicodedata
 from decimal import Decimal, InvalidOperation
 
 from common import db
 from common.http import ApiError
 from common.images import EVIDENCE_URL_TTL_SECONDS, PRODUCT_IMAGE_URL_TTL_SECONDS, signed_url
-from common.validation import MAX_PRICE_CENTS, parse_observed_at
+from common.validation import JOINERS, MAX_PRICE_CENTS, clean_text, parse_observed_at
 
 PACK_UNITS = {"ml": "ml", "l": "L", "g": "g", "kg": "kg", "pcs": "pcs", "rolls": "rolls"}
 MAX_PACK_QTY = 100_000
@@ -33,10 +34,14 @@ def _is_int(value):
 
 def _text(value, field, errors):
     low, high = TEXT_LIMITS[field]
-    if not isinstance(value, str) or not low <= len(value.strip()) <= high:
+    try:
+        text = clean_text(value) if isinstance(value, str) else None
+    except ValueError as error:
+        errors[field] = str(error)
+        return None
+    if text is None or not low <= len(text) <= high:
         errors[field] = f"Must be {low}–{high} characters"
         return None
-    text = " ".join(value.split())
     return text.lower() if field == "category" else text
 
 
@@ -62,10 +67,15 @@ def _tags(value, field, limit, errors):
         return None
     tags = []
     for tag in value:
-        if not isinstance(tag, str) or not 1 <= len(tag.strip()) <= MAX_TAG_LENGTH:
+        try:
+            tag = clean_text(tag) if isinstance(tag, str) else None
+        except ValueError as error:
+            errors[field] = str(error)
+            return None
+        if tag is None or not 1 <= len(tag) <= MAX_TAG_LENGTH:
             errors[field] = f"Each tag must be 1–{MAX_TAG_LENGTH} characters"
             return None
-        tags.append(tag.strip().lower())
+        tags.append(tag.lower())
     return list(dict.fromkeys(tags))
 
 
@@ -161,15 +171,22 @@ def suggested_range(price_cents):
     return max(1, price_cents // 2), min(MAX_PRICE_CENTS, math.ceil(price_cents * 3 / 2))
 
 
+def _comparable(text):
+    """Text as the duplicate check compares it: NFKC (so full-width "Ｍagnolia" matches "Magnolia"),
+    without zero-width joiners, with spacing collapsed and case ignored."""
+    text = unicodedata.normalize("NFKC", str(text))
+    return " ".join(text.translate({ord(joiner): None for joiner in JOINERS}).split()).casefold()
+
+
 def duplicate_key(fields):
-    """Same product = same name, brand and pack size (quantity, unit and units per pack), ignoring case
-    and spacing, so a 6 x 1 L pack is a different product from a single 1 L. Products without a
-    packCount (the oldest catalog entries) count as single packs."""
+    """Same product = same name, brand and pack size (quantity, unit and units per pack), ignoring case,
+    spacing and look-alike characters, so a 6 x 1 L pack is a different product from a single 1 L.
+    Products without a packCount (the oldest catalog entries) count as single packs."""
     qty = Decimal(str(fields["packQty"])).normalize()
     count = int(fields.get("packCount") or 1)
     return "|".join([
-        " ".join(str(fields["name"]).split()).casefold(),
-        " ".join(str(fields["brand"]).split()).casefold(),
+        _comparable(fields["name"]),
+        _comparable(fields["brand"]),
         format(qty, "f"),
         str(fields["packUnit"]).casefold(),
         str(count),

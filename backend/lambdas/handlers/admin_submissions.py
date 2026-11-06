@@ -13,11 +13,10 @@ from common import db
 from common.auth import require_admin
 from common.http import ApiError, api_handler, parse_json_body, response
 from common.submissions import to_records
-from common.validation import to_iso
+from common.validation import to_iso, validate_reason
 
 STATUSES = ("flagged", "accepted", "rejected")
 DECISIONS = ("accepted", "rejected")
-MAX_REASON_LENGTH = 500
 
 
 def list_submissions(event):
@@ -39,20 +38,15 @@ def moderate(event, admin):
     product_id, sk = db.decode_submission_id((event.get("pathParameters") or {}).get("id", ""))
     body = parse_json_body(event)
     decision = body.get("decision")
-    reason = body.get("reason")
     if decision not in DECISIONS:
         raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"decision": "Must be accepted or rejected"})
-    if decision == "rejected":
-        if not isinstance(reason, str) or not reason.strip():
-            raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"reason": "Enter a reason before rejecting"})
-        if len(reason.strip()) > MAX_REASON_LENGTH:
-            raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.", {"reason": f"Keep the reason under {MAX_REASON_LENGTH} characters"})
+    reason = validate_reason(body.get("reason")) if decision == "rejected" else None
 
     values = {":decision": decision, ":flagged": "flagged", ":now": to_iso(datetime.now(timezone.utc)), ":admin": admin.user_id}
     update = "SET #status = :decision, reviewedAt = :now, reviewedBy = :admin"
     if decision == "rejected":
         update += ", rejectionReason = :reason"
-        values[":reason"] = reason.strip()
+        values[":reason"] = reason
     try:
         result = db.submissions().update_item(
             Key={"productId": product_id, "sk": sk},

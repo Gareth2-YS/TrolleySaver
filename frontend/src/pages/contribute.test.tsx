@@ -173,6 +173,20 @@ describe("price and image contribution workflow", () => {
     expect(await screen.findByText("Choose a JPG or PNG image")).toBeInTheDocument()
   })
 
+  it("refuses a 'photo' the browser can't read as an image, before anything is uploaded", async () => {
+    vi.stubGlobal("createImageBitmap", vi.fn().mockRejectedValue(new DOMException("The source image could not be decoded.")))
+    const user = userEvent.setup()
+    const service = submissionService()
+    renderContribution("user", service)
+    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await user.upload(screen.getByLabelText(/Price evidence photo/), new File(["<html>"], "shelf.png", { type: "image/png" }))
+    expect(await screen.findByText("This file isn't a readable JPG or PNG image")).toBeInTheDocument()
+    expect(screen.queryByRole("img", { name: "Selected price evidence preview" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Submit price" })).toBeDisabled()
+    expect(service.requestImageUpload).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
   it("submits and immediately renders the backend status", async () => {
     const user = userEvent.setup()
     const service = submissionService()

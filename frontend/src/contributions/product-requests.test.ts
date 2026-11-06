@@ -158,3 +158,15 @@ describe("backend product validation boundaries", () => {
       .toBe("Each search term must be 1–30 characters (check for a stray comma)")
   })
 })
+
+describe("hidden characters in product fields", () => {
+  it("names the field that has one", () => {
+    const messages = (overrides: Partial<typeof proposal>) => validationMessages(productFieldsSchema.safeParse({ ...proposal, ...overrides }).error?.issues ?? [])
+    expect(messages({ name: "Oat​Milk" })).toBe("Product name can't contain hidden or control characters")
+    expect(messages({ brand: "Oa\u0000ts" })).toBe("Brand can't contain hidden or control characters")
+    expect(messages({ category: "milk⁦" })).toBe("Category can't contain hidden or control characters")
+    expect(messages({ dietary: ["veg​an"] })).toBe("Dietary tags can't contain hidden or control characters")
+    expect(productCorrectionsSchema.safeParse({ ...proposal, minCents: 1, maxCents: 100, searchTerms: ["oat‮"] }).error?.issues[0].message)
+      .toBe("Search terms can't contain hidden or control characters")
+  })
+})

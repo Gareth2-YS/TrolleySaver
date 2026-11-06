@@ -1,13 +1,44 @@
+import re
+
 import boto3
+import pytest
 
 from conftest import REGION
 from handlers import cognito_post_confirmation, cognito_pre_signup
 
 
+def _signup(**attributes):
+    return {"triggerSource": "PreSignUp_SignUp", "request": {"userAttributes": attributes}, "response": {}}
+
+
 def test_pre_signup_auto_confirms_public_signups():
-    event = {"triggerSource": "PreSignUp_SignUp", "request": {"userAttributes": {"email": "a@b.com"}}, "response": {}}
-    result = cognito_pre_signup.handler(event, None)
+    result = cognito_pre_signup.handler(_signup(email="a@b.com", name="Alex Tan"), None)
     assert result["response"] == {"autoConfirmUser": True, "autoVerifyEmail": True}
+
+
+@pytest.mark.parametrize("name, message", [
+    (None, "Enter your full name (2–80 characters)"),
+    ("A", "Enter your full name (2–80 characters)"),
+    ("A" * 81, "Enter your full name (2–80 characters)"),
+    ("Alex‮Tan", "Your name can't contain hidden or control characters"),
+    ("Alex​Tan", "Your name can't contain hidden or control characters"),
+    ("Alex\x00", "Your name can't contain hidden or control characters"),
+])
+def test_pre_signup_refuses_names_the_form_would_refuse(name, message):
+    """Someone calling Cognito's SignUp API directly gets the same rules as the registration form."""
+    attributes = {"email": "a@b.com", **({"name": name} if name is not None else {})}
+    with pytest.raises(ValueError, match=re.escape(message)):
+        cognito_pre_signup.handler(_signup(**attributes), None)
+
+
+def test_pre_signup_refuses_an_overlong_email():
+    with pytest.raises(ValueError, match="Email address is too long"):
+        cognito_pre_signup.handler(_signup(email="a" * 245 + "@example.com", name="Alex Tan"), None)
+
+
+def test_pre_signup_accepts_names_in_other_scripts():
+    for name in ("陈伟明", "Siti Nur'aini", "முருகன் ராஜ்", "José  Núñez"):
+        assert cognito_pre_signup.handler(_signup(email="a@b.com", name=name), None)["response"]["autoConfirmUser"]
 
 
 def test_pre_signup_leaves_admin_created_users_alone():
@@ -57,3 +88,17 @@ def test_post_confirmation_display_name_falls_back_to_email(aws):
     }
     cognito_post_confirmation.handler(event, None)
     assert aws.Table("unit-user").get_item(Key={"userId": sub})["Item"]["displayName"] == "sam"
+
+
+def test_post_confirmation_cleans_a_name_that_skipped_the_sign_up_checks(aws):
+    client, pool_id, username, sub = _pool_with_user("kim@example.com")
+    event = {
+        "triggerSource": "PostConfirmation_ConfirmSignUp",
+        "userPoolId": pool_id,
+        "userName": username,
+        "request": {"userAttributes": {"sub": sub, "email": "kim@example.com", "name": "Kim‮" + "x" * 200}},
+        "response": {},
+    }
+    cognito_post_confirmation.handler(event, None)
+    # Hidden characters: the name is unusable, so the email's name part is shown instead.
+    assert aws.Table("unit-user").get_item(Key={"userId": sub})["Item"]["displayName"] == "kim"

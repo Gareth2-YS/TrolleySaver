@@ -436,6 +436,7 @@ export function SearchProductsPage() {
               <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
+                maxLength={100}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search product or brand"

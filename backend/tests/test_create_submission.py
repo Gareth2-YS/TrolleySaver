@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import boto3
 import pytest
+from botocore.exceptions import ClientError
 
-from conftest import MILK_ID, OTHER_USER_ID, USER_ID, api_event, call, put_photo
+from conftest import BUCKET, MILK_ID, OTHER_USER_ID, REGION, USER_ID, api_event, call, put_photo
 from handlers import create_submission
 
 SGT = timezone(timedelta(hours=8))
@@ -162,3 +164,32 @@ def test_wrong_photo_type_rejected(aws):
     put_photo(key, content_type="application/pdf")
     status, error = submit(valid_body(photoKey=key))
     assert status == 400 and error["code"] == "INVALID_PHOTO"
+
+
+def _exists(key):
+    try:
+        boto3.client("s3", region_name=REGION).head_object(Bucket=BUCKET, Key=key)
+        return True
+    except ClientError:
+        return False
+
+
+@pytest.mark.parametrize("content_type, contents", [
+    ("image/png", b"<html><script>alert(1)</script></html>"),  # a web page labelled as an image
+    ("image/png", b"GIF89a" + b"x" * 100),                      # another image type
+    ("image/jpeg", b"\x89PNG\r\n\x1a\n" + b"x" * 100),          # a PNG declared as a JPEG
+])
+def test_a_file_that_isnt_the_image_it_claims_is_refused_and_deleted(aws, content_type, contents):
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.{'png' if content_type == 'image/png' else 'jpg'}"
+    put_photo(key, content_type=content_type, body=contents)
+    status, error = submit(valid_body(photoKey=key))
+    assert status == 400 and error["code"] == "INVALID_PHOTO"
+    assert error["fieldErrors"] == {"photoKey": "Not a JPG or PNG image"}
+    assert not _exists(key)
+
+
+def test_a_real_jpeg_is_accepted(aws):
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.jpg"
+    put_photo(key, content_type="image/jpeg")
+    status, record = submit(valid_body(photoKey=key))
+    assert status == 201 and record["photoContentType"] == "image/jpeg"
