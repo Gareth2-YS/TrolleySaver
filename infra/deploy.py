@@ -115,7 +115,8 @@ def preflight(args, aws, stack):
     try:
         identity = aws.json("sts", "get-caller-identity")
     except DeployError as error:
-        raise DeployError(f"Not signed in to AWS ({error}). Run `aws sso login --profile <profile>` and try again.")
+        raise DeployError(f"Not signed in to AWS ({error}). Copy fresh keys from the AWS access portal into "
+                          "%USERPROFILE%\\.aws\\credentials (docs/deployment.md, Signing in to AWS), then try again.")
     print(f"Signed in as {identity['Arn']}\nAccount {identity['Account']}, region {aws.env['AWS_REGION']}")
 
     outputs = aws.stack_outputs(stack)

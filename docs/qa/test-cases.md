@@ -1,6 +1,6 @@
 # Manual UI test cases
 
-A checklist for testing the TrolleySaver web app by hand in a browser, page by page. Each case says what to do and what you should see, quoting the text on screen. The cases were written from the frontend code (`frontend/src`) on 4 Nov 2026, and updated on 6 Nov for the redesigned Smart basket, enlarging pictures, the review fixes, the deployed site, and then the new look and the log-in window.
+A checklist for testing the TrolleySaver web app by hand in a browser, page by page. Each case says what to do and what you should see, quoting the text on screen. The cases were written from the frontend code (`frontend/src`) on 4 Nov 2026, and updated on 6 Nov for the redesigned Smart basket, enlarging pictures, the review fixes, the deployed site, and then the new look, the log-in window, loading spinners, the Healthier Choice Symbol on the new product form, and modals that keep the page behind them still.
 
 ⭐ marks the **key** cases: the ones that must pass before a demo, a handoff or the final report.
 
@@ -31,17 +31,17 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 |---|--:|--:|--:|
 | [1. Navigation and access](#1-navigation-and-access) | 12 | 6 | 0 |
 | [2. Register and log in](#2-register-and-log-in) | 15 | 5 | 1 |
-| [3. Search & filter](#3-search--filter) | 15 | 6 | 0 |
+| [3. Search & filter](#3-search--filter) | 16 | 6 | 0 |
 | [4. Smart Basket](#4-smart-basket) | 20 | 9 | 0 |
 | [5. Contributor: submit a price](#5-contributor-submit-a-price) | 19 | 6 | 0 |
-| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 18 | 9 | 0 |
+| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 19 | 9 | 0 |
 | [7. Admin: price review](#7-admin-price-review) | 7 | 4 | 0 |
 | [8. Admin: product request review](#8-admin-product-request-review) | 10 | 5 | 0 |
 | [9. Price freshness](#9-price-freshness) | 7 | 2 | 0 |
 | [10. Known issues](#10-known-issues) | 2 | 0 | 0 |
 | [11. Deployed site](#11-deployed-site) | 9 | 5 | 2 |
-| [12. Look and feel](#12-look-and-feel) | 8 | 2 | 0 |
-| **Total** | **142** | **59** | **3** |
+| [12. Look and feel](#12-look-and-feel) | 9 | 3 | 0 |
+| **Total** | **145** | **60** | **3** |
 
 ## 1. Navigation and access
 
@@ -87,7 +87,7 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|
 | SRCH-01 | Signed out, open `/search`. | "Search and filter groceries", a count like "24 of 24 products", and a card per product: its picture or category icon on a white tile, the name, brand · pack size (e.g. "6 × 180 ml"), and under a thin line the lowest price, e.g. "Lowest $3.63 at FairPrice". Healthier Choice products have a "Healthier Choice" badge with a leaf. | ⭐ | Not done | |
-| SRCH-02 | Type "milk" in "Search product or brand". Then "magnolia milk". | About a third of a second after you stop typing, the count shows "Updating…", then e.g. "5 of 24 products", with only matching products. "magnolia milk" shows only products matching **both** words. | ⭐ | Not done | |
+| SRCH-02 | Type "milk" in "Search product or brand". Then "magnolia milk". | About a third of a second after you stop typing, a spinner and "Updating…" show beside the count and the cards fade, then e.g. "5 of 24 products", with only matching products. "magnolia milk" shows only products matching **both** words. | ⭐ | Not done | |
 | SRCH-03 | Click the quick filters: a category (e.g. "Milk"), the same one again, then "Healthier Choice", then "All". | A category shows only that type, and clicking it again shows everything. "Healthier Choice" shows only products with the badge and clears the category (and the other way round). "All" clears both. Only categories in the catalog appear among "Cereal", "Milk", "Soft Drinks", "Cookies" and "Toilet Rolls". | | Not done | |
 | SRCH-04 | Click "Filters". Choose a Type and a Brand, then a Dietary option. | The panel has "Type", "Brand", "Dietary" and "Lowest price range ($)" with "From" and "To". Each choice narrows the results. The button reads "Filters (2)" after Type and Brand. | | Not done | The count includes Type, Healthier Choice and Brand only: Dietary and the price range don't add to it. |
 | SRCH-05 | In the price range, enter From `2` and To `5`. | Only products whose lowest current price is $2.00 to $5.00 inclusive. Products with no current price disappear. | ⭐ | Not done | |
@@ -101,6 +101,7 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | SRCH-13 | Turn on "Offline" in the browser's network tools, change a filter, then go back online and change it again. | Offline: "Catalogue unavailable" with the error. Back online, results return. | | Not done | |
 | SRCH-14 | Click a product's picture on its card. Close it with ✕, Esc, and by clicking outside it. Then open the product's details and click the picture there. | The picture opens large with the product's name, from the card and from the details. All three ways close it. | | Not done | Added 5 Nov. |
 | SRCH-15 | Click the category icon of a product the team loaded (no picture). | The enlarged view shows the same category icon, not a broken image. | | Not done | |
+| SRCH-16 | In the network tools, set throttling to "Slow 4G" (or "3G"), then reload `/search`. Turn throttling off afterwards. | While the catalogue loads: a spinner beside "Loading…" at the top, and a large spinner with "Loading products…" where the cards go. | | Not done | Added 6 Nov. |
 
 ## 4. Smart Basket
 
@@ -161,7 +162,7 @@ Log in as a contributor, open `/contribute` and click "Upload a new product". Us
 
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|
-| NPR-01 | Open the dialog. Close it with ✕, then reopen it and press Esc. | "Upload a new product" with "Product name", "Brand", "Category" (with suggestions), "Pack quantity", "Pack unit" (ml, L, g, kg, pcs, rolls), "Units per pack", "Does it have any of these labels?" with "Healthier Choice Symbol" and the dietary tags, then "Store", "Price (SGD)", "Observed date", "Product picture (required)", "Price evidence (optional)" and "Submit new product for review". Both ways close it. | ⭐ | Not done | |
+| NPR-01 | Open the dialog. Close it with ✕, then reopen it and press Esc. | The window opens below the green header, not at the very top of the screen. "Upload a new product" with "Product name", "Brand", "Category" (with suggestions), "Pack quantity", "Pack unit" (ml, L, g, kg, pcs, rolls), "Units per pack", "Does it have any of these labels?" with "Healthier Choice Symbol" (the Health Promotion Board symbol beside it) and the dietary tags, then "Store", "Price (SGD)", "Observed date", "Product picture (required)", "Price evidence (optional)" and "Submit new product for review". Both ways close it. | ⭐ | Not done | |
 | NPR-02 | Fill in every field correctly, but add no product picture. Submit. | "A product picture is required for every new product." | ⭐ | Not done | |
 | NPR-03 | Fill in Brand and Category. Set Product name to "x", leave Pack quantity empty, and set Units per pack to `1.5`. Submit. | One message: "Product name must be 2–120 characters; Pack quantity must be more than 0 and at most 100000; Units per pack must be a whole number from 1 to 100". There are no field codes (like `packQty:`) and no "Too small" or "Invalid input". | ⭐ | Not done | Fixed 4 Nov: it used to show the validation library's own messages. |
 | NPR-04 | With valid product fields, leave Store empty and set the price to `0`. Submit. | "Choose a store; Price must be greater than $0" | | Not done | |
@@ -177,8 +178,9 @@ Log in as a contributor, open `/contribute` and click "Upload a new product". Us
 | NPR-14 | Open `/contribute` in two tabs. An admin approves the request. Click Delete on it in the tab that hasn't refreshed. | "This product request is already approved." The list refreshes, showing it approved. | | Not done | |
 | NPR-15 | After an admin approves your request (ADR-03), look at it in your list. | "{name} · Approved" and "Added to the catalog. Public prices update after nightly aggregation; reload Search or Smart Basket to see the product." There's no Delete button. | ⭐ | Not done | |
 | NPR-16 | After an admin rejects your request (ADR-05), look at it in your list. | "{name} · Rejected" and "Rejection reason: {reason}". There's no Delete button. | ⭐ | Not done | |
-| NPR-17 | With no requests yet, look at "Your product submissions". Then click "Refresh product submissions". | "New product submissions will appear here." Refresh reloads the list. | | Not done | |
+| NPR-17 | Open `/contribute` and watch "Your product submissions" as the page loads. Then click "Refresh product submissions". | While it loads: a spinner and "Loading your product submissions…", never "New product submissions will appear here." for an account that has requests. With none: "New product submissions will appear here." On refresh the button's icon spins and the button is disabled until the list comes back; any requests stay on screen, faded, meanwhile. | | Not done | Spinner added 6 Nov. |
 | NPR-18 | Propose an 11th product within 24 hours. | "You can propose up to 10 new products a day. Please try again tomorrow." | | Not done | Delete the test requests afterwards. |
+| NPR-19 | In "Upload a new product", click the Healthier Choice Symbol picture, then click it again. As an admin, open a request's corrections. | Clicking the symbol ticks and unticks "Healthier Choice Symbol". The admin's correction form shows the same symbol. | | Not done | Added 6 Nov. |
 
 ## 7. Admin: price review
 
@@ -265,6 +267,7 @@ The 6 Nov redesign, from the UI wireframes: logo green, a dark-green header band
 | LOOK-06 | On an Android phone, open the site in Chrome. | The browser's address bar is dark green. | | Not done | |
 | LOOK-07 | Paste the site's link into a chat app that shows previews. | The preview reads "Compare grocery prices at FairPrice, Sheng Siong and Cold Storage, find the cheapest store for your whole basket, and share prices you spot." | | Not done | |
 | LOOK-08 | In a browser without Inter or Nunito installed (e.g. a phone), open the site. In the network tools, filter by "Font". | Text is in Inter, and headings, product names and prices in the rounded Nunito. The font files load from the site itself. | | Not done | Both fonts are bundled since 6 Nov. |
+| LOOK-09 | On a page long enough to scroll, open each window in turn: Log in, Register, "Upload a new product", a product's details and enlarged picture on Search, and Healthier choices and an enlarged picture on Smart basket. Scroll with the mouse wheel or a finger, inside the window and over the dimmed page, including past the end of the window's content. | The page behind never moves; only the window's own content scrolls. Closing the window leaves the page where it was, without jumping sideways. | ⭐ | Not done | Added 6 Nov. |
 
 ## Running the automated tests
 
@@ -275,7 +278,7 @@ python tests\run_all.py
 ```
 
 - **By default** it runs the backend unit tests (`pytest`), the frontend unit tests (`npm test`) and the template check (`sam validate --lint`). Nothing is sent to AWS.
-- **`--aws`** also runs the end-to-end smoke test and the Smart Basket evaluation against dev. They need AWS credentials in the terminal.
+- **`--aws`** also runs the end-to-end smoke test and the Smart Basket evaluation against dev. They need valid keys for the team account: set `$env:AWS_PROFILE = "<your profile>"` and `$env:AWS_REGION = "ap-southeast-1"` first, and check them with `aws sts get-caller-identity`. The keys are temporary and copied from the AWS access portal; when they expire, copy fresh ones as in [docs/deployment.md §2](../deployment.md#2-one-time-setup). `aws sso login` doesn't apply to these keys.
 - **`--only backend,frontend`** runs just the named suites (backend, frontend, lint, smoke, basket).
 - A suite whose tool isn't installed shows `Skipped` with what to set up. For example, the frontend tests need `npm ci` in `frontend/` once.
 - The script exits with an error if any suite failed.
