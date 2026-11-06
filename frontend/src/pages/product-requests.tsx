@@ -1,3 +1,4 @@
+import { LoaderCircle, RefreshCw } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { useAuth } from "../auth/auth-context"
 import { FormAlert } from "../components/auth/form-alert"
@@ -9,6 +10,10 @@ import { contributionSchema, earliestObservedDate, packUnits, productCorrections
 import { SubmissionServiceError } from "../contributions/service"
 import type { CatalogRetailer, ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 import { formatCents } from "../lib/format"
+import { inputClass } from "../lib/styles"
+import { cn } from "../lib/utils"
+import { Select } from "../components/ui/select"
+import hcsSymbol from "../../assets/brand/healthier-choice-symbol.png"
 
 const emptyProduct: ProductFields = { name: "", brand: "", category: "", packQty: 0, packUnit: "ml", packCount: 1, hcs: false, dietary: [] }
 type Facets = { categories: string[]; dietary: string[] }
@@ -27,11 +32,12 @@ function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFiel
     </div>)}
     <datalist id={`${prefix}-categories`}>{facets.categories.map((category) => <option key={category} value={category} />)}</datalist>
     <div className="space-y-2"><Label htmlFor={`${prefix}-qty`}>Pack quantity</Label><Input id={`${prefix}-qty`} type="number" step="any" min="0.001" max="100000" required value={value.packQty || ""} onChange={(e) => set("packQty", Number(e.target.value))} /></div>
-    <div className="space-y-2"><Label htmlFor={`${prefix}-unit`}>Pack unit</Label><select id={`${prefix}-unit`} className="h-11 w-full rounded-md border bg-background px-3" value={value.packUnit} onChange={(e) => set("packUnit", e.target.value as ProductFields["packUnit"])}>{packUnits.map((unit) => <option key={unit}>{unit}</option>)}</select></div>
+    <div className="space-y-2"><Label htmlFor={`${prefix}-unit`}>Pack unit</Label><Select id={`${prefix}-unit`} value={value.packUnit} onChange={(e) => set("packUnit", e.target.value as ProductFields["packUnit"])}>{packUnits.map((unit) => <option key={unit}>{unit}</option>)}</Select></div>
     <div className="space-y-2"><Label htmlFor={`${prefix}-count`}>Units per pack</Label><Input id={`${prefix}-count`} type="number" min="1" max="100" step="1" required value={value.packCount || ""} onChange={(e) => set("packCount", Number(e.target.value))} /></div>
     <section className="space-y-4 rounded-xl border bg-accent/30 p-5 sm:col-span-2" aria-label="Product labels">
-      <h3 className="text-lg font-semibold">Does it have any of these labels?</h3>
-      <label className="flex min-h-12 items-center gap-3"><input type="checkbox" checked={value.hcs} onChange={(e) => set("hcs", e.target.checked)} />Healthier Choice Symbol</label>
+      <h3 className="font-display text-lg font-extrabold">Does it have any of these labels?</h3>
+      {/* The symbol itself, so contributors can match it to the pack. Decorative: the text names the checkbox. */}
+      <label className="flex min-h-12 items-center gap-3"><input type="checkbox" checked={value.hcs} onChange={(e) => set("hcs", e.target.checked)} /><img src={hcsSymbol} alt="" aria-hidden="true" className="size-11 shrink-0" />Healthier Choice Symbol</label>
       <p className="text-sm text-muted-foreground">Select only claims shown on the packaging. Unselected dietary tags are not suitability advice. Claims will be reviewed by an administrator.</p>
       <div className="grid gap-3 sm:grid-cols-2">{tags.map((tag) => <label key={tag} className="flex min-h-12 items-center gap-3 rounded-lg border p-3"><input type="checkbox" checked={value.dietary.includes(tag)} disabled={value.dietary.length >= 5 && !value.dietary.includes(tag)} onChange={(e) => set("dietary", e.target.checked ? [...value.dietary, tag] : value.dietary.filter((t) => t !== tag))} />{tag}</label>)}</div>
       <p className="text-sm text-muted-foreground">Choose up to five dietary tags.</p>
@@ -111,7 +117,7 @@ export function ProductRequestForm({ service, onDone, onExisting }: { service: S
     <fieldset disabled={busy || !ready} className="space-y-6">
       <ProductEditor value={product} onChange={setProduct} facets={facets} prefix="new-product" />
       <div className="grid gap-5 sm:grid-cols-3">
-        <div className="space-y-2"><Label htmlFor="request-store">Store</Label><select id="request-store" value={storeId} onChange={(e) => setStoreId(e.target.value)} className="h-11 w-full rounded-md border bg-background px-3"><option value="">Choose a store</option>{stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div className="space-y-2"><Label htmlFor="request-store">Store</Label><Select id="request-store" value={storeId} onChange={(e) => setStoreId(e.target.value)}><option value="">Choose a store</option>{stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></div>
         <div className="space-y-2"><Label htmlFor="request-price">Price (SGD)</Label><Input id="request-price" type="number" min="0.01" max="1000" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
         <div className="space-y-2"><Label htmlFor="request-date">Observed date</Label><Input id="request-date" type="date" min={earliestObservedDate()} max={singaporeDateString()} value={date} onChange={(e) => setDate(e.target.value)} /></div>
       </div>
@@ -133,14 +139,23 @@ export function ProductRequestHistory({ service, refreshKey }: { service: Submis
   const [items, setItems] = useState<ProductRequest[]>([])
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  // True until the first list arrives, and while any refresh is in flight.
+  const [loading, setLoading] = useState(true)
+  const loadsInFlight = useRef(0)
   const historyVersion = useRef(0)
   const load = useCallback(async (message: string | null = null) => {
     const version = ++historyVersion.current
+    loadsInFlight.current += 1
+    setLoading(true)
     try {
       const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
       const records = await service.listMyProductRequests(user.id, token)
       if (version === historyVersion.current) { setItems(records); setError(message) }
     } catch (e) { if (version === historyVersion.current) setError(message ? `${message} Could not refresh the list: ${errorText(e)}` : errorText(e)) }
+    finally {
+      loadsInFlight.current -= 1
+      if (loadsInFlight.current === 0) setLoading(false)
+    }
   }, [service, user, getAccessToken])
   async function deletePending(id: string) {
     if (deletingId || !window.confirm("Delete this request? Its product picture and price evidence photo will be removed too. This cannot be undone.")) return
@@ -158,12 +173,14 @@ export function ProductRequestHistory({ service, refreshKey }: { service: Submis
     } finally { setDeletingId(null) }
   }
   useEffect(() => { async function fetchHistory() { await load() } void fetchHistory() }, [load, refreshKey])
-  return <section className="glass-panel space-y-5 p-5 sm:p-7" aria-label="Your product submissions">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">Your product submissions</h2><Button variant="outline" disabled={deletingId !== null} onClick={() => void load()}>Refresh product submissions</Button></div>
+  return <section className="surface-card space-y-5 p-5 sm:p-7" aria-label="Your product submissions" aria-busy={loading}>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-xl font-extrabold">Your product submissions</h2><Button variant="outline" disabled={deletingId !== null || loading} onClick={() => void load()}><RefreshCw className={cn("size-4", loading && "animate-spin")} aria-hidden="true" />Refresh product submissions</Button></div>
     <FormAlert message={error} />
-    {items.length === 0 && <p className="text-sm text-muted-foreground">New product submissions will appear here.</p>}
-    <div className="grid gap-4">{items.map((item) => <article key={item.id} className="space-y-3 rounded-xl border p-4">
-      <h3 className="font-semibold">{item.name} · <span className="capitalize">{item.status}</span></h3>
+    {items.length === 0 && (loading
+      ? <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />Loading your product submissions…</p>
+      : <p className="text-sm text-muted-foreground">New product submissions will appear here.</p>)}
+    <div className={cn("grid gap-4 transition-opacity", loading && items.length > 0 && "opacity-60")}>{items.map((item) => <article key={item.id} className="space-y-3 rounded-xl border p-4">
+      <h3 className="font-display font-extrabold">{item.name} · <span className="capitalize">{item.status}</span></h3>
       <p>{item.brand} · {item.packCount} × {item.packQty} {item.packUnit} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)}</p>
       <RequestImages item={item} admin={false} refresh={() => void load()} />
       {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
@@ -203,7 +220,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
     } finally { setBusy(false) }
   }
   return <article className="space-y-5 rounded-xl border p-5">
-    <h3 className="text-lg font-semibold">{item.name} · {item.status}</h3>
+    <h3 className="font-display text-lg font-extrabold">{item.name} · {item.status}</h3>
     <p className="text-sm">{item.submitterName ?? item.userId} {item.submitterEmail} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)} · observed {singaporeDateString(new Date(item.observedAt))}</p>
     <RequestImages item={item} admin refresh={() => void refresh()} />
     <FormAlert message={error} />
@@ -214,7 +231,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
       <div className="grid gap-4 sm:grid-cols-2">{([["Minimum cents", min, setMin], ["Maximum cents", max, setMax]] as const).map(([label, value, set]) => <label key={label} className="space-y-2">{label}<Input type="number" min="1" max="100000" step="1" value={value || ""} onChange={(e) => set(Number(e.target.value))} /></label>)}</div>
       <label className="block space-y-2">Search terms (comma separated)<Input value={terms} onChange={(e) => setTerms(e.target.value)} /></label>
       <label className="flex min-h-12 items-start gap-3 rounded-xl border bg-accent/40 p-4"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /><span>I reviewed the packaging, product fields, HCS and dietary claims, and price range. Correct unsupported claims before approval. If evidence is unclear, leave the request pending or reject it with a reason.</span></label>
-      <label className="block space-y-2">Reason for rejection<textarea maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className="min-h-24 w-full rounded-md border bg-background p-3" /></label>
+      <label className="block space-y-2">Reason for rejection<textarea maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className={cn(inputClass, "h-auto min-h-24 resize-y")} /></label>
       <div className="flex flex-wrap gap-3"><Button disabled={!checked} onClick={() => void decide("approved")}>Approve product</Button><Button variant="destructive" onClick={() => void decide("rejected")}>Reject product</Button></div>
     </fieldset>}
   </article>
@@ -237,9 +254,9 @@ export function ProductRequestReview({ service }: { service: SubmissionService }
     } catch (e) { if (currentLoad === loadId.current) setError(errorText(e)) }
   }, [service, status, user, getAccessToken])
   useEffect(() => { async function fetchQueue() { await load() } void fetchQueue(); const timer = window.setInterval(() => void load(), 4 * 60_000); return () => window.clearInterval(timer) }, [load])
-  return <section className="glass-panel space-y-5 p-5 sm:p-7" aria-label="Product request review">
-    <div className="flex flex-wrap items-center justify-between gap-4"><h2 className="text-xl font-semibold">Review new product requests</h2><Button variant="outline" onClick={() => void load()}>Refresh request queue</Button></div>
-    <label className="block space-y-2">Request status<select value={status} onChange={(e) => { setItems([]); setStatus(e.target.value as ProductRequestStatus) }} className="ml-3 rounded-md border bg-background p-2">{["pending", "approved", "rejected"].map((s) => <option key={s}>{s}</option>)}</select></label>
+  return <section className="surface-card space-y-5 p-5 sm:p-7" aria-label="Product request review">
+    <div className="flex flex-wrap items-center justify-between gap-4"><h2 className="font-display text-xl font-extrabold">Review new product requests</h2><Button variant="outline" onClick={() => void load()}>Refresh request queue</Button></div>
+    <label className="flex max-w-xs flex-col gap-1.5 text-sm font-semibold">Request status<Select value={status} onChange={(e) => { setItems([]); setStatus(e.target.value as ProductRequestStatus) }} className="capitalize">{["pending", "approved", "rejected"].map((s) => <option key={s}>{s}</option>)}</Select></label>
     <FormAlert message={error} />
     {items.length === 0 && <p>No {status} product requests.</p>}
     {items.map((item) => <RequestReviewCard key={item.id} item={item} service={service} facets={facets} refresh={load} notify={setError} />)}

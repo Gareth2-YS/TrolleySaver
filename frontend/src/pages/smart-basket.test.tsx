@@ -154,6 +154,51 @@ describe("smart basket page", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
+  it("offers the healthier basket and swaps every item in it at once", async () => {
+    const user = userEvent.setup()
+    const all: Product[] = [
+      ...products,
+      { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false },
+      { id: "lowfat", name: "Low Fat Milk", brand: "Marigold", category: "milk", packQty: 1, packUnit: "L", hcs: true },
+    ]
+    const prices: PriceTable = { ...fullPrices, white: { a: at(260), b: at(250), c: at(270) }, bread: { a: at(330), b: at(320), c: at(340) }, lowfat: { a: at(380), b: at(350), c: at(410) } }
+    // What the API sends: the healthier basket swaps white bread and fresh milk; rice has no Healthier Choice option.
+    const swapTo: Record<string, string> = { white: "bread", milk: "lowfat" }
+    const compare = vi.fn().mockImplementation(async (items: BasketItem[]) => {
+      const basket = compareBasket(items, all, retailers, prices)
+      const swapped = compareBasket(items.map((item) => ({ ...item, productId: swapTo[item.productId] ?? item.productId })), all, retailers, prices)
+      const healthierBasket = {
+        ...swapped,
+        stores: swapped.stores.map((store) => ({ ...store, lines: store.lines.map((line) => {
+          const from = items.find((item) => swapTo[item.productId] === line.productId)
+          return from ? { ...line, replacesProductId: from.productId } : line
+        }) })),
+        swaps: items.map((item) => ({ originalProductId: item.productId, originalName: null, category: null, status: swapTo[item.productId] ? "swapped" as const : "no-hcs-option" as const })),
+      }
+      const extraCents = swapped.recommendation!.totalCents - basket.recommendation!.totalCents
+      const healthierExtra = { basketTotalCents: basket.recommendation!.totalCents, healthierTotalCents: swapped.recommendation!.totalCents, extraCents, extraPercent: Math.round((extraCents / basket.recommendation!.totalCents) * 1000) / 10 }
+      return { priceMaxAgeDays: 30, basket, healthierBasket, healthierExtra }
+    })
+    localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "white", quantity: 2 }, { productId: "milk", quantity: 1 }, { productId: "rice", quantity: 1 }]))
+    renderBasket(basketService(prices, { listProducts: vi.fn().mockResolvedValue(all), compare }))
+
+    // Basket at Beta: 2 × 2.50 + 3.60 + 18.60 = 27.20. Healthier at Beta: 2 × 3.20 + 3.50 + 18.60 = 28.50.
+    const offer = await screen.findByRole("group", { name: "Healthier basket at Beta Grocer" })
+    expect(offer).toHaveTextContent("Swaps in Wholemeal Bread, Low Fat Milk.")
+    expect(offer).toHaveTextContent("$28.50")
+    expect(offer).toHaveTextContent("$1.30 more (4.8%)")
+
+    await user.click(within(offer).getByRole("button", { name: "Swap 2 items" }))
+    expect(JSON.parse(localStorage.getItem("trolleysaver.basket.v1")!)).toEqual([{ productId: "bread", quantity: 2 }, { productId: "lowfat", quantity: 1 }, { productId: "rice", quantity: 1 }])
+    expect(screen.getByText("Swapped from White Bread")).toBeInTheDocument()
+    expect(screen.getByText("Swapped from Fresh Milk")).toBeInTheDocument()
+    // Nothing left to swap, so the offer goes; each swap can still be undone on its own.
+    await waitFor(() => expect(screen.queryByRole("group", { name: /Healthier basket/ })).not.toBeInTheDocument())
+    await user.click(screen.getByRole("button", { name: "Undo swap back to White Bread" }))
+    expect(screen.getByLabelText("White Bread quantity")).toHaveTextContent("2")
+    expect(screen.getByLabelText("Low Fat Milk quantity")).toHaveTextContent("1")
+  })
+
   it("undoes a capped merge back to the basket as it was", async () => {
     const user = userEvent.setup()
     const withWhiteBread: Product[] = [...products, { id: "white", name: "White Bread", brand: "Gardenia", category: "bread", packQty: 400, packUnit: "g", hcs: false }]

@@ -35,6 +35,8 @@ export interface BasketLine {
   unitPriceCents: number
   subtotalCents: number
   observedAt: string
+  // On a healthier basket's line: the basket product this Healthier Choice product replaces.
+  replacesProductId?: string
 }
 
 export interface BasketStore {
@@ -68,9 +70,28 @@ export interface BasketComparison {
   maxSavingsCents: number | null
 }
 
+export interface HealthierSwap {
+  originalProductId: string
+  originalName: string | null
+  category: string | null
+  status: "swapped" | "already-hcs" | "no-hcs-option"
+}
+
+export interface HealthierExtra {
+  basketTotalCents: number
+  healthierTotalCents: number
+  // How much more the healthier basket's best store costs than the basket's; negative when it's cheaper.
+  extraCents: number
+  extraPercent: number
+}
+
 export interface BasketResult {
   priceMaxAgeDays: number
   basket: BasketComparison
+  // The same basket with each product swapped for a Healthier Choice one where possible. The API sends
+  // both; the local demo mode leaves them out.
+  healthierBasket?: (BasketComparison & { swaps: HealthierSwap[] }) | null
+  healthierExtra?: HealthierExtra | null
 }
 
 export interface BasketService {

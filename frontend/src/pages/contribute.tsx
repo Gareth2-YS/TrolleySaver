@@ -36,9 +36,12 @@ import {
 import { createSubmissionService, SubmissionServiceError } from "../contributions/service"
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, SubmissionService, SubmissionStatus } from "../contributions/types"
 import { formatDollars } from "../lib/format"
+import { inputClass } from "../lib/styles"
+import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
+import { PageHeader } from "../components/layout/page-header"
+import { Select } from "../components/ui/select"
 
-const selectClass = "flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`))
@@ -107,7 +110,7 @@ function SubmissionDetails({ submission }: { submission: PriceSubmission }) {
   return (
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <h3 className="font-semibold leading-snug">{submission.productName}</h3>
+        <h3 className="font-display font-extrabold leading-snug">{submission.productName}</h3>
         <StatusBadge status={submission.status} />
       </div>
       <p className="mt-2 text-2xl font-semibold tabular-nums text-primary">
@@ -128,10 +131,10 @@ function SubmissionDetails({ submission }: { submission: PriceSubmission }) {
 
 function ReviewPathCard() {
   return (
-    <aside className="glass-panel p-5 sm:p-6">
+    <aside className="surface-card p-5 sm:p-6">
       <div className="flex items-center gap-3">
         <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><ListChecks className="size-5" /></span>
-        <div><h2 className="font-semibold">From shelf to review</h2><p className="text-xs text-muted-foreground">A simple three-step flow</p></div>
+        <div><h2 className="font-display font-extrabold">From shelf to review</h2><p className="text-xs text-muted-foreground">A simple three-step flow</p></div>
       </div>
       <ol className="mt-5 grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
         {[["1", "Add details"], ["2", "Attach proof"], ["3", "Track status"]].map(([step, label]) => (
@@ -148,13 +151,14 @@ function ReviewPathCard() {
 function NewProductDialog({ service, onClose, onExisting }: { service: SubmissionService; onClose: () => void; onExisting: (id: string) => Promise<void> }) {
   const dialog = useRef<HTMLDialogElement>(null)
   useEffect(() => { dialog.current?.showModal() }, [])
-  return <dialog ref={dialog} onClose={onClose} aria-labelledby="new-product-title" className="m-auto max-h-[90vh] w-[min(1280px,95vw)] overflow-y-auto rounded-2xl border bg-background p-5 text-foreground shadow-xl backdrop:bg-black/50">
-    <div className="mb-5 flex items-center justify-between"><h2 id="new-product-title" className="text-xl font-semibold">Upload a new product</h2><Button variant="ghost" onClick={() => dialog.current?.close()} aria-label="Close new product upload"><X className="size-4" /></Button></div>
+  return <dialog ref={dialog} onClose={onClose} aria-labelledby="new-product-title" className="mx-auto mb-auto mt-6 max-h-[calc(100dvh-3rem)] w-[min(1280px,95vw)] overflow-y-auto rounded-2xl border bg-card p-5 text-card-foreground shadow-xl backdrop:bg-black/50 sm:mt-24 sm:max-h-[calc(100dvh-8rem)] sm:p-7">
+    <div className="mb-5 flex items-center justify-between"><h2 id="new-product-title" className="font-display text-xl font-extrabold">Upload a new product</h2><Button variant="ghost" onClick={() => dialog.current?.close()} aria-label="Close new product upload"><X className="size-4" /></Button></div>
     <ProductRequestForm service={service} onDone={() => dialog.current?.close()} onExisting={onExisting} />
   </dialog>
 }
 
 function ContributorWorkspace({ service }: { service: SubmissionService }) {
+  usePageTitle("Price & image upload")
   const { user, getAccessToken } = useAuth()
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
   const [products, setProducts] = useState<CatalogProduct[]>([])
@@ -327,17 +331,10 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <header className="grid items-end gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="pb-1">
-          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Contributor workspace</span>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Share a price you spotted</h1>
-          <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Found a price worth sharing? Pass it on and help another shopper make their next grocery trip a little easier.
-          </p>
-        </div>
-        <ReviewPathCard />
-      </header>
-      <div className="glass-panel flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"><div><h2 className="text-lg font-semibold">Found something new?</h2><p className="mt-1 text-sm text-muted-foreground">Help fellow shoppers discover it. Add a product we don’t have yet.</p></div><Button variant="outline" onClick={() => setShowNewProduct(true)}><ImageUp className="size-4" />Upload a new product</Button></div>
+      <PageHeader title="Share a price you spotted" description="Found a price worth sharing? Pass it on and help another shopper make their next grocery trip a little easier.">
+        <div className="min-w-0 flex-[1_1_340px]"><ReviewPathCard /></div>
+      </PageHeader>
+      <div className="surface-card flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"><div><h2 className="font-display text-lg font-extrabold">Found something new?</h2><p className="mt-1 text-sm text-muted-foreground">Help fellow shoppers discover it. Add a product we don’t have yet.</p></div><Button variant="outline" onClick={() => setShowNewProduct(true)}><ImageUp className="size-4" />Upload a new product</Button></div>
       {showNewProduct && <NewProductDialog onExisting={async (id) => {
         const catalog = await service.listProducts()
         const canonical = catalog.find((p) => p.id === id)
@@ -347,10 +344,10 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       <FormAlert message={loadError} />
       <form onSubmit={handleSubmit(submit)} noValidate className="grid items-stretch gap-5 lg:grid-cols-12">
         <div className="contents">
-        <section className="glass-panel p-5 sm:p-7 lg:col-span-7">
+        <section className="surface-card p-5 sm:p-7 lg:col-span-7">
           <div className="flex items-center gap-3 border-b border-border/70 pb-5">
             <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Store className="size-5" /></span>
-            <div><h2 className="text-xl font-semibold">Price details</h2><p className="mt-1 text-sm text-muted-foreground">What did you spot, and where?</p></div>
+            <div><h2 className="font-display text-xl font-extrabold">Price details</h2><p className="mt-1 text-sm text-muted-foreground">What did you spot, and where?</p></div>
           </div>
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
 
@@ -413,9 +410,8 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="product-category">Optional type filter</Label>
-                  <select
+                  <Select
                     id="product-category"
-                    className={selectClass}
                     value={productCategory}
                     disabled={loading || productCategories.length === 0}
                     onChange={(event) => {
@@ -437,12 +433,12 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
                     {productCategories.map((category) => (
                       <option key={category} value={category}>{category.charAt(0).toLocaleUpperCase() + category.slice(1)}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
               {showProductOptions && (
-                <div className="overflow-hidden rounded-md border bg-popover shadow-lg">
+                <div className="overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg">
                   {filteredProducts.length > 0 ? (
                     <div id="product-options" role="listbox" aria-label="Matching products" className="max-h-64 overflow-y-auto py-1">
                       {filteredProducts.map((product, index) => (
@@ -482,10 +478,10 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor={fieldId("store")}>Store</Label>
-              <select id={fieldId("store")} className={selectClass} disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
+              <Select id={fieldId("store")} disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
                 <option value="">{loading ? "Loading stores…" : "Select a store"}</option>
                 {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
-              </select>
+              </Select>
               <FieldError>{errors.storeId?.message}</FieldError>
             </div>
             <div className="space-y-2">
@@ -507,16 +503,16 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 
         </div>
 
-        <section className="glass-panel flex min-w-0 flex-col p-5 sm:p-7 lg:col-span-5">
+        <section className="surface-card flex min-w-0 flex-col p-5 sm:p-7 lg:col-span-5">
           <div className="flex items-start justify-between gap-4 border-b border-border/70 pb-5">
             <div className="flex items-center gap-3">
               <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Camera className="size-5" /></span>
-              <div><h2 className="text-xl font-semibold">Show the price you spotted</h2><p className="mt-2 inline-flex rounded-full bg-accent px-3 py-1 text-sm font-medium text-primary">Photo optional</p></div>
+              <div><h2 className="font-display text-xl font-extrabold">Show the price you spotted</h2><p className="mt-2 inline-flex rounded-full bg-accent px-3 py-1 text-sm font-medium text-primary">Photo optional</p></div>
             </div>
             {file && <Button type="button" variant="ghost" size="sm" onClick={clearImage}><X className="size-4" />Remove</Button>}
           </div>
           <div id={fieldId("evidence-help")} className="mt-5 rounded-xl border border-primary/20 bg-accent/40 p-4">
-            <h3 className="text-lg font-semibold">A clear price helps everyone.</h3>
+            <h3 className="font-display text-lg font-extrabold">A clear price helps everyone.</h3>
             <p className="mt-2 text-base leading-relaxed text-muted-foreground">Share a shelf label or receipt with the product name and price in focus, so the next shopper can buy with confidence.</p>
             <ul className="mt-4 flex flex-wrap gap-2" aria-label="Photo reminders">
               {["Product name", "Readable price"].map((reminder) => <li key={reminder} className="inline-flex items-center gap-1.5 rounded-lg bg-card/65 px-2.5 py-2 text-sm font-medium"><Check className="size-4 shrink-0 text-primary" />{reminder}</li>)}
@@ -553,7 +549,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           )}
         </section>
 
-        <div className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-12">
+        <div className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-12">
           <div className="flex items-center gap-3 text-sm">
             <span className="grid size-9 place-items-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="size-4" /></span>
             <span><strong className="block text-base">Small contribution. Shared savings.</strong><span className="mt-1 block text-sm text-muted-foreground">Usual prices are accepted automatically. Unusual prices get an administrator review. Public prices update after nightly aggregation.</span></span>
@@ -570,11 +566,11 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 
       <div className="grid items-start gap-6 lg:grid-cols-2">
       <ProductRequestHistory service={service} refreshKey={showNewProduct} />
-      <section className="glass-panel min-w-0 p-5 sm:p-7">
+      <section className="surface-card min-w-0 p-5 sm:p-7">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Clock3 className="size-5" /></span>
-            <div><h2 className="text-xl font-semibold">Your price submissions</h2><p className="text-xs text-muted-foreground">Track every price contribution from newest to oldest</p></div>
+            <div><h2 className="font-display text-xl font-extrabold">Your price submissions</h2><p className="text-xs text-muted-foreground">Track every price contribution from newest to oldest</p></div>
           </div>
           <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">{submissions.length} total</span>
         </div>
@@ -601,6 +597,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 }
 
 function AdminWorkspace({ service }: { service: SubmissionService }) {
+  usePageTitle("Review price evidence")
   const { user, getAccessToken } = useAuth()
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
   const [loading, setLoading] = useState(true)
@@ -667,26 +664,19 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <header className="grid items-end gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="pb-1">
-          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Administrator workspace</span>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Review price evidence</h1>
-          <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Help the community shop with confidence. Match each price to its photo, and give new finds a careful first look.
-          </p>
-        </div>
-        <aside className="glass-panel flex items-center justify-between p-5">
+      <PageHeader title="Review price evidence" description="Help the community shop with confidence. Match each price to its photo, and give new finds a careful first look.">
+        <aside className="surface-card flex flex-[1_1_280px] items-center justify-between p-5">
           <span className="grid size-12 place-items-center rounded-xl bg-accent text-primary"><ShieldCheck className="size-6" /></span>
-          <div className="text-right"><strong className="block text-3xl font-semibold tabular-nums">{loading ? "—" : submissions.length}</strong><span className="text-xs text-muted-foreground">Awaiting review</span></div>
+          <div className="text-right"><strong className="block font-display text-4xl font-extrabold tabular-nums">{loading ? "—" : submissions.length}</strong><span className="text-xs text-muted-foreground">Awaiting review</span></div>
         </aside>
-      </header>
+      </PageHeader>
 
       <FormAlert message={error} />
       <ProductRequestReview service={service} />
 
-      <section className="glass-panel p-5 sm:p-7">
+      <section className="surface-card p-5 sm:p-7">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h2 className="text-xl font-semibold">Products and prices awaiting review</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
+          <div><h2 className="font-display text-xl font-extrabold">Products and prices awaiting review</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
           <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">Administrator only</span>
         </div>
         <div className="mt-6 space-y-5" aria-live="polite">
@@ -716,7 +706,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
                       value={reason}
                       maxLength={500}
                       onChange={(event) => setReason(event.target.value)}
-                      className="mt-2 min-h-24 w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={cn(inputClass, "mt-2 h-auto min-h-24 resize-y")}
                       placeholder="Explain what needs to be corrected"
                     />
                     <p className="mt-2 text-xs text-muted-foreground">This helps the contributor understand the decision.</p>
