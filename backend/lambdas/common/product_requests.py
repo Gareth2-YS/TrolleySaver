@@ -202,30 +202,31 @@ def find_existing_product(fields):
     return None
 
 
-def to_record(item, retailers, users=None, admin=False):
-    """A request as the API shows it. Contributors see their own product picture; only admins get the
-    submitter's name and email and a link to the evidence photo."""
+def to_record(item, retailers, users=None, admin=False, own=False):
+    """A request as the API shows it. Contributors see their own product picture. Admins and the
+    request's own contributor (`own`) get a link to the evidence photo; only admins get the submitter's
+    name and email."""
     record = {k: v for k, v in item.items() if k != "duplicateKey"}
     record["id"] = item["requestId"]
     record["retailerName"] = (retailers.get(item["retailerId"]) or {}).get("name")
     if item.get("productImageKey"):
         record["productImageUrl"] = signed_url(item["productImageKey"], PRODUCT_IMAGE_URL_TTL_SECONDS)
+    if (admin or own) and item.get("photoKey"):
+        record["photoUrl"] = signed_url(item["photoKey"], EVIDENCE_URL_TTL_SECONDS)
     if admin:
         submitter = (users or {}).get(item["userId"]) or {}
         record["submitterName"] = submitter.get("displayName")
         record["submitterEmail"] = submitter.get("email")
-        if item.get("photoKey"):
-            record["photoUrl"] = signed_url(item["photoKey"], EVIDENCE_URL_TTL_SECONDS)
         if item.get("status") == "pending":
             record["suggestedMinCents"], record["suggestedMaxCents"] = suggested_range(int(item["priceCents"]))
     return record
 
 
-def to_records(items, admin=False):
+def to_records(items, admin=False, own=False):
     if not items:
         return []
     retailers = db.batch_get(db.retailers(), "id", [i["retailerId"] for i in items], ["id", "name"])
     users = None
     if admin:
         users = db.batch_get(db.users(), "userId", [i["userId"] for i in items], ["userId", "displayName", "email"])
-    return [to_record(i, retailers, users, admin) for i in items]
+    return [to_record(i, retailers, users, admin, own) for i in items]

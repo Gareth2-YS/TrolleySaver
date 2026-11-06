@@ -184,7 +184,7 @@ def test_optional_evidence_photo_is_checked_and_kept(aws):
     evidence = f"price-evidence/{USER_ID}/new-product/shelf.png"
     put_photo(evidence)
     status, record = create(valid_request(photoKey=evidence))
-    assert status == 201 and record["photoKey"] == evidence and "photoUrl" not in record
+    assert status == 201 and record["photoKey"] == evidence and record["photoUrl"].startswith("https://")  # its owner can see it
 
 
 def test_evidence_photo_must_come_from_the_new_product_folder(aws):
@@ -571,3 +571,13 @@ def test_product_and_price_photo_upload_links_share_one_hourly_allowance(aws, mo
     assert call(price_upload_url.handler, api_event("POST", "/price-submissions/image-upload-url", price_photo))[0] == 200
     status, error = upload_url({**picture, "purpose": "evidence"})
     assert status == 429 and error["code"] == "UPLOAD_RATE_LIMITED"
+
+
+def test_owner_gets_a_link_to_their_own_evidence_photo_in_mine(aws):
+    put_photo(IMAGE_KEY)
+    evidence = f"price-evidence/{USER_ID}/new-product/e.png"
+    put_photo(evidence)
+    assert create(valid_request(photoKey=evidence))[0] == 201
+    status, body = mine()
+    assert status == 200 and body["items"][0]["photoUrl"].startswith("https://")
+    assert "submitterEmail" not in body["items"][0]  # admin-only details stay admin-only

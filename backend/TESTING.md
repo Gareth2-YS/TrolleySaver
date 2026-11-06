@@ -143,8 +143,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 282 tests of the Lambda code (including the Smart Basket, its daily prices, Search, new product requests, date and pagination rules, CORS, and the security checks: upload limits, image contents, hidden characters and sign-up rules) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `282 passed in …s`.
+**What it checks:** 292 tests of the Lambda code (including the Smart Basket, its daily prices, Search, new product requests, date and pagination rules, CORS, and the security checks: upload limits, image contents, hidden characters and sign-up rules) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `292 passed in …s`.
 
 ### 1.2 Template check
 
@@ -161,7 +161,7 @@ sam validate --lint
 ```
 
 **What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. It also checks CORS: API responses name only the local dev server and the deployed site, and the photo bucket accepts uploads from the site. Finally it proposes a new product with a picture, approves it and finds it in the catalog, and proposes a second one that its owner deletes while it's pending. Everything it created is deleted at the end, including the published product. Takes about a minute.
-**You should see:** 67 lines starting with `PASS`, then:
+**You should see:** 71 lines starting with `PASS`, then:
 
 ```
 PASS  deleting an approved request -> 409
@@ -290,24 +290,28 @@ HTTP 201
 
 ### 3.3 Submit an unusual price → flagged
 
+Each person gets one price per product and store a day, so this one is at another store:
+
 ```powershell
-.venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=fairprice --set priceCents=2000 --set observedAt=$today
+.venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=coldstorage --set priceCents=2000 --set observedAt=$today
 ```
 
-**You should see:** `HTTP 201` and `"status": "flagged"`. $20.00 is above the 548-cent maximum, so it waits for an admin (step 3.8).
+**You should see:** `HTTP 201` and `"status": "flagged"`. $20.00 is above the 548-cent maximum, so the system flags it and it waits for an admin (step 3.8).
 
-### 3.4 Submit the same price again → duplicate
+### 3.4 Submit again for the same product and store → duplicate
 
-Run the command from 3.2 again. **You should see:**
+Run the command from 3.2 again, then the same with `--set priceCents=370`. **You should see**, both times:
 
 ```
 HTTP 409
 {
   "code": "DUPLICATE_SUBMISSION",
-  "message": "You have already submitted this price for this product and store today.",
+  "message": "You've already submitted a price for this product at this store today.",
   "requestId": "…"
 }
 ```
+
+A different price doesn't help: it's one price per product and store a day. Only a rejected price (or a pending one its contributor deleted, step 3.8) frees the day.
 
 ### 3.5 Invalid input → field errors
 
@@ -377,7 +381,7 @@ saved photoKey=price-evidence/invoke-test-user/a2210900-d837-5e6d-bbbc-73dea4f80
 .venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=shengsiong --set priceCents=365 --set observedAt=$today --set photoKey=$photoKey
 ```
 
-**You should see:** `HTTP 201` and `"status": "accepted"`, plus `"photoKey"`, `"photoContentType": "image/png"` and `"photoSizeBytes": 1621`. There's **no `photoUrl`**: evidence photos are for admin verification only, so contributors never get a link to view them.
+**You should see:** `HTTP 201` and `"status": "accepted"`, plus `"photoKey"`, `"photoContentType": "image/png"` and `"photoSizeBytes": 1621`. There's also a long `"photoUrl"`: a 5-minute link so the contributor can see the photo they sent. Admins get one too (next step); nobody else does.
 
 **d. See the photo as an admin.** The price above was accepted, so it's in the admin list of accepted prices (newest first):
 
@@ -405,11 +409,11 @@ saved photoKey=price-evidence/invoke-test-user/a2210900-d837-5e6d-bbbc-73dea4f80
 .venv\Scripts\python scripts\invoke.py mine
 ```
 
-**You should see** `HTTP 200` and your three submissions, newest first (shortened here). The 365-cent one still shows its `photoKey`, so a page can say "evidence attached", but there's no `photoUrl`:
+**You should see** `HTTP 200` and your three submissions, newest first (shortened here). The 365-cent one has its `photoKey` and a 5-minute `photoUrl`, so the page can show your photo:
 
 ```
-"priceCents": 365,  "status": "accepted", "retailerName": "Sheng Siong", "photoKey": "price-evidence/invoke-test-user/a2210900-…/4b0f6d9d-….png"
-"priceCents": 2000, "status": "flagged",  "retailerName": "FairPrice"
+"priceCents": 365,  "status": "accepted", "retailerName": "Sheng Siong", "photoKey": "price-evidence/invoke-test-user/a2210900-…/4b0f6d9d-….png", "photoUrl": "https://trolleysaver-dev-photos-…"
+"priceCents": 2000, "status": "flagged",  "retailerName": "Cold Storage"
 "priceCents": 363,  "status": "accepted", "retailerName": "FairPrice"
 ```
 
@@ -455,6 +459,22 @@ $id = ((.venv\Scripts\python scripts\invoke.py review-queue --as admin | Select-
 
 Run `invoke.py mine` again: the 2000-cent item now shows `"status": "rejected"`.
 
+**Withdrawing a pending price.** A contributor can delete their own price while it's still flagged. Submit an unusual price for yesterday (today's FairPrice price is taken), then save its id, the newest in your list:
+
+```powershell
+$yesterday = (Get-Date).AddDays(-1).ToString("yyyy-MM-dd");
+.venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=fairprice --set priceCents=2000 --set observedAt=$yesterday;
+$pendingId = ((.venv\Scripts\python scripts\invoke.py mine | Select-Object -Skip 1) | Out-String | ConvertFrom-Json).items[0].id; "saved id=$pendingId"
+```
+
+→ `HTTP 201` with `"status": "flagged"`, then `saved id=…`. Delete it, then try again, then try the rejected one from above:
+
+| Command | You should see |
+|---|---|
+| `.venv\Scripts\python scripts\invoke.py delete-submission --id $pendingId` | `HTTP 204`. It's gone from `invoke.py mine`, with its photo if it had one. |
+| The same again | `HTTP 404`, `"code": "NOT_FOUND"` |
+| `.venv\Scripts\python scripts\invoke.py delete-submission --id $id` | `HTTP 409`, `"message": "This submission is already rejected."` Decided prices can't be deleted. |
+
 ### 3.9 Logged out
 
 ```powershell
@@ -465,10 +485,10 @@ Run `invoke.py mine` again: the 2000-cent item now shows `"status": "rejected"`.
 
 ### 3.10 Rate limit (optional, about 1 minute)
 
-Each user can submit 30 prices per hour. You already have 3, so of these 31 attempts, 27 should succeed and 4 be refused:
+Each user can submit 30 prices per hour. You already have 3, so of these 29 attempts (one a day for the last 29 days, so none is a duplicate), 27 should succeed and 2 be refused:
 
 ```powershell
-$codes = foreach ($cents in 400..430) { (.venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=coldstorage --set priceCents=$cents --set observedAt=$today)[0] };
+$codes = foreach ($days in 1..29) { $day = (Get-Date).AddDays(-$days).ToString("yyyy-MM-dd"); (.venv\Scripts\python scripts\invoke.py submit --set productId=$milk --set retailerId=coldstorage --set priceCents=400 --set observedAt=$day)[0] };
 $codes | Group-Object | ForEach-Object { "$($_.Name) x$($_.Count)" }
 ```
 
@@ -476,7 +496,7 @@ $codes | Group-Object | ForEach-Object { "$($_.Name) x$($_.Count)" }
 
 ```
 HTTP 201 x27
-HTTP 429 x4
+HTTP 429 x2
 ```
 
 ### 3.11 Clean up (always)
@@ -663,7 +683,7 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `282 passed`
+- [ ] 1.1: `pytest` shows `292 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products

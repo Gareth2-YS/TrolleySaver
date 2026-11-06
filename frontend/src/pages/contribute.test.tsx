@@ -252,17 +252,20 @@ describe("integrated product request screens", () => {
     expect(screen.queryByRole("button", { name: "Approve product" })).not.toBeInTheDocument()
   })
 
-  it("offers API deletion only for pending requests and keeps contributor evidence private", async () => {
+  it("offers deletion only for pending requests and prices, and shows contributors their own evidence photos", async () => {
     renderContribution("user", submissionService({ mode: "api", listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission]), listMyProductRequests: vi.fn().mockResolvedValue([
       requestRecord, { ...requestRecord, id: "approved", status: "approved", productId: "canonical" }, { ...requestRecord, id: "rejected", status: "rejected", rejectionReason: "Wrong packaging" },
     ]) }))
     expect(await screen.findByText("Wrong packaging", { exact: false })).toBeInTheDocument()
     expect(screen.getByText(/Added to the catalog/)).toBeInTheDocument()
-    expect(screen.getAllByText("Photo attached · visible to administrators")).toHaveLength(4)
-    expect(screen.queryByRole("img", { name: /Price evidence/ })).not.toBeInTheDocument()
+    // Contributors see the evidence photos they sent, on product requests and on prices.
+    expect(screen.getAllByRole("img", { name: "Price evidence for Oat milk" })).toHaveLength(3)
+    expect(screen.getAllByRole("img", { name: "Price evidence for Oat milk" })[0]).toHaveAttribute("src", requestRecord.photoUrl)
+    expect(screen.queryByText(/visible to administrators/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: `Enlarge image of Price evidence for ${flaggedSubmission.productName}` })).toBeInTheDocument()
     expect(screen.getAllByRole("img", { name: /Product picture/ })).toHaveLength(3)
     expect(screen.getAllByRole("button", { name: "Delete pending product request" })).toHaveLength(1)
-    expect(screen.queryByRole("button", { name: "Delete pending submission" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Delete pending price submission" })).toHaveLength(1)
   })
 
   it("sends selected product and retailer for an existing-product evidence upload", async () => {
@@ -273,7 +276,6 @@ describe("integrated product request screens", () => {
     await user.upload(screen.getByLabelText("Price evidence photo"), new File(["image"], "e.png", { type: "image/png" }))
     await user.click(screen.getByRole("button", { name: "Submit price" }))
     await waitFor(() => expect(service.requestImageUpload).toHaveBeenCalledWith(expect.any(File), "gardenia-white-600g", "fairprice", "test-token"))
-    expect(screen.queryByRole("img", { name: /Price evidence for/ })).not.toBeInTheDocument()
   })
 
   it("reviews corrections, ranges and claims through the product request contract and refreshes on concurrent decisions", async () => {
@@ -455,5 +457,42 @@ describe("new products and deletion", () => {
     expect(service.deleteSubmission).not.toHaveBeenCalled()
     expect(await screen.findByText("accepted")).toBeInTheDocument()
     expect(screen.getByText("rejected")).toBeInTheDocument()
+  })
+
+  it("deletes a pending price after confirming, and keeps it if cancelled", async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true)
+    const service = submissionService({ listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission]) })
+    renderContribution("user", service)
+    const remove = await screen.findByRole("button", { name: "Delete pending price submission" })
+    await user.click(remove)
+    expect(confirm).toHaveBeenCalledWith("Delete this price submission? Its photo will be removed too. This cannot be undone.")
+    expect(service.deleteSubmission).not.toHaveBeenCalled()
+    await user.click(remove)
+    await waitFor(() => expect(service.deleteSubmission).toHaveBeenCalledWith("submission-1", { id: "user-1", role: "user" }, "test-token"))
+    expect(screen.queryByRole("button", { name: "Delete pending price submission" })).not.toBeInTheDocument()
+  })
+
+  it("explains when an admin decided the price before it could be deleted, and refreshes the list", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    const service = submissionService({
+      listMySubmissions: vi.fn().mockResolvedValueOnce([flaggedSubmission]).mockResolvedValue([{ ...flaggedSubmission, status: "accepted" }]),
+      deleteSubmission: vi.fn().mockRejectedValue(new SubmissionServiceError("This submission is already accepted.", 409, "ALREADY_MODERATED")),
+    })
+    renderContribution("user", service)
+    await user.click(await screen.findByRole("button", { name: "Delete pending price submission" }))
+    expect(await screen.findByText("This submission is already accepted.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Delete pending price submission" })).not.toBeInTheDocument()
+  })
+
+  it("enlarges the contributor's own price photo from its thumbnail", async () => {
+    const user = userEvent.setup()
+    renderContribution("user", submissionService({ listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission]) }))
+    const name = `Price evidence for ${flaggedSubmission.productName}`
+    await user.click(await screen.findByRole("button", { name: `Enlarge image of ${name}` }))
+    const preview = screen.getByRole("dialog", { name: `Enlarged image of ${name}` })
+    expect(preview).toHaveProperty("open", true)
+    expect(within(preview).getByRole("img", { name })).toHaveAttribute("src", "blob:shelf")
   })
 })

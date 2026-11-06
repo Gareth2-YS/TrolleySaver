@@ -6,8 +6,9 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { useBasketItems } from "../basket/use-basket-items"
-import { getCategoryIcon, normalizeCategory } from "../lib/category-icons"
-import { formatCents } from "../lib/format"
+import { getCategoryIcon } from "../lib/category-icons"
+import { formatCents, isWholeCents, limitToCents } from "../lib/format"
+import { cn } from "../lib/utils"
 import { HcsBadge } from "../components/hcs-badge"
 import { PageHeader } from "../components/layout/page-header"
 import { Select } from "../components/ui/select"
@@ -59,7 +60,6 @@ interface Retailer {
   name: string
 }
 
-const QUICK_CATEGORY_LABELS = ["cereal", "milk", "soft drinks", "cookies", "toilet rolls"]
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "")
 
@@ -166,6 +166,8 @@ function ProductCard({
       <article
         className="surface-card flex h-full flex-col p-5 text-left transition-colors hover:border-primary/50"
       >
+        {/* At the top, so a long product name keeps the row's full width */}
+        {product.hcs && <HcsBadge className="mb-3 self-start" />}
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -192,7 +194,6 @@ function ProductCard({
               </button>
             </div>
           </div>
-          {product.hcs && <HcsBadge />}
         </div>
 
         <div className="mt-4 border-t pt-3">
@@ -352,13 +353,6 @@ export function SearchProductsPage() {
   const categories = useMemo(() => result?.facets.categories ?? [], [result])
   const brands = result?.facets.brands ?? []
   const dietaryOptions = result?.facets.dietary ?? []
-  const quickCategories = useMemo(
-    () => QUICK_CATEGORY_LABELS.flatMap((label) => {
-      const value = categories.find((item) => normalizeCategory(item) === label)
-      return value ? [value] : []
-    }),
-    [categories],
-  )
 
   useEffect(() => { saveBasket(basketItems) }, [basketItems, saveBasket])
 
@@ -377,6 +371,7 @@ export function SearchProductsPage() {
     const max = maximumPrice === "" ? Number.POSITIVE_INFINITY : Number(maximumPrice)
     if (!Number.isFinite(min) || min < 0) return "Enter a valid minimum price of 0 or more."
     if (maximumPrice !== "" && (!Number.isFinite(max) || max < 0)) return "Enter a valid maximum price of 0 or more."
+    if (!isWholeCents(min) || (maximumPrice !== "" && !isWholeCents(max))) return "Enter prices in dollars and cents, e.g. 3.63"
     if (min > max) return "Minimum price must not be greater than maximum price."
     return null
   }, [maximumPrice, minimumPrice])
@@ -407,7 +402,8 @@ export function SearchProductsPage() {
     return () => controller.abort()
   }, [])
 
-  const activeFilterCount = Number(Boolean(category)) + Number(hcsOnly) + Number(Boolean(brand))
+  // The filters inside the panel. The Healthier Choice switch shows its own state beside it.
+  const activeFilterCount = Number(Boolean(category)) + Number(Boolean(brand))
     + Number(Boolean(dietary)) + Number(Boolean(minimumPrice)) + Number(Boolean(maximumPrice))
 
   function clearFilters() {
@@ -431,7 +427,7 @@ export function SearchProductsPage() {
         </PageHeader>
 
         <div className="surface-card space-y-5 p-5 sm:p-6">
-          <form onSubmit={(event) => event.preventDefault()} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <form onSubmit={(event) => event.preventDefault()} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -454,27 +450,28 @@ export function SearchProductsPage() {
             >
               <Filter className="size-4" />Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
             </Button>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={hcsOnly}
+              onClick={() => setHcsOnly((value) => !value)}
+              className={cn(
+                "flex h-12 items-center justify-center gap-2.5 rounded-lg border bg-card px-3.5 text-sm font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                hcsOnly && "border-primary bg-accent text-accent-foreground hover:bg-accent",
+              )}
+            >
+              <span aria-hidden="true" className={cn("relative h-5 w-9 shrink-0 rounded-full bg-input/40 transition-colors", hcsOnly && "bg-primary")}>
+                <span className={cn("absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform", hcsOnly && "translate-x-4")} />
+              </span>
+              Healthier Choice only
+            </button>
           </form>
-
-          <div className="flex flex-wrap gap-2" aria-label="Quick filters">
-            <Button type="button" size="sm" className="rounded-full" variant={category === null && !hcsOnly ? "default" : "outline"} onClick={() => { setCategory(null); setHcsOnly(false) }}>
-              All
-            </Button>
-            {quickCategories.map((value) => (
-              <Button key={value} type="button" size="sm" className="rounded-full" variant={category === value ? "default" : "outline"} onClick={() => { setCategory(category === value ? null : value); setHcsOnly(false) }}>
-                {formatLabel(value)}
-              </Button>
-            ))}
-            <Button type="button" size="sm" className="rounded-full" variant={hcsOnly ? "default" : "outline"} aria-pressed={hcsOnly} onClick={() => { setHcsOnly((value) => !value); setCategory(null) }}>
-              Healthier Choice
-            </Button>
-          </div>
 
           {filtersOpen && (
             <div id="advanced-filters" className="grid gap-4 rounded-xl border bg-background/60 p-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="type-filter">Type</Label>
-                <Select id="type-filter" value={category ?? ""} onChange={(event) => { setCategory(event.target.value || null); setHcsOnly(false) }}>
+                <Select id="type-filter" value={category ?? ""} onChange={(event) => setCategory(event.target.value || null)}>
                   <option value="">All types</option>
                   {categories.map((value) => <option key={value} value={value}>{formatLabel(value)}</option>)}
                 </Select>
@@ -506,7 +503,7 @@ export function SearchProductsPage() {
                       inputMode="decimal"
                       placeholder="0"
                       value={minimumPrice}
-                      onChange={(event) => setMinimumPrice(event.target.value)}
+                      onChange={(event) => setMinimumPrice(limitToCents(event.target.value))}
                     />
                   </div>
                   <div className="space-y-1">
@@ -519,7 +516,7 @@ export function SearchProductsPage() {
                       inputMode="decimal"
                       placeholder="No limit"
                       value={maximumPrice}
-                      onChange={(event) => setMaximumPrice(event.target.value)}
+                      onChange={(event) => setMaximumPrice(limitToCents(event.target.value))}
                     />
                   </div>
                 </div>

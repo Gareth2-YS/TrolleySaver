@@ -52,7 +52,7 @@ describe("product request contracts", () => {
     expect(await service.requestProductImageUpload(image, "product-image", "token")).toMatchObject({ photoKey: proposal.productImageKey })
     await service.requestProductImageUpload(image, "evidence", "token")
     const result = await service.createProductRequest(proposal, "ignored", "token")
-    expect(result.photoUrl).toBeUndefined()
+    expect(result.photoUrl).toBe(record.photoUrl) // the contributor's own evidence photo
     expect(result.productImageUrl).toBe(record.productImageUrl)
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["https://api.test/product-requests/image-upload-url", "https://api.test/product-requests/image-upload-url", "https://api.test/product-requests"])
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ purpose: "product-image", contentType: "image/png", sizeBytes: 7 })
@@ -61,7 +61,7 @@ describe("product request contracts", () => {
     expect(new Headers(fetchMock.mock.calls[2][1].headers).get("Authorization")).toBe("Bearer token")
   })
 
-  it("paginates request history, removes contributor evidence URLs, and preserves admin evidence", async () => {
+  it("paginates request history, and keeps evidence links for the contributor and for admins", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(response({ items: [record], nextToken: "next/+" }))
       .mockResolvedValueOnce(response({ items: [{ ...record, id: "approved", status: "approved", productId: "canonical" }], nextToken: null }))
       .mockResolvedValueOnce(response({ items: [record], nextToken: null }))
@@ -69,7 +69,7 @@ describe("product request contracts", () => {
     const service = new ApiSubmissionService("https://api.test")
     const mine = await service.listMyProductRequests("user", "token")
     expect(mine.map((r) => r.status)).toEqual(["pending", "approved"])
-    expect(mine.every((r) => !r.photoUrl)).toBe(true)
+    expect(mine.every((r) => r.photoUrl === record.photoUrl)).toBe(true) // their own evidence photos
     expect(fetchMock.mock.calls[1][0]).toBe("https://api.test/product-requests/mine?nextToken=next%2F%2B")
     expect(await service.listProductRequests("pending", admin, "token")).toMatchObject([{ photoUrl: record.photoUrl }])
   })
@@ -90,14 +90,17 @@ describe("product request contracts", () => {
     await expect(new ApiSubmissionService("https://api.test").createProductRequest(proposal, "user", "token")).rejects.toMatchObject({ status, code, productId: "canonical", fieldErrors: { productImageKey: "Missing picture" }, requestId: "ref" })
   })
 
-  it("never uses a contributor evidence URL even if an unexpected price response includes one, and never calls DELETE", async () => {
-    const price = { id: "p", productId: "canonical", retailerId: "fairprice", userId: "user", priceCents: 350, observedAt: new Date().toISOString(), submittedAt: new Date().toISOString(), status: "flagged", photoKey: "private-key", photoUrl: "https://private.test/evidence" }
-    const fetchMock = vi.fn().mockResolvedValue(response({ items: [price], nextToken: null }))
+  it("shows contributors their own price photo, and withdraws a pending price with DELETE", async () => {
+    const price = { id: "p/1", productId: "canonical", retailerId: "fairprice", userId: "user", priceCents: 350, observedAt: new Date().toISOString(), submittedAt: new Date().toISOString(), status: "flagged", photoKey: "private-key", photoUrl: "https://private.test/evidence" }
+    const fetchMock = vi.fn().mockResolvedValueOnce(response({ items: [price], nextToken: null })).mockResolvedValueOnce(new Response(null, { status: 204 }))
     vi.stubGlobal("fetch", fetchMock)
     const service = new ApiSubmissionService("https://api.test")
-    expect(await service.listMySubmissions("user", "token")).toMatchObject([{ photo: { photoKey: "private-key", previewUrl: undefined } }])
-    await expect(service.deleteSubmission("p", { id: "user", role: "user" }, "token")).rejects.toMatchObject({ code: "UNSUPPORTED" })
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(await service.listMySubmissions("user", "token")).toMatchObject([{ photo: { photoKey: "private-key", previewUrl: "https://private.test/evidence" } }])
+    await expect(service.deleteSubmission("p/1", { id: "user", role: "user" }, "token")).resolves.toBeUndefined()
+    const [url, init] = fetchMock.mock.calls[1]
+    expect(url).toBe("https://api.test/price-submissions/p%2F1")
+    expect(init.method).toBe("DELETE")
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer token")
   })
 })
 

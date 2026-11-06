@@ -21,6 +21,7 @@ import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
 import { FormAlert } from "../components/auth/form-alert"
+import { EnlargeableImage } from "../components/enlargeable-image"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -36,7 +37,7 @@ import {
 } from "../contributions/schema"
 import { createSubmissionService, SubmissionServiceError } from "../contributions/service"
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, SubmissionService, SubmissionStatus } from "../contributions/types"
-import { formatDollars } from "../lib/format"
+import { formatDollars, limitToCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
@@ -79,12 +80,17 @@ function PhotoView({ submission, large = false, onExpired }: { submission: Price
       </div>
     )
   }
-  if (!large || !submission.photo.previewUrl) {
+  if (!submission.photo.previewUrl) {
     return (
       <div className={cn("grid place-items-center rounded-xl border border-dashed bg-secondary/50 p-3 text-center text-muted-foreground", large ? "min-h-52" : "size-20 shrink-0")}>
-        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">Photo attached · visible to administrators</span></div>
+        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">Photo attached</span></div>
       </div>
     )
+  }
+  // The contributor's own photo, as a thumbnail that enlarges like the pictures on Search.
+  if (!large) {
+    return <EnlargeableImage url={submission.photo.previewUrl} name={`Price evidence for ${submission.productName}`} className="size-20 object-cover p-0"
+      onExpired={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }} />
   }
   return (
     <figure className={large ? "min-w-0 space-y-3" : "size-20 shrink-0"}>
@@ -174,6 +180,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
   const [preparingImage, setPreparingImage] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
   const photoInput = useRef<HTMLInputElement>(null)
   const [showNewProduct, setShowNewProduct] = useState(false)
@@ -194,6 +201,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     defaultValues: { productId: "", storeId: "", price: 0, observedDate: today },
   })
   const selectedProductId = watch("productId")
+  const priceField = register("price")
 
   const productCategories = useMemo(
     () => [...new Set(products.map((product) => product.category?.trim()).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b)),
@@ -227,6 +235,28 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
     setSubmissions(await service.listMySubmissions(user.id, token))
   }, [getAccessToken, service, user])
+
+  // Only a pending (flagged) price can be withdrawn: an admin hasn't decided it yet.
+  async function deletePending(submission: PriceSubmission) {
+    if (deletingId || !user || !window.confirm("Delete this price submission? Its photo will be removed too. This cannot be undone.")) return
+    setDeletingId(submission.id)
+    setLoadError(null)
+    try {
+      const token = await getAccessToken()
+      if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
+      await service.deleteSubmission(submission.id, { id: user.id, role: user.role }, token)
+      setSubmissions((current) => current.filter((item) => item.id !== submission.id))
+    } catch (error) {
+      if (error instanceof SubmissionServiceError && (error.code === "NOT_FOUND" || error.code === "ALREADY_MODERATED")) {
+        await loadMine().catch(() => undefined)
+        setLoadError(error.code === "NOT_FOUND" ? "This submission no longer exists." : error.message)
+      } else {
+        setLoadError(error instanceof Error ? error.message : "The submission could not be deleted.")
+      }
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -495,7 +525,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
               <Label htmlFor={fieldId("price")}>Price (SGD)</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                <Input id={fieldId("price")} type="number" min="0.01" max="1000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...register("price")} />
+                <Input id={fieldId("price")} type="number" min="0.01" max="1000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...priceField} onChange={(event) => { event.target.value = limitToCents(event.target.value); void priceField.onChange(event) }} />
               </div>
               <FieldError>{errors.price?.message}</FieldError>
             </div>
@@ -593,6 +623,13 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           ) : submissions.map((submission) => (
             <article key={submission.id} className="rounded-xl border bg-card/45 p-4">
               <div className="flex gap-4"><PhotoView submission={submission} onExpired={() => void loadMine().catch(() => setLoadError("The photo link expired and could not be refreshed."))} /><SubmissionDetails submission={submission} /></div>
+              {submission.status === "flagged" && (
+                <div className="mt-3 flex justify-end">
+                  <Button type="button" variant="outline" size="sm" disabled={deletingId !== null} onClick={() => void deletePending(submission)}>
+                    {deletingId === submission.id ? "Deleting…" : "Delete pending price submission"}
+                  </Button>
+                </div>
+              )}
               <p className="mt-3 border-t pt-3 text-[11px] text-muted-foreground">Submitted {formatTimestamp(submission.submittedAt)}</p>
             </article>
           ))}

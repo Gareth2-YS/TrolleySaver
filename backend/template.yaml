@@ -748,7 +748,9 @@ Resources:
     Properties:
       FunctionName: !Sub trolleysaver-${Env}-my-submissions
       Handler: handlers.my_submissions.handler
-      # No photo-bucket access: contributors don't get links to evidence photos (admins only).
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-price-submission
@@ -756,6 +758,11 @@ Resources:
             TableName: !Sub trolleysaver-${Env}-product
         - DynamoDBReadPolicy:
             TableName: !Sub trolleysaver-${Env}-retailer
+        # To sign links to the caller's own evidence photos (the handler only signs their own).
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
       Events:
         ListMine:
           Type: Api
@@ -763,6 +770,34 @@ Resources:
             RestApiId: !Ref Api
             Path: /price-submissions/mine
             Method: GET
+
+  DeleteSubmissionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trolleysaver-${Env}-delete-submission
+      Handler: handlers.delete_submission.handler
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref PhotoBucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:DeleteItem]
+              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/trolleysaver-${Env}-price-submission
+            # Only to take the deleted price off the contributor's submissionCount.
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/trolleysaver-${Env}-user
+            - Effect: Allow
+              Action: s3:DeleteObject
+              Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+      Events:
+        DeletePending:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /price-submissions/{id}
+            Method: DELETE
 
   AdminSubmissionsFunction:
     Type: AWS::Serverless::Function

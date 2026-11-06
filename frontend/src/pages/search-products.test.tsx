@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -124,5 +124,34 @@ describe("search page", () => {
     expect(within(card).getByText("$3.63")).toBeInTheDocument()
     await user.click(within(card).getByRole("button", { name: "View details for Fresh Milk" }))
     expect(within(screen.getByRole("dialog", { name: "Fresh Milk" })).getByText("Fairprice")).toBeInTheDocument()
+  })
+
+  it("filters to Healthier Choice with a switch, and has no quick filter chips", async () => {
+    const user = userEvent.setup()
+    renderSearch([bread, milk])
+    const toggle = await screen.findByRole("switch", { name: "Healthier Choice only" })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(screen.queryByLabelText("Quick filters")).not.toBeInTheDocument()
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("hcs=true"))).toBe(true))
+    // The switch shows its own state, so it isn't counted on the Filters button.
+    await user.click(screen.getByRole("button", { name: "Filters" }))
+    await user.click(screen.getByRole("button", { name: "Clear search and filters" }))
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("keeps the price range in dollars and cents", async () => {
+    const user = userEvent.setup()
+    renderSearch([milk])
+    await user.click(await screen.findByRole("button", { name: "Filters" }))
+    await user.type(screen.getByLabelText("From"), "3.639")
+    expect(screen.getByLabelText("From")).toHaveValue(3.63)
+  })
+
+  it("shows the Healthier Choice pill at the top of the card, above a long name", async () => {
+    renderSearch([{ ...bread, name: "Gardenia Wholemeal Bread With Extra Grains And Seeds, Family Size" }])
+    const card = (await screen.findByRole("button", { name: /View details for Gardenia Wholemeal/ })).closest("article")!
+    expect(card.firstElementChild).toHaveTextContent("Healthier Choice")
   })
 })

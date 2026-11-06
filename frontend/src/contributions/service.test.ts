@@ -33,6 +33,16 @@ describe("LocalSubmissionService", () => {
     const rejected = await service.moderateSubmission(created.id, "rejected", "Image is unclear", { id: "admin-1", role: "admin" }, "token")
     expect(rejected).toMatchObject({ status: "rejected", rejectionReason: "Image is unclear", reviewedBy: "admin-1" })
   })
+
+  it("takes one price per product, store and day, like the backend, unless the first was rejected", async () => {
+    const service = new LocalSubmissionService()
+    const first = await service.createSubmission({ ...input, price: 20 }, "token")
+    await expect(service.createSubmission({ ...input, price: 2.9 }, "token")).rejects.toMatchObject({ status: 409, code: "DUPLICATE_SUBMISSION" })
+    // (The test setup gives every local id the same value, so the first price is decided before adding more.)
+    await service.moderateSubmission(first.id, "rejected", "Wrong price", { id: "admin-1", role: "admin" }, "token")
+    expect((await service.createSubmission({ ...input, price: 2.9 }, "token")).status).toBe("accepted")
+    expect(await service.createSubmission({ ...input, storeId: "shengsiong" }, "token")).toBeTruthy()
+  })
 })
 
 describe("ApiSubmissionService", () => {

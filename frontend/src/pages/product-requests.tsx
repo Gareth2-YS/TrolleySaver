@@ -10,7 +10,7 @@ import { prepareImage } from "../contributions/image"
 import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, reasonError, singaporeDateString, validationMessages } from "../contributions/schema"
 import { SubmissionServiceError } from "../contributions/service"
 import type { CatalogRetailer, ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
-import { formatCents } from "../lib/format"
+import { formatCents, limitToCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { cn } from "../lib/utils"
 import { Select } from "../components/ui/select"
@@ -126,7 +126,7 @@ export function ProductRequestForm({ service, onDone, onExisting }: { service: S
       <ProductEditor value={product} onChange={setProduct} facets={facets} prefix="new-product" />
       <div className="grid gap-5 sm:grid-cols-3">
         <div className="space-y-2"><Label htmlFor="request-store">Store</Label><Select id="request-store" value={storeId} onChange={(e) => setStoreId(e.target.value)}><option value="">Choose a store</option>{stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></div>
-        <div className="space-y-2"><Label htmlFor="request-price">Price (SGD)</Label><Input id="request-price" type="number" min="0.01" max="1000" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
+        <div className="space-y-2"><Label htmlFor="request-price">Price (SGD)</Label><Input id="request-price" type="number" min="0.01" max="1000" step="0.01" value={price} onChange={(e) => setPrice(limitToCents(e.target.value))} /></div>
         <div className="space-y-2"><Label htmlFor="request-date">Observed date</Label><Input id="request-date" type="date" min={earliestObservedDate()} max={singaporeDateString()} value={date} onChange={(e) => setDate(e.target.value)} /></div>
       </div>
       <div className="grid gap-5 md:grid-cols-2"><ImagePicker id="product-picture" label="Product picture (required)" file={picture} onChange={setPicture} /><ImagePicker id="request-evidence" label="Price evidence (optional)" file={evidence} onChange={setEvidence} /></div>
@@ -135,10 +135,12 @@ export function ProductRequestForm({ service, onDone, onExisting }: { service: S
   </form>
 }
 
-function RequestImages({ item, admin, refresh }: { item: ProductRequest; admin: boolean; refresh: () => void }) {
+// The product picture and, if one was attached, the price evidence photo. Admins and the request's
+// own contributor get a link to the evidence; without one, the card just says it's there.
+function RequestImages({ item, refresh }: { item: ProductRequest; refresh: () => void }) {
   return <div className="grid gap-3 sm:grid-cols-2">
     <ProductImage url={item.productImageUrl} name={`Product picture for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} />
-    {item.photoKey && (admin && item.photoUrl ? <ProductImage url={item.photoUrl} name={`Price evidence for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} /> : <p className="rounded-xl border p-4 text-sm">Photo attached · visible to administrators</p>)}
+    {item.photoKey && (item.photoUrl ? <ProductImage url={item.photoUrl} name={`Price evidence for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} /> : <p className="rounded-xl border p-4 text-sm">Photo attached</p>)}
   </div>
 }
 
@@ -190,7 +192,7 @@ export function ProductRequestHistory({ service, refreshKey }: { service: Submis
     <div className={cn("grid gap-4 transition-opacity", loading && items.length > 0 && "opacity-60")}>{items.map((item) => <article key={item.id} className="space-y-3 rounded-xl border p-4">
       <h3 className="font-display font-extrabold">{item.name} · <span className="capitalize">{item.status}</span></h3>
       <p>{item.brand} · {item.packCount} × {item.packQty} {item.packUnit} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)}</p>
-      <RequestImages item={item} admin={false} refresh={() => void load()} />
+      <RequestImages item={item} refresh={() => void load()} />
       {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
       {item.status === "pending" && <Button variant="outline" disabled={deletingId !== null} onClick={() => void deletePending(item.id)}>{deletingId === item.id ? "Deleting…" : "Delete pending product request"}</Button>}
       {item.status === "approved" && <p className="text-sm">Added to the catalog. Public prices update after nightly aggregation; reload Search or Smart Basket to see the product.</p>}
@@ -231,7 +233,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
   return <article className="space-y-5 rounded-xl border p-5">
     <h3 className="font-display text-lg font-extrabold">{item.name} · {item.status}</h3>
     <p className="text-sm">{item.submitterName ?? item.userId} {item.submitterEmail} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)} · observed {singaporeDateString(new Date(item.observedAt))}</p>
-    <RequestImages item={item} admin refresh={() => void refresh()} />
+    <RequestImages item={item} refresh={() => void refresh()} />
     <FormAlert message={error} />
     {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
     {item.status === "pending" && <fieldset disabled={busy} className="space-y-5">

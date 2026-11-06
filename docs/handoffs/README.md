@@ -21,5 +21,6 @@ Notes passed between team members when one person's work becomes someone else's 
 | 4 Nov 2026 | When a product's prices were last updated (`priceUpdatedAt`) | backend → frontend | [2026-11-04-price-updated-backend-to-frontend.md](2026-11-04-price-updated-backend-to-frontend.md) | Search & filter shows it; Smart Basket optional |
 | 6 Nov 2026 | The deployed web app (CloudFront), CI and review fixes | backend → frontend | [2026-11-06-deployed-site-backend-to-frontend.md](2026-11-06-deployed-site-backend-to-frontend.md) | **Open**: frontend to check the site (test-cases §11) |
 | 6 Nov 2026 | Security hardening (CSP, photo checks, input rules, limits) | backend → frontend | [2026-11-06-security-hardening-backend-to-frontend.md](2026-11-06-security-hardening-backend-to-frontend.md) | **Open**: frontend to check the site's console and the new cases (test-cases §11, §5, §6) |
+| 7 Nov 2026 | Basket, Search, theme toggle and price-submission enhancements | backend → frontend | [2026-11-07-enhancements-backend-to-frontend.md](2026-11-07-enhancements-backend-to-frontend.md) | **Open**: frontend to check the site; submission panels' matching layout left to another developer |
 
 The API contract that the backend → frontend handoffs rely on is in [../api/README.md](../api/README.md).

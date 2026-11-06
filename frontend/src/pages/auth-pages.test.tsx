@@ -158,4 +158,16 @@ describe("sign-in field limits", () => {
     await user.click(dialog.getByRole("button", { name: /Create my account/ }))
     expect(await dialog.findByRole("alert")).toHaveTextContent(/^Your name can't contain hidden or control characters\.$/)
   })
+
+  it("switches between light and dark mode from the header", async () => {
+    const user = userEvent.setup()
+    renderApp("/basket", service())
+    const [toggle] = await screen.findAllByRole("button", { name: "Switch to dark mode" })
+    await user.click(toggle)
+    expect(document.documentElement).toHaveClass("dark")
+    expect(localStorage.getItem("trolleysaver.theme")).toBe("dark")
+    const [back] = screen.getAllByRole("button", { name: "Switch to light mode" })
+    await user.click(back)
+    expect(document.documentElement).toHaveClass("light")
+  })
 })

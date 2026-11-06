@@ -101,7 +101,7 @@ def create(event, caller):
         item.update(photoKey=request["photoKey"], photoContentType=photo_type, photoSizeBytes=photo_size)
 
     db.product_requests().put_item(Item=item, ConditionExpression="attribute_not_exists(requestId)")
-    return response(201, to_record(item, {retailer["id"]: retailer}))
+    return response(201, to_record(item, {retailer["id"]: retailer}, own=True))
 
 
 def mine(event, caller):
@@ -113,7 +113,7 @@ def mine(event, caller):
     }
     token = (event.get("queryStringParameters") or {}).get("nextToken")
     items, next_token = db.query_page(db.product_requests(), query, token, ("requestId", "userId", "submittedAt"))
-    return response(200, {"items": to_records(items), "nextToken": next_token})
+    return response(200, {"items": to_records(items, own=True), "nextToken": next_token})
 
 
 def _load_own(request_id, caller):

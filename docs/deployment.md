@@ -98,7 +98,7 @@ That's the whole deployment. It stops at the first problem and says what to do. 
 | `--skip-tests` | Skip step 2, e.g. right after a green CI run on the same commit |
 | `--backend-only` | Deploy the stack but not the web app |
 | `--frontend-only` | Rebuild and upload only the web app (much faster; the stack must already exist) |
-| `--smoke` | Finish with the end-to-end smoke test: 67 checks against the live API, cleaning up after itself |
+| `--smoke` | Finish with the end-to-end smoke test: 71 checks against the live API, cleaning up after itself |
 | `--env staging` | Deploy another environment (needs a `[staging.*]` section in `backend/samconfig.toml`) |
 
 ### What each step does, and why

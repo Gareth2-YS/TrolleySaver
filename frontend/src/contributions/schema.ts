@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { isWholeCents } from "../lib/format"
 import { hasHiddenCharacters, hiddenCharactersMessage } from "../lib/text"
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -66,7 +67,7 @@ export const contributionSchema = z.object({
   storeId: z.string().min(1, "Choose a store"),
   price: z.coerce.number({ message: "Enter a valid price" }).min(0.01, "Price must be greater than $0").max(MAX_PRICE, "Price must be $1,000 or less")
     // Whole cents only, so 3.635 isn't silently sent as 3.64.
-    .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-6, "Enter the price in dollars and cents, e.g. 3.63"),
+    .refine(isWholeCents, "Enter the price in dollars and cents, e.g. 3.63"),
   observedDate: z.string().min(1, "Choose the observed date")
     .refine((value) => value <= singaporeDateString(), "Observed date cannot be in the future")
     .refine((value) => value >= earliestObservedDate(), "Observed date must be within the last 30 days"),
