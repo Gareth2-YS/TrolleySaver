@@ -58,6 +58,7 @@ def main():
 
     outputs = stack_outputs(args.env, args.region)
     api, pool_id, client_id, bucket = outputs["ApiUrl"], outputs["UserPoolId"], outputs["UserPoolClientId"], outputs["PhotoBucketName"]
+    site = outputs["SiteUrl"]
     cognito = boto3.client("cognito-idp", region_name=args.region)
     dynamodb = boto3.resource("dynamodb", region_name=args.region)
     users_table = dynamodb.Table(f"trolleysaver-{args.env}-user")
@@ -122,7 +123,14 @@ def main():
                 r.status_code == 400 and "items[0].quantity" in r.json().get("fieldErrors", {}), r.text[:300])
         r = requests.options(f"{api}/basket/compare", timeout=TIMEOUT,
                              headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
-        t.check("basket CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173", r.headers)
+        t.check("basket CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") in ("*", "http://localhost:5173"), r.headers)
+
+        # --- CORS: responses name only the allowed sites (the local dev server and the deployed site) ---
+        for origin in ("http://localhost:5173", site):
+            r = requests.get(f"{api}/products", headers={"Origin": origin}, timeout=TIMEOUT)
+            t.check(f"GET /products from {origin} -> allowed", r.headers.get("Access-Control-Allow-Origin") == origin, r.headers)
+        r = requests.get(f"{api}/products", headers={"Origin": "https://evil.example"}, timeout=TIMEOUT)
+        t.check("GET /products from another site -> not allowed", "Access-Control-Allow-Origin" not in r.headers, r.headers)
 
         # --- Authorizer ---
         upload_body = {"productId": product["id"], "retailerId": "fairprice", "fileName": "shelf.png",
@@ -145,6 +153,8 @@ def main():
         t.check("photo key is scoped to caller and product", photo_key.startswith(f"price-evidence/{user_sub}/{product['id']}/"), photo_key)
         up = requests.post(target["uploadUrl"], data=target["fields"], files={"file": ("shelf.png", PNG, "image/png")}, timeout=TIMEOUT)
         t.check("browser-style POST to S3 succeeds", up.status_code in (200, 204), f"{up.status_code} {up.text[:300]}")
+        r = requests.options(target["uploadUrl"], headers={"Origin": site, "Access-Control-Request-Method": "POST"}, timeout=TIMEOUT)
+        t.check("photo bucket accepts uploads from the deployed site", r.headers.get("Access-Control-Allow-Origin") == site, r.headers)
 
         big = call("POST", "/price-submissions/image-upload-url", access, json=upload_body).json()
         too_big = requests.post(big["uploadUrl"], data=big["fields"],
@@ -173,6 +183,10 @@ def main():
         t.check("duplicate -> 409", r.status_code == 409, r.status_code)
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": "3.50"})
         t.check("invalid body -> 400 with fieldErrors", r.status_code == 400 and "priceCents" in r.json().get("fieldErrors", {}), r.text[:300])
+        never_uploaded = f"price-evidence/{user_sub}/{product['id']}/never-uploaded.png"
+        r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid + 1, "photoKey": never_uploaded})
+        t.check("photo that was never uploaded -> 400 PHOTO_NOT_FOUND",
+                r.status_code == 400 and r.json().get("code") == "PHOTO_NOT_FOUND", r.text[:300])
 
         r = call("GET", "/price-submissions/mine", access)
         mine = r.json().get("items", []) if r.ok else []
@@ -204,7 +218,7 @@ def main():
         t.check("second decision -> 409", r.status_code == 409, r.status_code)
         r = requests.options(f"{api}/price-submissions", timeout=TIMEOUT,
                              headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
-        t.check("CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173", r.headers)
+        t.check("CORS preflight allowed", r.status_code == 200 and r.headers.get("Access-Control-Allow-Origin") in ("*", "http://localhost:5173"), r.headers)
 
         # --- New product request ---
         image_body = {"purpose": "product-image", "contentType": "image/png", "sizeBytes": len(PNG)}

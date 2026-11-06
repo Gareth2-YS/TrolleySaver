@@ -27,7 +27,7 @@ Type either dummy account into the normal login form. New registrations are imme
 
 Price & Image Upload is implemented for local development testing. Contributors can validate and submit price details with optional shelf-tag evidence, then immediately see the pending record. Administrators receive a focused local moderation queue. In local mode, metadata is stored in browser `localStorage`, image references use temporary object URLs, and no data is sent to AWS.
 
-Set `VITE_PRICE_SUBMISSION_MODE=local` for this demonstration flow. `api` is reserved for the future production adapter and currently shows an explicit unavailable-integration error instead of fake success. Smart Basket and Search & Filter remain untouched placeholders.
+Set `VITE_PRICE_SUBMISSION_MODE=local` for this demonstration flow, or `api` to use the deployed backend (with `VITE_AUTH_MODE=cognito` and `VITE_API_BASE_URL`). Smart Basket uses `VITE_SMART_BASKET_MODE` the same way, and Search & Filter always uses the API.
 
 ## Quality checks
 
@@ -39,6 +39,10 @@ npm run build
 ```
 
 For real Cognito, change `VITE_AUTH_MODE` to `cognito` and fill in the non-secret AWS values. See [docs/handoffs/2026-10-24-auth-backend-to-frontend.md](../docs/handoffs/2026-10-24-auth-backend-to-frontend.md) for setup and [docs/api/README.md](../docs/api/README.md) for the API contract.
+
+## Deployed site
+
+The app is hosted on CloudFront (the stack output `SiteUrl`). `python infra\deploy.py` from the repository root builds it with Cognito sign-in and API mode, using the stack's own settings rather than `.env.local`, and publishes it. See [docs/deployment.md](../docs/deployment.md). CI runs the quality checks above on every push.
 
 
 ## Search and Filter

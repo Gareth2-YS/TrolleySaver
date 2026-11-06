@@ -5,8 +5,9 @@
 - [API reference](./api/README.md)
 - [Handoffs](./handoffs/README.md)
 - [Setup](./setup.md)
+- [Deployment](./deployment.md): what's deployed, the one-command deploy, CI
 - [Operations](./operations.md)
 - [UX references](./ux/README.md)
 - Backend code and deployment: [backend/README.md](../backend/README.md)
 - Testing the backend step by step: [backend/TESTING.md](../backend/TESTING.md)
-- Test case tracker (every test, key tests, done / not done): [qa/test-cases.md](./qa/test-cases.md)
+- Manual UI test cases, with key cases and their status: [qa/test-cases.md](./qa/test-cases.md)

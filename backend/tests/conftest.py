@@ -34,7 +34,7 @@ ENV = {
     "RETAILER_PRICE_TABLE": "unit-retailer-price",
     "PRODUCT_REQUEST_TABLE": "unit-product-request",
     "PHOTO_BUCKET": BUCKET,
-    "ALLOWED_ORIGIN": "http://localhost:5173",
+    "ALLOWED_ORIGINS": "http://localhost:5173,https://site.example.test",
     "RATE_LIMIT_PER_HOUR": "30",
 }
 

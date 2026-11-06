@@ -8,6 +8,7 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.types import TypeSerializer
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from common.http import ApiError
 
@@ -182,6 +183,26 @@ def decode_page_token(token):
     if not isinstance(key, dict):
         raise ApiError(400, "INVALID_PAGE_TOKEN", "The nextToken is invalid.")
     return key
+
+
+def query_page(table, query, token, key_names):
+    """One page of `query`, continuing after `token` (a nextToken from an earlier page).
+
+    `key_names` are the attributes of a start key for this query: the table's key plus the index's.
+    Returns (items, nextToken). A token that decodes but doesn't fit this query, e.g. one that was edited
+    or came from another list, is refused as a client error rather than failing as a 500."""
+    start_key = decode_page_token(token)
+    if start_key:
+        if set(start_key) != set(key_names) or not all(isinstance(value, str) for value in start_key.values()):
+            raise ApiError(400, "INVALID_PAGE_TOKEN", "The nextToken is invalid.")
+        query = {**query, "ExclusiveStartKey": start_key}
+    try:
+        page = table.query(**query)
+    except ClientError as error:
+        if start_key and error.response.get("Error", {}).get("Code") == "ValidationException":
+            raise ApiError(400, "INVALID_PAGE_TOKEN", "The nextToken is invalid.")
+        raise
+    return page["Items"], encode_page_token(page.get("LastEvaluatedKey"))
 
 
 def page_limit(event, default=50, maximum=100):

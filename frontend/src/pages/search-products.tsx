@@ -1,6 +1,5 @@
 import { ProductImage } from "../components/product-image"
 import { Filter, Plus, Search, X } from "lucide-react"
-// import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
@@ -19,7 +18,6 @@ import riceIcon from "../../assets/product-icons/Rice.svg"
 import softDrinkIcon from "../../assets/product-icons/Soft.svg"
 import teaIcon from "../../assets/product-icons/Tea.svg"
 import yogurtIcon from "../../assets/product-icons/Yogurt.svg"
-
 
 interface StorePrice {
   priceCents: number
@@ -144,7 +142,6 @@ function getPackDescription(product: SearchProduct) {
   return product.packCount && product.packCount > 1 ? `${product.packCount} × ${unitSize}` : unitSize
 }
 
-
 function ProductCard({
   product,
   basketQuantity,
@@ -160,7 +157,6 @@ function ProductCard({
   const dialogRef = useRef<HTMLDialogElement>(null)
   const imagePreviewRef = useRef<HTMLDialogElement>(null)
   const packDescription = getPackDescription(product)
-  // const lowestPrice = getLowestPrice(product)
   const lowestPrice = product.lowestPrice
   const priceUpdated = getPriceUpdatedLabel(product.priceUpdatedAt)
   const categoryIcon = getCategoryIcon(product.category)
@@ -227,13 +223,11 @@ function ProductCard({
             <p className="mt-0.5 font-semibold text-[20px] text-primary">
               ${(lowestPrice.priceCents / 100).toFixed(2)}
               <span className="ml-2 text-sm font-normal text-foreground">
-                {/* at {RETAILER_NAMES[lowestPrice.retailerId] ?? formatLabel(lowestPrice.retailerId)} */}
                 at {lowestPrice.retailerName ?? RETAILER_NAMES[lowestPrice.retailerId] ?? formatLabel(lowestPrice.retailerId)}
               </span>
             </p>
           </div>
         )}
-        {/* {!lowestPrice && showNoPrice && ( */}
         {!lowestPrice && (
           <p className="mt-4 rounded-lg border border-border/70 px-3 py-2.5 text-sm text-muted-foreground">
             No current price available
@@ -360,16 +354,12 @@ function ProductCard({
 }
 
 export function SearchProductsPage() {
-  // const [products, setProducts] = useState<SearchProduct[]>([])
   const [imageRevision, setImageRevision] = useState(0)
   const [result, setResult] = useState<SearchResult | null>(null)
   const { items: basketItems, setItems: setBasketItems, save: saveBasket } = useBasketItems()
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
-  // const [pricesLoading, setPricesLoading] = useState(true)
-  // const [pricesError, setPricesError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // const [draftQuery, setDraftQuery] = useState("")
   const [query, setQuery] = useState("")
   const [category, setCategory] = useState<string | null>(null)
   const [hcsOnly, setHcsOnly] = useState(false)
@@ -435,14 +425,10 @@ export function SearchProductsPage() {
     return () => { clearTimeout(timer); controller.abort() }
   }, [brand, category, dietary, hcsOnly, maximumPrice, minimumPrice, priceRangeError, query, imageRevision])
 
-
-
   const activeFilterCount = Number(Boolean(category)) + Number(hcsOnly) + Number(Boolean(brand))
     + Number(Boolean(dietary)) + Number(Boolean(minimumPrice)) + Number(Boolean(maximumPrice))
 
-
   function clearFilters() {
-    // setDraftQuery("")
     setQuery("")
     setCategory(null)
     setHcsOnly(false)
@@ -461,20 +447,16 @@ export function SearchProductsPage() {
             <p className="mt-2 text-sm text-muted-foreground">Find a product by name or brand.</p>
           </div>
           <p className="text-sm text-muted-foreground" aria-live="polite">
-            {/* {loading ? "Loading…" : `${filteredProducts.length} of ${products.length} products`} */}
             {loading ? "Loading…" : searching ? "Updating…" : `${result?.total ?? 0} of ${result?.catalogSize ?? 0} products`}
           </p>
         </header>
 
         <div className="glass-panel space-y-5 p-5 sm:p-7">
-          {/* <form onSubmit={submitSearch} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"> */}
           <form onSubmit={(event) => event.preventDefault()} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
-                // value={draftQuery}
-                // onChange={(event) => setDraftQuery(event.target.value)}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search product or brand"
@@ -482,7 +464,6 @@ export function SearchProductsPage() {
                 className="pl-10"
               />
             </div>
-            {/* <Button type="submit"><Search className="size-4" />Search</Button> */}
             <Button
               type="button"
               variant="outline"
@@ -581,13 +562,11 @@ export function SearchProductsPage() {
           </div>
         ) : loading ? (
           <div className="glass-panel p-10 text-center text-sm text-muted-foreground" aria-live="polite">Loading products…</div>
-        // ) : products.length === 0 ? (
         ) : result?.catalogSize === 0 ? (
           <div className="glass-panel p-10 text-center">
             <h2 className="font-semibold">No products yet</h2>
             <p className="mt-2 text-sm text-muted-foreground">Products will appear here when the catalog API returns them.</p>
           </div>
-        // ) : filteredProducts.length === 0 ? (
         ) : products.length === 0 ? (
           <div className="glass-panel p-10 text-center">
             <h2 className="font-semibold">No matching products</h2>
@@ -595,11 +574,7 @@ export function SearchProductsPage() {
             <Button type="button" variant="outline" className="mt-4" onClick={clearFilters}>Clear search and filters</Button>
           </div>
         ) : (
-          // <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-live="polite">
           <div className={`grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${searching ? "opacity-60" : ""}`} aria-live="polite" aria-busy={searching}>
-            {/* {filteredProducts.map((product) => (
-              <ProductCard key={product.id} product={product} showNoPrice={!pricesLoading && !pricesError} />
-            ))} */}
             {products.map((product) => (
               <ProductCard
                 key={product.id}

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: TrolleySaver backend - Cognito auth, catalog, community price submissions and Smart Basket
+Description: TrolleySaver - web app hosting, Cognito auth, catalog, community price submissions and Smart Basket
 
 Parameters:
   Env:
@@ -16,7 +16,7 @@ Parameters:
   AllowedOrigin:
     Type: String
     Default: http://localhost:5173
-    Description: Frontend origin allowed by API and photo-bucket CORS
+    Description: Local dev-server origin allowed by API and photo-bucket CORS, alongside the deployed site (FrontendDistribution)
 
 Conditions:
   ShouldCreateTables: !Equals [!Ref CreateTables, "true"]
@@ -38,7 +38,8 @@ Globals:
         USER_TABLE: !Sub trolleysaver-${Env}-user
         RETAILER_PRICE_TABLE: !Sub trolleysaver-${Env}-retailer-price
         PRODUCT_REQUEST_TABLE: !Sub trolleysaver-${Env}-product-request
-        ALLOWED_ORIGIN: !Ref AllowedOrigin
+        # Browsers on these two sites may read API responses (common/http.py echoes the Origin back).
+        ALLOWED_ORIGINS: !Sub "${AllowedOrigin},https://${FrontendDistribution.DomainName}"
         MAX_UPLOAD_BYTES: "5242880"
         RATE_LIMIT_PER_HOUR: "30"
         PRODUCT_REQUESTS_PER_DAY: "10"
@@ -175,7 +176,10 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedMethods: [POST, GET]
-            AllowedOrigins: [!Ref AllowedOrigin]
+            # Browser uploads (presigned POST) come from the local dev server or the deployed site.
+            AllowedOrigins:
+              - !Ref AllowedOrigin
+              - !Sub https://${FrontendDistribution.DomainName}
             AllowedHeaders: ["*"]
             MaxAge: 3000
 
@@ -192,6 +196,99 @@ Resources:
             Resource:
               - !GetAtt PhotoBucket.Arn
               - !Sub ${PhotoBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ---------- Frontend hosting (the React app) ----------
+  # A private bucket holds the built site; CloudFront serves it over HTTPS and is the only reader.
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub trolleysaver-${Env}-site-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # CloudFront signs its requests to the bucket, and the bucket policy only accepts that distribution.
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub trolleysaver-${Env}-site
+        Description: Lets the TrolleySaver distribution read the site bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub TrolleySaver ${Env} web app
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_200  # includes the Asia edge locations near Singapore
+        Origins:
+          - Id: site-bucket
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: site-bucket
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # AWS managed policies: CachingOptimized (follows each file's Cache-Control, set by
+          # infra/deploy.py) and SecurityHeadersPolicy (HSTS, nosniff, frame options, referrer policy).
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+        # The app routes in the browser (/search, /contribute, ...). Those paths aren't files, so the
+        # bucket answers 403/404; serve index.html instead and let the app show the page.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowOnlyThisDistribution
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt FrontendBucket.Arn
+              - !Sub ${FrontendBucket.Arn}/*
             Condition:
               Bool:
                 aws:SecureTransport: "false"
@@ -349,8 +446,11 @@ Resources:
     Properties:
       Name: !Sub trolleysaver-${Env}-api
       StageName: !Ref Env
+      # Preflight (OPTIONS) and the gateway's own errors below are static responses that can name only
+      # one origin, so they allow any; they carry no data. Every Lambda response names the caller's
+      # origin only if it is in ALLOWED_ORIGINS (common/http.py), so other sites still can't read the API.
       Cors:
-        AllowOrigin: !Sub "'${AllowedOrigin}'"
+        AllowOrigin: "'*'"
         AllowHeaders: "'Authorization,Content-Type'"
         AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
         MaxAge: "'600'"
@@ -368,12 +468,12 @@ Resources:
         DEFAULT_4XX:
           ResponseParameters:
             Headers:
-              Access-Control-Allow-Origin: !Sub "'${AllowedOrigin}'"
+              Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Authorization,Content-Type'"
         DEFAULT_5XX:
           ResponseParameters:
             Headers:
-              Access-Control-Allow-Origin: !Sub "'${AllowedOrigin}'"
+              Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Authorization,Content-Type'"
 
   CatalogFunction:
@@ -545,6 +645,11 @@ Resources:
             - Effect: Allow
               Action: s3:GetObject
               Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+            # Without ListBucket, S3 answers 403 instead of 404 for a photo that was never uploaded,
+            # so a missing upload would surface as a 500 rather than PHOTO_NOT_FOUND. Nothing lists the bucket.
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt PhotoBucket.Arn
       Events:
         CreateSubmission:
           Type: Api
@@ -641,6 +746,10 @@ Resources:
               Resource:
                 - !Sub ${PhotoBucket.Arn}/product-images/pending/*
                 - !Sub ${PhotoBucket.Arn}/price-evidence/*/new-product/*
+            # So a missing upload is a 404 (PHOTO_NOT_FOUND), not a 403; see CreateSubmissionFunction.
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt PhotoBucket.Arn
       Events:
         RequestImageUploadUrl:
           Type: Api
@@ -695,6 +804,10 @@ Resources:
             - Effect: Allow
               Action: s3:GetObject
               Resource: !Sub ${PhotoBucket.Arn}/price-evidence/*
+            # So copying a picture that's gone fails as NoSuchKey (PRODUCT_IMAGE_MISSING), not AccessDenied.
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt PhotoBucket.Arn
       Events:
         ListForReview:
           Type: Api
@@ -724,3 +837,12 @@ Outputs:
   Region:
     Description: VITE_AWS_REGION
     Value: !Ref AWS::Region
+  SiteUrl:
+    Description: The deployed web app (CloudFront)
+    Value: !Sub https://${FrontendDistribution.DomainName}
+  FrontendBucketName:
+    Description: Where infra/deploy.py uploads the built frontend
+    Value: !Ref FrontendBucket
+  FrontendDistributionId:
+    Description: Invalidated by infra/deploy.py after each upload
+    Value: !Ref FrontendDistribution

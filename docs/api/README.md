@@ -29,7 +29,7 @@ How the frontend should adopt it is described in the feature handoffs:
 | **Environment** | `dev` is the only deployed environment. Build the frontend against it. |
 | **Format** | JSON request and response bodies (`Content-Type: application/json`) |
 | **Auth** | `Authorization: Bearer <Cognito access token>` on every route except the catalog and the basket comparison |
-| **CORS** | Allowed origin is `http://localhost:5173` (the Vite dev server). Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH, DELETE`. Other origins can be added on request. |
+| **CORS** | Allowed origins are `http://localhost:5173` (the Vite dev server) and the deployed site (the stack output `SiteUrl`, `https://<id>.cloudfront.net`). Responses name the caller's origin only when it's one of those. Allowed headers are `Authorization, Content-Type`, and methods are `GET, POST, PATCH, DELETE`. See [deployment.md §5](../deployment.md#5-cors-which-sites-may-call-the-api). |
 | **Money** | Integer cents: `363` means $3.63 |
 | **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
 | **Ids** | Product ids are UUIDs. Retailer ids are `fairprice`, `shengsiong` and `coldstorage`. A submission `id` is an opaque string: store it and pass it back, never build or parse it. |
@@ -243,7 +243,7 @@ Step 3 of 3, and the only step when there's no photo.
 | `productId` | string | yes | Must be an id from `GET /products` |
 | `retailerId` | string | yes | Must be an id from `GET /retailers` |
 | `priceCents` | integer | yes | 1 – 100000 ($0.01 – $1,000). Price of **one pack** at regular shelf price. |
-| `observedAt` | string | yes | `YYYY-MM-DD` (read as midnight Singapore time) or an ISO 8601 datetime. Not in the future, at most 30 days ago. |
+| `observedAt` | string | yes | `YYYY-MM-DD` (read as midnight Singapore time) or an ISO 8601 datetime. Not in the future. A date may be up to 30 days before today in Singapore time, so the earliest date a form offers is accepted all day; a datetime at most 30 days before now. |
 | `photoKey` | string | no | The `photoKey` from step 1 for **this same product**, after a successful upload in step 2 |
 
 The product and store are checked here too, with or without a photo, because a price without a photo never goes through step 1.
@@ -501,6 +501,7 @@ Errors:
 | 409 | `ALREADY_MODERATED` | The request isn't pending any more; another admin may have got there first |
 | 409 | `PRODUCT_EXISTS` | The product was added to the catalog meanwhile (includes `productId`). Reject the request instead. |
 | 409 | `PRODUCT_IMAGE_MISSING` | The request's picture is gone from storage. Reject the request instead. |
+| 409 | `OBSERVATION_TOO_OLD` | The request's price was seen more than 30 days ago (Singapore days), so it can't be published as a current price. Reject the request and ask for a fresh one. |
 
 ### `POST /basket/compare`
 
@@ -818,7 +819,7 @@ Errors from the backend always have this shape:
 | 400 | `IMAGE_TOO_LARGE` | Upload request over 5 MiB |
 | 400 | `PHOTO_NOT_FOUND` | `photoKey` or `productImageKey` has no uploaded file |
 | 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less |
-| 400 | `INVALID_PAGE_TOKEN` | `nextToken` was altered |
+| 400 | `INVALID_PAGE_TOKEN` | `nextToken` was altered, or came from a different list |
 | 401 | `UNAUTHENTICATED` | Token missing its user (rare, see below) |
 | 403 | `FORBIDDEN` | Admin route called by a non-admin |
 | 404 | `NOT_FOUND` | Submission or product request doesn't exist |
@@ -827,6 +828,7 @@ Errors from the backend always have this shape:
 | 409 | `PRODUCT_EXISTS` | The proposed product is already in the catalog; `productId` says which |
 | 409 | `PRODUCT_ALREADY_REQUESTED` | The proposed product is already waiting for an admin |
 | 409 | `PRODUCT_IMAGE_MISSING` | A pending request's picture is gone; the admin should reject it |
+| 409 | `OBSERVATION_TOO_OLD` | A pending request's price is more than 30 days old; the admin should reject it |
 | 429 | `RATE_LIMITED` | Too many submissions this hour, or product requests today |
 | 500 | `INTERNAL_ERROR` | Backend bug. Report the `requestId` to Gareth. |
 
@@ -848,7 +850,7 @@ Errors from the backend always have this shape:
 | `photoUrl` lifetime (evidence, admins only) | 5 minutes |
 | `imageUrl` / `productImageUrl` lifetime (product pictures) | 1 hour |
 | Price | 1 – 100000 cents |
-| `observedAt` | Not in the future (5-minute clock tolerance), at most 30 days old |
+| `observedAt` | Not in the future (5-minute clock tolerance). A date: up to 30 days before today (Singapore time). A datetime: at most 30 days old. A product request can only be approved while its price is still within those 30 days. |
 | Submissions per user | 30 per rolling hour (counts every status) |
 | Product requests per user | 10 per rolling 24 hours (counts every status) |
 | Duplicate rule | One submission per user, product, store, price and Singapore day |

@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AuthProvider } from "../auth/auth-context"
 import type { AuthService } from "../auth/types"
+import breadIcon from "../../assets/product-icons/Bread.svg"
 
 // The page reads the API address when it loads, so set it before the import below runs.
 vi.hoisted(() => { vi.stubEnv("VITE_API_BASE_URL", "https://api.example.test") })
@@ -55,5 +56,39 @@ describe("search page", () => {
     await user.click(screen.getByRole("button", { name: "Close product details" }))
     await user.click(screen.getByRole("button", { name: "View details for Wholemeal Bread" }))
     expect(within(screen.getByRole("dialog", { name: "Wholemeal Bread" })).getByText("No prices yet")).toBeInTheDocument()
+  })
+
+  it("enlarges a product's picture from its card and from its details", async () => {
+    const user = userEvent.setup()
+    renderSearch([{ ...milk, imageUrl: "https://img.example/milk.png" }])
+    const card = (await screen.findByRole("button", { name: "View details for Fresh Milk" })).closest("article")!
+
+    await user.click(within(card).getByRole("button", { name: "Enlarge image of Fresh Milk" }))
+    const preview = screen.getByRole("dialog", { name: "Enlarged image of Fresh Milk" })
+    expect(preview).toHaveProperty("open", true)
+    expect(within(preview).getByRole("img", { name: "Fresh Milk" })).toHaveAttribute("src", "https://img.example/milk.png")
+    await user.click(within(preview).getByRole("button", { name: "Close enlarged image of Fresh Milk" }))
+    expect(preview).toHaveProperty("open", false)
+
+    await user.click(within(card).getByRole("button", { name: "View details for Fresh Milk" }))
+    const details = screen.getByRole("dialog", { name: "Fresh Milk" })
+    await user.click(within(details).getByRole("button", { name: "Enlarge image of Fresh Milk" }))
+    expect(preview).toHaveProperty("open", true)
+    // Clicking the backdrop closes it.
+    await user.click(preview)
+    expect(preview).toHaveProperty("open", false)
+  })
+
+  it("shows the category icon for a product without a picture, enlarged too", async () => {
+    const user = userEvent.setup()
+    renderSearch([bread])
+    const card = (await screen.findByRole("button", { name: "View details for Wholemeal Bread" })).closest("article")!
+    const icon = within(card).getByRole("button", { name: "Enlarge image of Wholemeal Bread" }).querySelector("img")!
+    expect(icon).toHaveAttribute("src", breadIcon)
+    expect(icon).toHaveAttribute("aria-hidden", "true")
+
+    await user.click(within(card).getByRole("button", { name: "Enlarge image of Wholemeal Bread" }))
+    const preview = screen.getByRole("dialog", { name: "Enlarged image of Wholemeal Bread" })
+    expect(preview.querySelector("img")).toHaveAttribute("src", breadIcon)
   })
 })

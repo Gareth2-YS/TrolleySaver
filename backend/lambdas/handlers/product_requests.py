@@ -110,14 +110,9 @@ def mine(event, caller):
         "ScanIndexForward": False,
         "Limit": db.page_limit(event),
     }
-    start_key = db.decode_page_token((event.get("queryStringParameters") or {}).get("nextToken"))
-    if start_key:
-        query["ExclusiveStartKey"] = start_key
-    page = db.product_requests().query(**query)
-    return response(200, {
-        "items": to_records(page["Items"]),
-        "nextToken": db.encode_page_token(page.get("LastEvaluatedKey")),
-    })
+    token = (event.get("queryStringParameters") or {}).get("nextToken")
+    items, next_token = db.query_page(db.product_requests(), query, token, ("requestId", "userId", "submittedAt"))
+    return response(200, {"items": to_records(items), "nextToken": next_token})
 
 
 def _load_own(request_id, caller):
