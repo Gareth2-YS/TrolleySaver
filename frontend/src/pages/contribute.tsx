@@ -4,6 +4,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  Clock3,
   Image,
   Info,
   LoaderCircle,
@@ -55,6 +56,17 @@ type Mode = "existing" | "new"
 const MODES: { value: Mode; label: string; icon: typeof Search }[] = [
   { value: "existing", label: "Existing product", icon: Search },
   { value: "new", label: "New product", icon: PackagePlus },
+]
+
+// Shown beside Submit: what happens to what you send, in the order it happens.
+type Rule = { icon: typeof Search; tone: "done" | "waiting"; text: string }
+const PRICE_RULES: Rule[] = [
+  { icon: CheckCircle2, tone: "done", text: "Most prices are accepted straight away, and show on TrolleySaver after the nightly update." },
+  { icon: Clock3, tone: "waiting", text: "A price far from the usual range is checked by an admin first." },
+]
+const NEW_PRODUCT_RULES: Rule[] = [
+  { icon: Clock3, tone: "waiting", text: "An admin checks every new product before it goes live." },
+  { icon: CheckCircle2, tone: "done", text: "Once approved, it appears in Search and Smart Basket. Its price shows after the nightly update." },
 ]
 
 function FieldError({ id, children }: { id?: string; children?: ReactNode }) {
@@ -637,11 +649,15 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
         </section>
 
         <div className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:pl-6 lg:col-span-12">
-          <p className="max-w-[72ch] text-sm text-muted-foreground">
-            {mode === "new"
-              ? <><strong className="font-semibold text-foreground">An admin checks every new product first.</strong> Once it’s approved, it appears in Search and Smart Basket, and its price shows after the nightly update.</>
-              : <><strong className="font-semibold text-foreground">Most prices are accepted straight away</strong> and show on TrolleySaver after the nightly update. A price far from the usual range goes to an admin to check first.</>}
-          </p>
+          {/* What happens after Submit, one rule per line, with the icons of the badges each outcome gets in Your submissions */}
+          <ul className="grid gap-1.5 text-sm" aria-label="What happens next">
+            {(mode === "new" ? NEW_PRODUCT_RULES : PRICE_RULES).map(({ icon: Icon, tone, text }) => (
+              <li key={text} className="flex items-start gap-2">
+                <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", tone === "done" ? "text-primary" : "text-amber-700 dark:text-amber-300")} />
+                <span>{text}</span>
+              </li>
+            ))}
+          </ul>
           <div className="flex shrink-0 flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="outline" onClick={clearForm}>Clear</Button>
             <Button type="submit" disabled={isSubmitting || evidence.preparing || picture.preparing || Boolean(evidence.error)}>
