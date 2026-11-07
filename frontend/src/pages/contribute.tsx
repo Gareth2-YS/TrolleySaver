@@ -183,7 +183,6 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     () => [...new Set(products.map((product) => product.category?.trim()).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b)),
     [products],
   )
-  const categoryById = useMemo(() => new Map(products.map((product) => [product.id, product.category])), [products])
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLocaleLowerCase()
     const category = productCategory.trim().toLocaleLowerCase()
@@ -674,7 +673,6 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
         pricesLoading={loading}
         refreshPrices={loadMine}
         onPriceDeleted={(id) => setSubmissions((current) => current.filter((item) => item.id !== id))}
-        categoryOf={(productId) => categoryById.get(productId)}
         refreshKey={historyKey}
       />
     </div>

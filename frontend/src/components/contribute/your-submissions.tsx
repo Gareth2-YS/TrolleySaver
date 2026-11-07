@@ -1,9 +1,8 @@
-import { CalendarDays, Image, ImageOff, LoaderCircle, RefreshCw, Store, Trash2 } from "lucide-react"
+import { CalendarDays, Image, LoaderCircle, RefreshCw, Store, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useAuth } from "../../auth/auth-context"
 import { errorText, SubmissionServiceError } from "../../contributions/service"
 import type { PriceSubmission, ProductRequest, SubmissionService } from "../../contributions/types"
-import { getCategoryIcon } from "../../lib/category-icons"
 import { formatCents, formatDay, formatDollars, formatTimestamp } from "../../lib/format"
 import { cn } from "../../lib/utils"
 import { FormAlert } from "../auth/form-alert"
@@ -50,12 +49,14 @@ function Row({ thumb, name, kind, meta, photo, price, badge, after }: { thumb: R
 }
 
 // The row's main picture: what the contributor sent, enlargeable like the pictures on Search.
-// The category icon stands in when they sent no photo, or when the photo can't be loaded.
-function RowPicture({ url, name, category, onExpired }: { url?: string; name: string; category?: string | null; onExpired: () => void }) {
-  const icon = getCategoryIcon(category)
-  if (url) return <EnlargeableImage url={url} name={name} fallback={icon} onExpired={onExpired} className="size-12 object-cover p-0 sm:size-14" />
-  if (icon) return <img src={icon} alt="" className="product-tile size-12 sm:size-14" />
-  return <span className="product-tile grid size-12 place-items-center text-muted-foreground sm:size-14"><Image aria-hidden="true" className="size-5" /></span>
+// Without one, the row says so plainly rather than showing a stand-in picture.
+function RowPicture({ url, name, attached = false, onExpired }: { url?: string; name: string; attached?: boolean; onExpired: () => void }) {
+  if (url) return <EnlargeableImage url={url} name={name} onExpired={onExpired} className="size-12 object-cover p-0 sm:size-14" />
+  return (
+    <span className="grid size-12 place-items-center rounded-xl border border-dashed bg-secondary/50 text-center text-muted-foreground sm:size-14">
+      <span><Image aria-hidden="true" className="mx-auto size-4" /><span className="mt-0.5 block text-[10px] leading-tight">{attached ? "Photo attached" : "No image"}</span></span>
+    </span>
+  )
 }
 
 // Names a pending item well enough to tell it from others of the same product: what, where and when.
@@ -87,13 +88,12 @@ function Meta({ icon: Icon, children }: { icon?: typeof Store; children: ReactNo
  * Everything the contributor has sent, prices and new products in one list, newest first.
  * Price submissions come from the page (it adds new ones as they are sent); product requests are loaded here.
  */
-export function YourSubmissions({ service, priceSubmissions, pricesLoading, refreshPrices, onPriceDeleted, categoryOf, refreshKey }: {
+export function YourSubmissions({ service, priceSubmissions, pricesLoading, refreshPrices, onPriceDeleted, refreshKey }: {
   service: SubmissionService
   priceSubmissions: PriceSubmission[]
   pricesLoading: boolean
   refreshPrices: () => Promise<void>
   onPriceDeleted: (id: string) => void
-  categoryOf: (productId: string) => string | undefined
   refreshKey: number
 }) {
   const { user, getAccessToken } = useAuth()
@@ -225,11 +225,10 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
                   key={`price-${item.id}`}
                   kind="price"
                   name={item.productName}
-                  thumb={<RowPicture url={item.photo?.previewUrl} name={`Price evidence for ${item.productName}`} category={categoryOf(item.productId)} onExpired={() => { if (item.photo?.storage === "private-s3") void refreshPrices().catch(() => undefined) }} />}
+                  thumb={<RowPicture url={item.photo?.previewUrl} name={`Price evidence for ${item.productName}`} attached={Boolean(item.photo)} onExpired={() => { if (item.photo?.storage === "private-s3") void refreshPrices().catch(() => undefined) }} />}
                   meta={[
                     <Meta key="store" icon={Store}>{item.storeName}</Meta>,
                     <Meta key="seen" icon={CalendarDays}>Seen {formatDay(item.observedDate)}</Meta>,
-                    item.photo ? (item.photo.previewUrl ? null : <Meta key="photo" icon={Image}>Photo attached</Meta>) : <Meta key="photo" icon={ImageOff}>No photo</Meta>,
                     <Meta key="sent">Sent {formatTimestamp(item.submittedAt)}</Meta>,
                   ]}
                   price={formatDollars(item.price)}
@@ -253,7 +252,7 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
                 key={`new-${item.id}`}
                 kind="new"
                 name={item.name}
-                thumb={<RowPicture url={item.productImageUrl} name={`Product picture for ${item.name}`} category={item.category} onExpired={() => void load()} />}
+                thumb={<RowPicture url={item.productImageUrl} name={`Product picture for ${item.name}`} onExpired={() => void load()} />}
                 meta={[
                   <Meta key="pack">{packLabel(item)}</Meta>,
                   <Meta key="store" icon={Store}>{item.retailerName ?? item.retailerId}</Meta>,
