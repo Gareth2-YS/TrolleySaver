@@ -44,3 +44,16 @@ def test_origin_does_not_leak_into_the_next_request(aws):
     products("https://site.example.test")
     assert "Access-Control-Allow-Origin" not in products()["headers"]
     assert call(catalog.handler, api_event("GET", "/retailers", user_id=None))[0] == 200
+
+
+def test_every_response_says_nosniff_and_no_store(aws):
+    """Browsers must take responses as the JSON they are, and nobody may keep a copy of someone's data."""
+    from common.http import ApiError, api_handler, no_content
+
+    @api_handler
+    def failing(event, context):
+        raise ApiError(400, "VALIDATION_ERROR", "Some fields are invalid.")
+
+    for result in (products(), failing({}, None), no_content()):
+        assert result["headers"]["X-Content-Type-Options"] == "nosniff"
+        assert result["headers"]["Cache-Control"] == "no-store"

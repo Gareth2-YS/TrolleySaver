@@ -10,6 +10,7 @@ interface FormFieldProps {
   type?: string
   autoComplete?: string
   placeholder?: string
+  maxLength?: number
 }
 
 export function FormField({ id, label, error, registration, ...props }: FormFieldProps) {

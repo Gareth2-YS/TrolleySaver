@@ -10,6 +10,8 @@ const FRIENDLY_ERRORS: Record<string, string> = {
 }
 
 export function getAuthErrorMessage(error: unknown) {
+  // The sign-up trigger refused the details; Cognito wraps its message as "PreSignUp failed with error <message>."
+  if (error instanceof Error && error.name === "UserLambdaValidationException") return error.message.replace(/^PreSignUp failed with error\s*/, "")
   if (error instanceof Error) return FRIENDLY_ERRORS[error.name] ?? error.message
   return "Something went wrong. Please try again."
 }

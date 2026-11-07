@@ -6,102 +6,108 @@ import {
   CheckCircle2,
   Clock3,
   Image,
-  ImageUp,
-  ListChecks,
+  Info,
   LoaderCircle,
+  Package,
+  PackagePlus,
   Search,
+  Send,
   ShieldCheck,
   Store,
+  Tag,
   X,
-  XCircle,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react"
-import { ProductRequestForm, ProductRequestHistory, ProductRequestReview } from "./product-requests"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
 import { FormAlert } from "../components/auth/form-alert"
+import { PhotoDrop, usePhoto } from "../components/contribute/photo-drop"
+import { PriceStatusBadge } from "../components/contribute/status-badge"
+import { YourSubmissions } from "../components/contribute/your-submissions"
 import { AppShell } from "../components/layout/app-shell"
+import { PageHeader } from "../components/layout/page-header"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
+import { Select } from "../components/ui/select"
 import {
   contributionSchema,
   earliestObservedDate,
+  productFieldsSchema,
+  reasonError,
   singaporeDateString,
-  validateImage,
+  validationMessages,
   type ContributionInput,
   type ContributionValues,
 } from "../contributions/schema"
-import { createSubmissionService, SubmissionServiceError } from "../contributions/service"
-import type { CatalogProduct, CatalogRetailer, PriceSubmission, SubmissionService, SubmissionStatus } from "../contributions/types"
-import { formatDollars } from "../lib/format"
+import { createSubmissionService, errorText, SubmissionServiceError } from "../contributions/service"
+import type { CatalogProduct, CatalogRetailer, PriceSubmission, ProductFields, SubmissionService } from "../contributions/types"
+import { getCategoryIcon } from "../lib/category-icons"
+import { formatDay, formatDollars, formatTimestamp, limitToCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
-import { PageHeader } from "../components/layout/page-header"
-import { Select } from "../components/ui/select"
+import { emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
 
+// Whether the price is for a product already on TrolleySaver, or for one being added.
+type Mode = "existing" | "new"
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`))
-}
+const MODES: { value: Mode; label: string; icon: typeof Search }[] = [
+  { value: "existing", label: "Existing product", icon: Search },
+  { value: "new", label: "New product", icon: PackagePlus },
+]
 
-function formatTimestamp(value: string) {
-  return new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
-}
+// Shown beside Submit: what happens to what you send, in the order it happens.
+type Rule = { icon: typeof Search; tone: "done" | "waiting"; text: string }
+const PRICE_RULES: Rule[] = [
+  { icon: CheckCircle2, tone: "done", text: "Most prices are accepted straight away, and show on TrolleySaver after the nightly update." },
+  { icon: Clock3, tone: "waiting", text: "A price far from the usual range is checked by an admin first." },
+]
+const NEW_PRODUCT_RULES: Rule[] = [
+  { icon: Clock3, tone: "waiting", text: "An admin checks every new product before it goes live." },
+  { icon: CheckCircle2, tone: "done", text: "Once approved, it appears in Search and Smart Basket. Its price shows after the nightly update." },
+]
 
-function FieldError({ children }: { children?: ReactNode }) {
+function FieldError({ id, children }: { id?: string; children?: ReactNode }) {
   if (!children) return null
-  return <p role="alert" className="text-xs font-medium text-destructive">{children}</p>
+  return <p id={id} role="alert" className="text-xs font-medium text-destructive">{children}</p>
 }
 
-function StatusBadge({ status }: { status: SubmissionStatus }) {
-  const Icon = status === "accepted" ? CheckCircle2 : status === "rejected" ? XCircle : Clock3
+function SectionHeading({ icon: Icon, title, description }: { icon: typeof Search; title: string; description: string }) {
   return (
-    <span className={cn(
-      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold capitalize",
-      status === "accepted" && "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-      status === "rejected" && "border-destructive/25 bg-destructive/10 text-destructive",
-      status === "flagged" && "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    )}>
-      <Icon className="size-3.5" />{status === "flagged" ? "Pending review" : status}
-    </span>
+    <div className="flex items-center gap-3">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-primary"><Icon className="size-5" aria-hidden="true" /></span>
+      <div>
+        <h2 className="font-display text-lg font-extrabold leading-tight sm:text-xl">{title}</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+      </div>
+    </div>
   )
 }
 
-function PhotoView({ submission, large = false, onExpired }: { submission: PriceSubmission; large?: boolean; onExpired?: () => void }) {
-  if (!submission.photo) {
+// The evidence photo beside a flagged price, for administrators.
+function PhotoView({ submission, onExpired }: { submission: PriceSubmission; onExpired?: () => void }) {
+  if (!submission.photo?.previewUrl) {
     return (
-      <div className={cn("grid place-items-center rounded-xl border border-dashed bg-secondary/50 text-center text-muted-foreground", large ? "min-h-52" : "size-20 shrink-0")}>
-        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">No image</span></div>
-      </div>
-    )
-  }
-  if (!large || !submission.photo.previewUrl) {
-    return (
-      <div className={cn("grid place-items-center rounded-xl border border-dashed bg-secondary/50 p-3 text-center text-muted-foreground", large ? "min-h-52" : "size-20 shrink-0")}>
-        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">Photo attached · visible to administrators</span></div>
+      <div className="grid min-h-52 place-items-center rounded-xl border border-dashed bg-secondary/50 p-3 text-center text-muted-foreground">
+        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">{submission.photo ? "Photo attached" : "No image"}</span></div>
       </div>
     )
   }
   return (
-    <figure className={large ? "min-w-0 space-y-3" : "size-20 shrink-0"}>
-      <figcaption className={large ? "text-sm font-semibold" : "sr-only"}>
-        Price evidence
-      </figcaption>
+    <figure className="min-w-0 space-y-3">
+      <figcaption className="text-sm font-semibold">Price evidence</figcaption>
       <img
-      src={submission.photo.previewUrl}
-      alt={`Price evidence for ${submission.productName}`}
-      className={cn("rounded-xl border", large ? "max-h-96 w-full bg-secondary/40 object-contain" : "size-20 object-cover")}
-      onError={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }}
+        src={submission.photo.previewUrl}
+        alt={`Price evidence for ${submission.productName}`}
+        className="max-h-96 w-full rounded-xl border bg-secondary/40 object-contain"
+        onError={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }}
       />
-      {large && <div className="rounded-xl border border-primary/20 bg-accent/50 p-4">
+      <div className="rounded-xl border border-primary/20 bg-accent/50 p-4">
         <p className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-5 shrink-0 text-primary" />Help shoppers trust this price</p>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        Match the product name and price on the shelf label or receipt to the details beside it.
-        </p>
-      </div>}
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Match the product name and price on the shelf label or receipt to the details beside it.</p>
+      </div>
     </figure>
   )
 }
@@ -111,14 +117,12 @@ function SubmissionDetails({ submission }: { submission: PriceSubmission }) {
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="font-display font-extrabold leading-snug">{submission.productName}</h3>
-        <StatusBadge status={submission.status} />
+        <PriceStatusBadge status={submission.status} />
       </div>
-      <p className="mt-2 text-2xl font-semibold tabular-nums text-primary">
-        {formatDollars(submission.price)}
-      </p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums text-primary">{formatDollars(submission.price)}</p>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5"><Store className="size-3.5" />{submission.storeName}</span>
-        <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-3.5" />Observed {formatDate(submission.observedDate)}</span>
+        <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-3.5" />Observed {formatDay(submission.observedDate)}</span>
       </div>
       {submission.rejectionReason && (
         <p className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -129,53 +133,33 @@ function SubmissionDetails({ submission }: { submission: PriceSubmission }) {
   )
 }
 
-function ReviewPathCard() {
-  return (
-    <aside className="surface-card p-5 sm:p-6">
-      <div className="flex items-center gap-3">
-        <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><ListChecks className="size-5" /></span>
-        <div><h2 className="font-display font-extrabold">From shelf to review</h2><p className="text-xs text-muted-foreground">A simple three-step flow</p></div>
-      </div>
-      <ol className="mt-5 grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
-        {[["1", "Add details"], ["2", "Attach proof"], ["3", "Track status"]].map(([step, label]) => (
-          <li key={step} className="rounded-xl border bg-card/35 px-2 py-3">
-            <span className="mx-auto grid size-6 place-items-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">{step}</span>
-            <span className="mt-2 block">{label}</span>
-          </li>
-        ))}
-      </ol>
-    </aside>
-  )
-}
-
-function NewProductDialog({ service, onClose, onExisting }: { service: SubmissionService; onClose: () => void; onExisting: (id: string) => Promise<void> }) {
-  const dialog = useRef<HTMLDialogElement>(null)
-  useEffect(() => { dialog.current?.showModal() }, [])
-  return <dialog ref={dialog} onClose={onClose} aria-labelledby="new-product-title" className="mx-auto mb-auto mt-6 max-h-[calc(100dvh-3rem)] w-[min(1280px,95vw)] overflow-y-auto rounded-2xl border bg-card p-5 text-card-foreground shadow-xl backdrop:bg-black/50 sm:mt-24 sm:max-h-[calc(100dvh-8rem)] sm:p-7">
-    <div className="mb-5 flex items-center justify-between"><h2 id="new-product-title" className="font-display text-xl font-extrabold">Upload a new product</h2><Button variant="ghost" onClick={() => dialog.current?.close()} aria-label="Close new product upload"><X className="size-4" /></Button></div>
-    <ProductRequestForm service={service} onDone={() => dialog.current?.close()} onExisting={onExisting} />
-  </dialog>
-}
-
 function ContributorWorkspace({ service }: { service: SubmissionService }) {
   usePageTitle("Price & image upload")
   const { user, getAccessToken } = useAuth()
+  const [mode, setMode] = useState<Mode>("existing")
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
   const [products, setProducts] = useState<CatalogProduct[]>([])
+  const [stores, setStores] = useState<CatalogRetailer[]>([])
+  const [facets, setFacets] = useState<Facets>({ categories: [], dietary: [] })
   const [productSearch, setProductSearch] = useState("")
   const [productCategory, setProductCategory] = useState("")
   const [productListOpen, setProductListOpen] = useState(false)
   const [activeProductIndex, setActiveProductIndex] = useState(-1)
-  const [stores, setStores] = useState<CatalogRetailer[]>([])
+  const [newProduct, setNewProduct] = useState<ProductFields>(emptyProduct)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [file, setFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [imageError, setImageError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
-  const photoInput = useRef<HTMLInputElement>(null)
-  const [showNewProduct, setShowNewProduct] = useState(false)
-  const fieldId = (name: string) => name
+  // Bumped after a new product is sent, so the list reloads its product requests.
+  const [historyKey, setHistoryKey] = useState(0)
+  // Bumped by Clear, so the photo inputs start empty again.
+  const [formKey, setFormKey] = useState(0)
+  const evidence = usePhoto()
+  const picture = usePhoto()
+  // The product chosen before switching to New, restored when switching back.
+  const savedProductId = useRef("")
+  const focusNameOnSwitch = useRef(false)
+  const tabs = useRef<Record<Mode, HTMLButtonElement | null>>({ existing: null, new: null })
   const today = singaporeDateString()
   const earliestDate = earliestObservedDate()
   const {
@@ -185,18 +169,21 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     clearErrors,
     setError,
     setValue,
+    getValues,
     watch,
     formState: { errors, isSubmitting },
   } = useForm<ContributionInput, unknown, ContributionValues>({
     resolver: zodResolver(contributionSchema),
-    defaultValues: { productId: "", storeId: "", price: 0, observedDate: today },
+    defaultValues: { productId: "", storeId: "", price: "", observedDate: today },
   })
   const selectedProductId = watch("productId")
+  const priceField = register("price")
 
   const productCategories = useMemo(
     () => [...new Set(products.map((product) => product.category?.trim()).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b)),
     [products],
   )
+  const categoryById = useMemo(() => new Map(products.map((product) => [product.id, product.category])), [products])
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLocaleLowerCase()
     const category = productCategory.trim().toLocaleLowerCase()
@@ -209,7 +196,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       return matchesCategory && (!query || searchableText.includes(query))
     })
   }, [productCategory, productSearch, products])
-  const showProductOptions = productListOpen
+  const typed = productSearch.trim()
 
   function chooseProduct(product: CatalogProduct) {
     setValue("productId", product.id, { shouldDirty: true, shouldValidate: true })
@@ -217,6 +204,43 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     setProductSearch(product.name)
     setProductListOpen(false)
     setActiveProductIndex(-1)
+  }
+
+  // Store, price, date and the price photo are shared, so they keep their values when the mode changes.
+  function switchMode(next: Mode) {
+    if (next === mode) return
+    if (next === "new") {
+      const current = getValues("productId")
+      savedProductId.current = current === "new" ? "" : current
+      setValue("productId", "new")
+      clearErrors("productId")
+    } else {
+      setValue("productId", savedProductId.current)
+    }
+    setProductListOpen(false)
+    setNotice(null)
+    setMode(next)
+  }
+
+  // From a search that found nothing: carry what was typed over as the new product's name.
+  function addAsNewProduct() {
+    if (typed && !selectedProductId) setNewProduct((current) => (current.name ? current : { ...current, name: typed }))
+    focusNameOnSwitch.current = true
+    switchMode("new")
+  }
+
+  useEffect(() => {
+    if (mode !== "new" || !focusNameOnSwitch.current) return
+    focusNameOnSwitch.current = false
+    document.getElementById("new-product-name")?.focus()
+  }, [mode])
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+    event.preventDefault()
+    const next: Mode = event.key === "Home" ? "existing" : event.key === "End" ? "new" : mode === "existing" ? "new" : "existing"
+    switchMode(next)
+    tabs.current[next]?.focus()
   }
 
   const loadMine = useCallback(async () => {
@@ -228,6 +252,8 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
 
   useEffect(() => {
     let active = true
+    // The labels and categories for new products; the price form works without them.
+    service.listFacets().then((next) => { if (active) setFacets(next) }).catch(() => undefined)
     async function load() {
       try {
         const [nextProducts, nextStores] = await Promise.all([service.listProducts(), service.listRetailers()])
@@ -249,52 +275,82 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     return () => window.clearTimeout(timer)
   }, [loadMine, submissions])
 
-  function clearImage() {
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setFile(null)
-    setPreviewUrl(null)
-    setImageError(null)
-    setProgress(null)
-  }
-
   function clearForm() {
-    reset({ productId: "", storeId: "", price: 0, observedDate: today })
+    reset({ productId: mode === "new" ? "new" : "", storeId: "", price: "", observedDate: today })
+    savedProductId.current = ""
     setProductSearch("")
     setProductCategory("")
     setProductListOpen(false)
     setActiveProductIndex(-1)
-    clearImage()
+    setNewProduct(emptyProduct)
+    evidence.clear()
+    picture.clear()
+    setFormKey((key) => key + 1)
+    setProgress(null)
     setLoadError(null)
-  }
-
-  function onImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0]
-    if (!next) return
-    const validationError = validateImage(next)
-    if (validationError) {
-      clearImage()
-      setImageError(validationError)
-      event.target.value = ""
-      return
-    }
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setFile(next)
-    setPreviewUrl(URL.createObjectURL(next))
-    setImageError(null)
+    setNotice(null)
   }
 
   async function submit(values: ContributionValues) {
-    if (!user || imageError) return
+    if (!user || evidence.error) return
     setLoadError(null)
+    setNotice(null)
     clearErrors()
-    setProgress(file ? 0 : null)
+
+    if (mode === "new") {
+      const fields = productFieldsSchema.safeParse(newProduct)
+      if (!fields.success) { setLoadError(validationMessages(fields.error.issues)); return }
+      if (!picture.file) { picture.setError("Add a picture of the pack. Every new product needs one."); return }
+      setProgress(0)
+      try {
+        const token = await getAccessToken()
+        if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
+        const target = await service.requestProductImageUpload(picture.file, "product-image", token)
+        await service.uploadImage(target, picture.file, evidence.file ? undefined : setProgress)
+        let photoKey: string | undefined
+        if (evidence.file) {
+          const photo = await service.requestProductImageUpload(evidence.file, "evidence", token)
+          await service.uploadImage(photo, evidence.file, setProgress)
+          photoKey = photo.photoKey
+        }
+        await service.createProductRequest({
+          ...fields.data,
+          retailerId: values.storeId,
+          priceCents: Math.round(values.price * 100),
+          observedAt: values.observedDate,
+          productImageKey: target.photoKey,
+          ...(photoKey ? { photoKey } : {}),
+        }, user.id, token)
+        clearForm()
+        setHistoryKey((key) => key + 1)
+        toast.success("New product sent for review")
+      } catch (error) {
+        // Already on TrolleySaver: switch to that product, keeping the store, price, date and photo.
+        if (error instanceof SubmissionServiceError && error.code === "PRODUCT_EXISTS" && error.productId) {
+          try {
+            const catalog = await service.listProducts()
+            const canonical = catalog.find((product) => product.id === error.productId)
+            if (!canonical) throw new Error("The canonical product is not available yet. Reload the catalog and retry.", { cause: error })
+            setProducts(catalog)
+            switchMode("existing")
+            chooseProduct(canonical)
+            setNotice(`${error.message} It’s now selected below, with your store, price and photos kept.`)
+          } catch (recoveryError) { setLoadError(errorText(recoveryError)) }
+        } else setLoadError(errorText(error))
+      } finally {
+        setProgress(null)
+      }
+      return
+    }
+
+    setProgress(evidence.file ? 0 : null)
     try {
       const token = await getAccessToken()
       if (!token) throw new Error("Your session is unavailable. Sign in again and retry.")
       let photo
-      if (file) {
-        const target = await service.requestImageUpload(file, values.productId, values.storeId, token)
-        photo = await service.uploadImage(target, file, setProgress)
+      if (evidence.file) {
+        const target = await service.requestImageUpload(evidence.file, values.productId, values.storeId, token)
+        photo = await service.uploadImage(target, evidence.file, setProgress)
       }
       const product = products.find((item) => item.id === values.productId)
       const store = stores.find((item) => item.id === values.storeId)
@@ -312,7 +368,9 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       }, token)
       setSubmissions((current) => [created, ...current])
       clearForm()
-      toast.success(created.status === "accepted" ? "Price accepted; public prices update after nightly aggregation" : "Submission sent for administrator review")
+      if (created.status === "accepted") toast.success("Price accepted. It shows on TrolleySaver after the nightly update.")
+      else if (created.status === "flagged") toast.success("Price sent to an admin to check, as it’s far from the usual range.")
+      else toast.error("This price wasn’t accepted. Check it against the shelf label and try again.")
     } catch (error) {
       if (error instanceof SubmissionServiceError && error.fieldErrors) {
         const fieldMap = { productId: "productId", retailerId: "storeId", priceCents: "price", observedAt: "observedDate" } as const
@@ -321,7 +379,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           if (message) setError(formField, { message })
         })
         const photoMessage = error.fieldErrors.photo ?? error.fieldErrors.photoKey
-        if (photoMessage) setImageError(photoMessage)
+        if (photoMessage) evidence.setError(photoMessage)
       }
       setLoadError(error instanceof Error ? error.message : "The submission could not be saved.")
     } finally {
@@ -329,269 +387,296 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     }
   }
 
+  const existingPanel = (
+    <div
+      className="space-y-2"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProductListOpen(false)
+      }}
+    >
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(160px,0.45fr)]">
+        <div className="space-y-2">
+          <Label htmlFor="product-search">Product</Label>
+          <div className="relative">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="product-search"
+              type="search"
+              maxLength={100}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={productListOpen}
+              aria-controls={filteredProducts.length > 0 ? "product-options" : undefined}
+              aria-activedescendant={productListOpen && activeProductIndex >= 0 ? `product-option-${filteredProducts[activeProductIndex]?.id}` : undefined}
+              aria-invalid={Boolean(errors.productId)}
+              aria-describedby={errors.productId ? "product-error" : undefined}
+              autoComplete="off"
+              placeholder="Start typing a product or brand"
+              className="pl-9"
+              value={productSearch}
+              onFocus={() => {
+                setProductListOpen(true)
+                setActiveProductIndex(-1)
+              }}
+              onChange={(event) => {
+                setProductSearch(event.target.value)
+                setValue("productId", "")
+                setProductListOpen(true)
+                setActiveProductIndex(-1)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" && filteredProducts.length > 0) {
+                  event.preventDefault()
+                  setProductListOpen(true)
+                  setActiveProductIndex((current) => Math.min(current + 1, filteredProducts.length - 1))
+                } else if (event.key === "ArrowUp" && filteredProducts.length > 0) {
+                  event.preventDefault()
+                  setProductListOpen(true)
+                  setActiveProductIndex((current) => current <= 0 ? filteredProducts.length - 1 : current - 1)
+                } else if (event.key === "Enter" && productListOpen && filteredProducts.length > 0) {
+                  event.preventDefault()
+                  chooseProduct(filteredProducts[activeProductIndex >= 0 ? activeProductIndex : 0])
+                } else if (event.key === "Escape") {
+                  setProductListOpen(false)
+                  setActiveProductIndex(-1)
+                }
+              }}
+              disabled={loading}
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="product-category">Type <span className="font-normal text-muted-foreground">(optional)</span></Label>
+          <Select
+            id="product-category"
+            value={productCategory}
+            disabled={loading || productCategories.length === 0}
+            onChange={(event) => {
+              const category = event.target.value
+              setProductCategory(category)
+              // Keep the chosen product if it belongs to the new type; otherwise clear the
+              // selection and the box together, so the box never shows an unselected product.
+              const selected = products.find((product) => product.id === selectedProductId)
+              const stillFits = selected && (!category || selected.category?.trim().toLocaleLowerCase() === category.trim().toLocaleLowerCase())
+              if (!stillFits) {
+                setValue("productId", "")
+                setProductSearch("")
+              }
+              setProductListOpen(true)
+              setActiveProductIndex(-1)
+            }}
+          >
+            <option value="">All types</option>
+            {productCategories.map((category) => (
+              <option key={category} value={category}>{category.charAt(0).toLocaleUpperCase() + category.slice(1)}</option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      {productListOpen && (
+        <div className="overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg">
+          {filteredProducts.length > 0 && (
+            <div id="product-options" role="listbox" aria-label="Matching products" className="max-h-64 overflow-y-auto py-1">
+              {filteredProducts.map((product, index) => {
+                const icon = getCategoryIcon(product.category)
+                return (
+                  <div
+                    id={`product-option-${product.id}`}
+                    key={product.id}
+                    role="option"
+                    aria-selected={product.id === selectedProductId}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-3 px-3 py-2 text-sm",
+                      index === activeProductIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+                    )}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveProductIndex(index)}
+                    onClick={() => chooseProduct(product)}
+                  >
+                    {icon
+                      ? <img src={icon} alt="" className="product-tile size-8" />
+                      : <span className="product-tile grid size-8 place-items-center text-muted-foreground"><Package className="size-4" aria-hidden="true" /></span>}
+                    <span className="min-w-0 flex-1">{product.name}</span>
+                    {product.category && <span className="shrink-0 text-xs capitalize text-muted-foreground">{product.category}</span>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className={cn("grid gap-2.5 bg-secondary/60 p-3", filteredProducts.length > 0 && "border-t")}>
+            {filteredProducts.length === 0
+              ? <p role="status" className="text-sm">{typed ? <>No product matches “<strong>{typed}</strong>”.</> : "No products of this type yet."}</p>
+              : <p className="text-sm text-muted-foreground">Can’t find it?</p>}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit max-w-full border-primary/50 text-primary"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={addAsNewProduct}
+            >
+              <PackagePlus className="size-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{filteredProducts.length === 0 && typed ? `Add “${typed}” as a new product` : "Add it as a new product"}</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!loading && products.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {typed || productCategory
+            ? `Showing ${filteredProducts.length} of ${products.length} products.`
+            : `${products.length} products. Type to search, or pick from the list.`}
+        </p>
+      )}
+      <FieldError id="product-error">{errors.productId?.message}</FieldError>
+    </div>
+  )
+
   return (
     <div className="space-y-6 sm:space-y-8">
-      <PageHeader title="Share a price you spotted" description="Found a price worth sharing? Pass it on and help another shopper make their next grocery trip a little easier.">
-        <div className="min-w-0 flex-[1_1_340px]"><ReviewPathCard /></div>
-      </PageHeader>
-      <div className="surface-card flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"><div><h2 className="font-display text-lg font-extrabold">Found something new?</h2><p className="mt-1 text-sm text-muted-foreground">Help fellow shoppers discover it. Add a product we don’t have yet.</p></div><Button variant="outline" onClick={() => setShowNewProduct(true)}><ImageUp className="size-4" />Upload a new product</Button></div>
-      {showNewProduct && <NewProductDialog onExisting={async (id) => {
-        const catalog = await service.listProducts()
-        const canonical = catalog.find((p) => p.id === id)
-        if (!canonical) throw new Error("The canonical product is not available yet. Reload the catalog and retry.")
-        setProducts(catalog); chooseProduct(canonical); setShowNewProduct(false)
-      }} service={service} onClose={() => { setShowNewProduct(false); void loadMine().catch(() => setLoadError("Could not refresh submissions.")) }} />}
+      <PageHeader
+        title="Share a price you spotted"
+        description="Add a price you saw on the shelf, with a photo if you have one. You can also add a product that isn’t on TrolleySaver yet."
+      />
       <FormAlert message={loadError} />
-      <form onSubmit={handleSubmit(submit)} noValidate className="grid items-stretch gap-5 lg:grid-cols-12">
-        <div className="contents">
-        <section className="surface-card p-5 sm:p-7 lg:col-span-7">
-          <div className="flex items-center gap-3 border-b border-border/70 pb-5">
-            <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Store className="size-5" /></span>
-            <div><h2 className="font-display text-xl font-extrabold">Price details</h2><p className="mt-1 text-sm text-muted-foreground">What did you spot, and where?</p></div>
+      {notice && (
+        <p role="status" className="flex gap-2 rounded-xl border border-primary/30 bg-accent/60 p-3 text-sm text-accent-foreground">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{notice}
+        </p>
+      )}
+
+      <form onSubmit={handleSubmit(submit)} noValidate className="grid items-start gap-5 lg:grid-cols-12">
+        <input type="hidden" {...register("productId")} />
+
+        <section className="surface-card min-w-0 lg:col-span-7" aria-label="Product, store and price">
+          <div role="tablist" aria-label="Which product?" className="flex gap-1.5 border-b px-3 sm:px-5">
+            {MODES.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                ref={(element) => { tabs.current[value] = element }}
+                type="button"
+                role="tab"
+                id={`mode-tab-${value}`}
+                aria-selected={mode === value}
+                aria-controls="product-panel"
+                tabIndex={mode === value ? 0 : -1}
+                onClick={() => switchMode(value)}
+                onKeyDown={onTabKeyDown}
+                className={cn(
+                  "-mb-px inline-flex h-14 items-center gap-2 border-b-[3px] border-transparent px-2.5 text-[15px] font-semibold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  mode === value && "border-primary text-foreground",
+                )}
+              >
+                <Icon aria-hidden="true" className={cn("size-4", mode === value && "text-primary")} />{label}
+              </button>
+            ))}
           </div>
-          <div className="mt-6 grid gap-5 sm:grid-cols-2">
 
-            <div
-              className="space-y-2 sm:col-span-2"
-              onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProductListOpen(false)
-              }}
-            >
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,0.45fr)]">
-                <div className="space-y-2">
-                  <Label htmlFor="product-search">Product · search by name or brand</Label>
-                  <div className="relative">
-                    <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="product-search"
-                      type="search"
-                      role="combobox"
-                      aria-autocomplete="list"
-                      aria-expanded={showProductOptions}
-                      aria-controls={filteredProducts.length > 0 ? "product-options" : undefined}
-                      aria-activedescendant={showProductOptions && activeProductIndex >= 0 ? `product-option-${filteredProducts[activeProductIndex]?.id}` : undefined}
-                      aria-invalid={Boolean(errors.productId)}
-                      aria-describedby={errors.productId ? "product-error" : undefined}
-                      autoComplete="off"
-                      placeholder="Start typing a product or brand"
-                      className="pl-9"
-                      value={productSearch}
-                      onFocus={() => {
-                        setProductListOpen(true)
-                        setActiveProductIndex(-1)
-                      }}
-                      onChange={(event) => {
-                        const query = event.target.value
-                        setProductSearch(query)
-                        setValue("productId", "")
-                        setProductListOpen(true)
-                        setActiveProductIndex(-1)
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "ArrowDown" && filteredProducts.length > 0) {
-                          event.preventDefault()
-                          setProductListOpen(true)
-                          setActiveProductIndex((current) => Math.min(current + 1, filteredProducts.length - 1))
-                        } else if (event.key === "ArrowUp" && filteredProducts.length > 0) {
-                          event.preventDefault()
-                          setProductListOpen(true)
-                          setActiveProductIndex((current) => current <= 0 ? filteredProducts.length - 1 : current - 1)
-                        } else if (event.key === "Enter" && showProductOptions && filteredProducts.length > 0) {
-                          event.preventDefault()
-                          chooseProduct(filteredProducts[activeProductIndex >= 0 ? activeProductIndex : 0])
-                        } else if (event.key === "Escape") {
-                          setProductListOpen(false)
-                          setActiveProductIndex(-1)
-                        }
-                      }}
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="product-category">Optional type filter</Label>
-                  <Select
-                    id="product-category"
-                    value={productCategory}
-                    disabled={loading || productCategories.length === 0}
-                    onChange={(event) => {
-                      const category = event.target.value
-                      setProductCategory(category)
-                      // Keep the chosen product if it belongs to the new type; otherwise clear the
-                      // selection and the box together, so the box never shows an unselected product.
-                      const selected = products.find((product) => product.id === selectedProductId)
-                      const stillFits = selected && (!category || selected.category?.trim().toLocaleLowerCase() === category.trim().toLocaleLowerCase())
-                      if (!stillFits) {
-                        setValue("productId", "")
-                        setProductSearch("")
-                      }
-                      setProductListOpen(true)
-                      setActiveProductIndex(-1)
-                    }}
-                  >
-                    <option value="">All types</option>
-                    {productCategories.map((category) => (
-                      <option key={category} value={category}>{category.charAt(0).toLocaleUpperCase() + category.slice(1)}</option>
-                    ))}
+          <div className="space-y-6 p-5 sm:p-7">
+            <div id="product-panel" role="tabpanel" aria-labelledby={`mode-tab-${mode}`} className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {mode === "existing"
+                  ? products.length ? `Search the ${products.length} products already on TrolleySaver.` : "Search the products already on TrolleySaver."
+                  : "Describe it as it appears on the pack. An admin checks new products before they go live."}
+              </p>
+              {mode === "existing" ? existingPanel : <ProductEditor value={newProduct} onChange={setNewProduct} facets={facets} prefix="new-product" />}
+            </div>
+
+            <div className="space-y-5 border-t pt-6">
+              <SectionHeading icon={Tag} title="Where and how much" description="The same for existing and new products" />
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="store">Store</Label>
+                  <Select id="store" disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
+                    <option value="">{loading ? "Loading stores…" : "Select a store"}</option>
+                    {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
                   </Select>
+                  <FieldError>{errors.storeId?.message}</FieldError>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="price">Price (SGD)</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                    <Input id="price" type="number" inputMode="decimal" min="0.01" max="1000" step="0.01" placeholder="0.00" className="pl-7" aria-invalid={Boolean(errors.price)} {...priceField} onChange={(event) => { event.target.value = limitToCents(event.target.value); void priceField.onChange(event) }} />
+                  </div>
+                  <FieldError>{errors.price?.message}</FieldError>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="observedDate">Date seen</Label>
+                  <Input id="observedDate" type="date" min={earliestDate} max={today} aria-invalid={Boolean(errors.observedDate)} aria-describedby="observed-help" {...register("observedDate")} />
+                  <p id="observed-help" className="text-xs text-muted-foreground">Within the last 30 days</p>
+                  <FieldError>{errors.observedDate?.message}</FieldError>
                 </div>
               </div>
-
-              {showProductOptions && (
-                <div className="overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg">
-                  {filteredProducts.length > 0 ? (
-                    <div id="product-options" role="listbox" aria-label="Matching products" className="max-h-64 overflow-y-auto py-1">
-                      {filteredProducts.map((product, index) => (
-                        <div
-                          id={`product-option-${product.id}`}
-                          key={product.id}
-                          role="option"
-                          aria-selected={product.id === selectedProductId}
-                          className={cn(
-                            "flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-sm",
-                            index === activeProductIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
-                          )}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onMouseEnter={() => setActiveProductIndex(index)}
-                          onClick={() => chooseProduct(product)}
-                        >
-                          <span>{product.name}</span>
-                          {product.category && <span className="shrink-0 text-xs text-muted-foreground">{product.category}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p role="status" className="px-3 py-3 text-sm text-muted-foreground">No products match. Try another name or product type.</p>
-                  )}
-                </div>
-              )}
-
-              <input type="hidden" {...register("productId")} />
-              {!loading && products.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {productSearch.trim() || productCategory
-                    ? `Showing ${filteredProducts.length} of ${products.length} products. Select a suggestion from the list.`
-                    : `${products.length} products available. Type to search, or choose a suggestion from the full list.`}
-                </p>
-              )}
-              {errors.productId && <p id="product-error" role="alert" className="text-xs font-medium text-destructive">{errors.productId.message}</p>}
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor={fieldId("store")}>Store</Label>
-              <Select id={fieldId("store")} disabled={loading} aria-invalid={Boolean(errors.storeId)} {...register("storeId")}>
-                <option value="">{loading ? "Loading stores…" : "Select a store"}</option>
-                {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
-              </Select>
-              <FieldError>{errors.storeId?.message}</FieldError>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={fieldId("price")}>Price (SGD)</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                <Input id={fieldId("price")} type="number" min="0.01" max="1000" step="0.01" className="pl-7" aria-invalid={Boolean(errors.price)} {...register("price")} />
-              </div>
-              <FieldError>{errors.price?.message}</FieldError>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={fieldId("observedDate")}>Observed date</Label>
-              <Input id={fieldId("observedDate")} type="date" min={earliestDate} max={today} aria-invalid={Boolean(errors.observedDate)} {...register("observedDate")} />
-              <FieldError>{errors.observedDate?.message}</FieldError>
             </div>
           </div>
         </section>
 
-
-        </div>
-
-        <section className="surface-card flex min-w-0 flex-col p-5 sm:p-7 lg:col-span-5">
-          <div className="flex items-start justify-between gap-4 border-b border-border/70 pb-5">
-            <div className="flex items-center gap-3">
-              <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Camera className="size-5" /></span>
-              <div><h2 className="font-display text-xl font-extrabold">Show the price you spotted</h2><p className="mt-2 inline-flex rounded-full bg-accent px-3 py-1 text-sm font-medium text-primary">Photo optional</p></div>
-            </div>
-            {file && <Button type="button" variant="ghost" size="sm" onClick={clearImage}><X className="size-4" />Remove</Button>}
-          </div>
-          <div id={fieldId("evidence-help")} className="mt-5 rounded-xl border border-primary/20 bg-accent/40 p-4">
-            <h3 className="font-display text-lg font-extrabold">A clear price helps everyone.</h3>
-            <p className="mt-2 text-base leading-relaxed text-muted-foreground">Share a shelf label or receipt with the product name and price in focus, so the next shopper can buy with confidence.</p>
-            <ul className="mt-4 flex flex-wrap gap-2" aria-label="Photo reminders">
-              {["Product name", "Readable price"].map((reminder) => <li key={reminder} className="inline-flex items-center gap-1.5 rounded-lg bg-card/65 px-2.5 py-2 text-sm font-medium"><Check className="size-4 shrink-0 text-primary" />{reminder}</li>)}
-            </ul>
-          </div>
-          <Label htmlFor={fieldId("evidence")} className="sr-only">Price evidence photo</Label>
-          <label
-            htmlFor={fieldId("evidence")}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); photoInput.current?.click() } }}
-            className={cn(
-              "mt-5 grid min-h-56 flex-1 cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed bg-secondary/35 text-center transition-colors hover:border-primary/50 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-              imageError ? "border-destructive/50" : "border-border",
-            )}
-          >
-            {previewUrl ? (
-              <img src={previewUrl} alt="Selected price evidence preview" className="max-h-80 w-full object-contain" />
-            ) : (
-              <span className="p-6">
-                <span className="mx-auto grid size-14 place-items-center rounded-full bg-accent text-primary"><ImageUp className="size-7" /></span>
-                <strong className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-3 text-base font-semibold text-primary-foreground"><ImageUp className="size-5" />Add a price photo</strong>
-                <span className="mt-3 block text-sm text-muted-foreground">Choose from your device · JPG or PNG · Up to 5 MB</span>
-              </span>
-            )}
-          </label>
-          <input ref={photoInput} id={fieldId("evidence")} aria-describedby={fieldId("evidence-help")} className="sr-only" type="file" accept="image/jpeg,image/png" onChange={onImageChange} />
-          <FieldError>{imageError}</FieldError>
+        <section className="surface-card flex min-w-0 flex-col gap-6 p-5 sm:p-7 lg:col-span-5" aria-label="Photos">
+          <SectionHeading icon={Camera} title="Photos" description="JPG or PNG, up to 5 MB each" />
+          {mode === "new" && (
+            <PhotoDrop
+              key={`picture-${formKey}`}
+              id="product-picture"
+              label="Product picture"
+              inputLabel="Product picture"
+              required
+              title="Add a picture of the pack"
+              hint="The front of the pack, so shoppers recognise it"
+              previewAlt="Selected product picture preview"
+              photo={picture}
+            />
+          )}
+          <PhotoDrop
+            key={`evidence-${formKey}`}
+            id="evidence"
+            label="Price photo"
+            inputLabel="Price evidence photo"
+            title="Add a shelf label or receipt"
+            hint="Helps an admin check the price quickly"
+            previewAlt="Selected price evidence preview"
+            reminders={["Product name in view", "Price readable"]}
+            photo={evidence}
+          />
           {progress !== null && (
-            <div className="mt-4" aria-live="polite">
-              <div className="mb-2 flex justify-between text-xs"><span>Preparing image</span><span>{progress}%</span></div>
+            <div aria-live="polite">
+              <div className="mb-2 flex justify-between text-xs"><span>Uploading photo</span><span className="tabular-nums">{progress}%</span></div>
               <div className="h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div>
             </div>
           )}
         </section>
 
-        <div className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between lg:col-span-12">
-          <div className="flex items-center gap-3 text-sm">
-            <span className="grid size-9 place-items-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="size-4" /></span>
-            <span><strong className="block text-base">Small contribution. Shared savings.</strong><span className="mt-1 block text-sm text-muted-foreground">Usual prices are accepted automatically. Unusual prices get an administrator review. Public prices update after nightly aggregation.</span></span>
-          </div>
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
+        <div className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:pl-6 lg:col-span-12">
+          {/* What happens after Submit, one rule per line, with the icons of the badges each outcome gets in Your submissions */}
+          <ul className="grid gap-1.5 text-sm" aria-label="What happens next">
+            {(mode === "new" ? NEW_PRODUCT_RULES : PRICE_RULES).map(({ icon: Icon, tone, text }) => (
+              <li key={text} className="flex items-start gap-2">
+                <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", tone === "done" ? "text-primary" : "text-amber-700 dark:text-amber-300")} />
+                <span>{text}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex shrink-0 flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="outline" onClick={clearForm}>Clear</Button>
-            <Button type="submit" disabled={isSubmitting || Boolean(imageError)}>
-              {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <ImageUp className="size-4" />}
-              {isSubmitting ? "Saving..." : "Submit price"}
+            <Button type="submit" disabled={isSubmitting || evidence.preparing || picture.preparing || Boolean(evidence.error)}>
+              {isSubmitting ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : <Send className="size-4" aria-hidden="true" />}
+              {isSubmitting ? "Sending…" : mode === "new" ? "Submit product for review" : "Submit price"}
             </Button>
           </div>
         </div>
       </form>
 
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-      <ProductRequestHistory service={service} refreshKey={showNewProduct} />
-      <section className="surface-card min-w-0 p-5 sm:p-7">
-        <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-xl bg-accent text-primary"><Clock3 className="size-5" /></span>
-            <div><h2 className="font-display text-xl font-extrabold">Your price submissions</h2><p className="text-xs text-muted-foreground">Track every price contribution from newest to oldest</p></div>
-          </div>
-          <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">{submissions.length} total</span>
-        </div>
-        <div className="mt-6 grid gap-4" aria-live="polite">
-          {loading ? (
-            <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading your submissions…</div>
-          ) : submissions.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-10 text-center md:col-span-2 xl:col-span-3">
-              <Camera className="mx-auto size-7 text-muted-foreground" />
-              <h3 className="mt-3 font-semibold">Nothing submitted yet</h3>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Your price contributions will appear here immediately after submission.</p>
-            </div>
-          ) : submissions.map((submission) => (
-            <article key={submission.id} className="rounded-xl border bg-card/45 p-4">
-              <div className="flex gap-4"><PhotoView submission={submission} onExpired={() => void loadMine().catch(() => setLoadError("The photo link expired and could not be refreshed."))} /><SubmissionDetails submission={submission} /></div>
-              <p className="mt-3 border-t pt-3 text-[11px] text-muted-foreground">Submitted {formatTimestamp(submission.submittedAt)}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-      </div>
+      <YourSubmissions
+        service={service}
+        priceSubmissions={submissions}
+        pricesLoading={loading}
+        refreshPrices={loadMine}
+        onPriceDeleted={(id) => setSubmissions((current) => current.filter((item) => item.id !== id))}
+        categoryOf={(productId) => categoryById.get(productId)}
+        refreshKey={historyKey}
+      />
     </div>
   )
 }
@@ -634,6 +719,11 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
     if (!user) return
     if (decision === "rejected" && !reason.trim()) {
       setError("Enter a reason before rejecting this submission.")
+      return
+    }
+    const invalidReason = decision === "rejected" ? reasonError(reason) : null
+    if (invalidReason) {
+      setError(invalidReason)
       return
     }
     setError(null)
@@ -690,7 +780,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
             </div>
           ) : submissions.map((submission) => (
             <article key={submission.id} className="grid gap-5 rounded-xl border bg-card/45 p-4 lg:grid-cols-[minmax(220px,.75fr)_minmax(0,1.25fr)] lg:p-5">
-              <PhotoView submission={submission} large onExpired={() => void loadFlagged().catch(() => setError("The photo link expired and could not be refreshed."))} />
+              <PhotoView submission={submission} onExpired={() => void loadFlagged().catch(() => setError("The photo link expired and could not be refreshed."))} />
               <div className="min-w-0">
                 <SubmissionDetails submission={submission} />
                 <dl className="mt-4 grid gap-3 rounded-xl bg-secondary/55 p-4 text-xs sm:grid-cols-2">

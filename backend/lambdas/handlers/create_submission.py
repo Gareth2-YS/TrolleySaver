@@ -5,7 +5,8 @@ ask for an upload link, so this is where non-existent products are always refuse
 must have been uploaded for this same product (its key starts with price-evidence/<user>/<product>/).
 
 In-range prices are accepted immediately; prices outside the product's believable range are
-flagged for an administrator to accept or reject.
+flagged for an administrator to accept or reject. Each contributor gets one price per product and
+store per day. The response includes a short-lived `photoUrl` so the contributor can see their photo.
 """
 
 import os
@@ -23,6 +24,7 @@ from common.validation import SGT, to_iso, validate_submission
 
 STATUS_ACCEPTED = "accepted"
 STATUS_FLAGGED = "flagged"
+STATUS_REJECTED = "rejected"
 
 
 def _rate_limit():
@@ -39,18 +41,19 @@ def _check_rate_limit(user_id, now):
         raise ApiError(429, "RATE_LIMITED", f"You can submit up to {_rate_limit()} prices per hour. Please try again later.")
 
 
-def _check_duplicate(user_id, product_id, retailer_id, price_cents, observed):
-    """Same user, product, store and price on the same Singapore calendar day."""
+def _check_duplicate(user_id, product_id, retailer_id, observed):
+    """One price per user, product and store per Singapore calendar day, whatever the price. A rejected
+    price doesn't count, so the contributor can send a corrected one; a deleted one is gone."""
     day_start = datetime.combine(observed.astimezone(SGT).date(), time(), SGT)
     day_end = day_start + timedelta(days=1) - timedelta(milliseconds=1)
     duplicates = db.count_query(
         db.submissions(),
         KeyConditionExpression=Key("productId").eq(product_id)
         & Key("sk").between(f"{retailer_id}#{to_iso(day_start)}", f"{retailer_id}#{to_iso(day_end)}~"),
-        FilterExpression=Attr("userId").eq(user_id) & Attr("priceCents").eq(price_cents),
+        FilterExpression=Attr("userId").eq(user_id) & Attr("status").ne(STATUS_REJECTED),
     )
     if duplicates:
-        raise ApiError(409, "DUPLICATE_SUBMISSION", "You have already submitted this price for this product and store today.")
+        raise ApiError(409, "DUPLICATE_SUBMISSION", "You've already submitted a price for this product at this store today.")
 
 
 def _status_for(product, price_cents):
@@ -69,7 +72,7 @@ def handler(event, context):
     product = db.require_item(db.products(), {"id": product_id}, "productId", "Unknown product")
     retailer = db.require_item(db.retailers(), {"id": retailer_id}, "retailerId", "Unknown store")
     _check_rate_limit(caller.user_id, now)
-    _check_duplicate(caller.user_id, product_id, retailer_id, price_cents, observed)
+    _check_duplicate(caller.user_id, product_id, retailer_id, observed)
 
     submission_id = str(uuid.uuid4())
     observed_at = to_iso(observed)
@@ -94,5 +97,5 @@ def handler(event, context):
         UpdateExpression="ADD submissionCount :one",
         ExpressionAttributeValues={":one": 1},
     )
-    record = to_record(item, {product_id: product}, {retailer_id: retailer})
+    record = to_record(item, {product_id: product}, {retailer_id: retailer}, include_photo_url=True)
     return response(201, record)

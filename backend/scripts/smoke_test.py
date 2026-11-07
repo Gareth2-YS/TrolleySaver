@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
+from botocore.exceptions import ClientError
 
 from create_admin import create_admin
 from invoke import cleanup as delete_user_data
@@ -131,6 +132,8 @@ def main():
             t.check(f"GET /products from {origin} -> allowed", r.headers.get("Access-Control-Allow-Origin") == origin, r.headers)
         r = requests.get(f"{api}/products", headers={"Origin": "https://evil.example"}, timeout=TIMEOUT)
         t.check("GET /products from another site -> not allowed", "Access-Control-Allow-Origin" not in r.headers, r.headers)
+        t.check("API responses say nosniff and no-store",
+                r.headers.get("X-Content-Type-Options") == "nosniff" and r.headers.get("Cache-Control") == "no-store", r.headers)
 
         # --- Authorizer ---
         upload_body = {"productId": product["id"], "retailerId": "fairprice", "fileName": "shelf.png",
@@ -168,11 +171,14 @@ def main():
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid})
         accepted = r.json()
         t.check("in-range price -> 201 accepted", r.status_code == 201 and accepted.get("status") == "accepted", r.text[:300])
+        # One price per product and store a day, so the unusual price goes to another store.
+        unusual = min(int(product["maxCents"]) + 1000, 100000)
         r = call("POST", "/price-submissions", access,
-                 json={**base, "priceCents": min(int(product["maxCents"]) + 1000, 100000), "photoKey": photo_key})
+                 json={**base, "retailerId": "shengsiong", "priceCents": unusual, "photoKey": photo_key})
         flagged = r.json()
         t.check("out-of-range price with photo -> 201 flagged", r.status_code == 201 and flagged.get("status") == "flagged", r.text[:300])
-        t.check("contributor gets no evidence photo link", "photoUrl" not in flagged and flagged.get("photoKey") == photo_key, r.text[:300])
+        own = requests.get(flagged["photoUrl"], timeout=TIMEOUT) if flagged.get("photoUrl") else None
+        t.check("contributor gets a working link to their own photo", own is not None and own.status_code == 200 and own.content == PNG, r.text[:300])
         other = next((p for p in products if p["id"] != product["id"]), None)
         if other:
             r = call("POST", "/price-submissions", access, json={**base, "productId": other["id"], "priceCents": mid, "photoKey": photo_key})
@@ -181,17 +187,41 @@ def main():
         t.check("price for a fake product -> 400", r.status_code == 400 and "productId" in r.json().get("fieldErrors", {}), r.text[:300])
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid})
         t.check("duplicate -> 409", r.status_code == 409, r.status_code)
+        r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid + 1})
+        t.check("same product and store, another price, same day -> 409",
+                r.status_code == 409 and r.json().get("code") == "DUPLICATE_SUBMISSION", r.text[:300])
         r = call("POST", "/price-submissions", access, json={**base, "priceCents": "3.50"})
         t.check("invalid body -> 400 with fieldErrors", r.status_code == 400 and "priceCents" in r.json().get("fieldErrors", {}), r.text[:300])
         never_uploaded = f"price-evidence/{user_sub}/{product['id']}/never-uploaded.png"
-        r = call("POST", "/price-submissions", access, json={**base, "priceCents": mid + 1, "photoKey": never_uploaded})
+        r = call("POST", "/price-submissions", access, json={**base, "retailerId": "coldstorage", "priceCents": mid, "photoKey": never_uploaded})
         t.check("photo that was never uploaded -> 400 PHOTO_NOT_FOUND",
                 r.status_code == 400 and r.json().get("code") == "PHOTO_NOT_FOUND", r.text[:300])
+        # A web page uploaded as "image/png": S3 only checks the declared type, the backend checks the bytes.
+        fake = call("POST", "/price-submissions/image-upload-url", access, json=upload_body).json()
+        requests.post(fake["uploadUrl"], data=fake["fields"], files={"file": ("shelf.png", b"<html>not an image</html>", "image/png")}, timeout=TIMEOUT)
+        r = call("POST", "/price-submissions", access, json={**base, "retailerId": "coldstorage", "priceCents": mid, "photoKey": fake["photoKey"]})
+        t.check("a file that isn't really a PNG -> 400 INVALID_PHOTO",
+                r.status_code == 400 and r.json().get("code") == "INVALID_PHOTO", r.text[:300])
+        try:
+            boto3.client("s3", region_name=args.region).head_object(Bucket=bucket, Key=fake["photoKey"])
+            fake_deleted = False
+        except ClientError:
+            fake_deleted = True
+        t.check("...and the fake file is deleted", fake_deleted, fake["photoKey"])
+
+        # --- Withdrawing a pending price ---
+        r = call("POST", "/price-submissions", access, json={**base, "retailerId": "coldstorage", "priceCents": unusual})
+        withdrawn = r.json() if r.status_code == 201 else {}
+        r = call("DELETE", f"/price-submissions/{withdrawn.get('id', 'none')}", access)
+        t.check("owner deletes a pending price -> 204", withdrawn.get("status") == "flagged" and r.status_code == 204, f"{r.status_code} {r.text[:300]}")
+        r = call("DELETE", f"/price-submissions/{accepted['id']}", access)
+        t.check("deleting an accepted price -> 409", r.status_code == 409 and r.json().get("code") == "ALREADY_MODERATED", r.text[:300])
 
         r = call("GET", "/price-submissions/mine", access)
         mine = r.json().get("items", []) if r.ok else []
-        t.check("GET /mine returns both submissions", {i["id"] for i in mine} == {accepted["id"], flagged["id"]}, r.text[:300])
-        t.check("GET /mine has no evidence photo links", all("photoUrl" not in i for i in mine), r.text[:300])
+        t.check("GET /mine returns both submissions, without the deleted one", {i["id"] for i in mine} == {accepted["id"], flagged["id"]}, r.text[:300])
+        t.check("GET /mine links the caller's own photo",
+                any(i["id"] == flagged["id"] and i.get("photoUrl") for i in mine) and all(i.get("photoKey") or "photoUrl" not in i for i in mine), r.text[:300])
         t.check("photo is not publicly readable",
                 requests.get(f"https://{bucket}.s3.{args.region}.amazonaws.com/{photo_key}", timeout=TIMEOUT).status_code == 403)
 

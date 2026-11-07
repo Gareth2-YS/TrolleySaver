@@ -34,6 +34,9 @@ How the frontend should adopt it is described in the feature handoffs:
 | **Timestamps** | UTC ISO 8601 with milliseconds, e.g. `2026-10-24T08:15:02.120Z`. Show them in Singapore time. |
 | **Ids** | Product ids are UUIDs. Retailer ids are `fairprice`, `shengsiong` and `coldstorage`. A submission `id` is an opaque string: store it and pass it back, never build or parse it. |
 | **Pagination** | List endpoints take `limit` (default 50, max 100) and return `nextToken`. Pass it back as `?nextToken=…` to get the next page. `null` means there are no more pages. |
+| **Text** | Names, brands, categories, tags, search terms and rejection reasons can't contain control characters or invisible formatting characters (e.g. a zero-width space or a right-to-left override): `fieldErrors` says "Must not contain hidden or control characters". Zero-width joiners are allowed. Text is stored in Unicode NFC form. |
+| **Response headers** | Every backend response has `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. |
+| **Throttling** | 20 requests a second across all callers, bursts up to 40. Over it, API Gateway answers `429` (see [5. Errors](#5-errors)). |
 
 Get the environment values (`ApiUrl`, `UserPoolId`, `UserPoolClientId`) from Gareth, or run:
 
@@ -71,6 +74,7 @@ The server always takes the caller's identity from the verified token. Fields li
 | [`POST {uploadUrl}`](#uploading-the-photo-to-s3) | none (signed URL) | Upload the photo directly to S3 |
 | [`POST /price-submissions`](#post-price-submissions) | user | Submit a price |
 | [`GET /price-submissions/mine`](#get-price-submissionsmine) | user | The caller's own submissions |
+| [`DELETE /price-submissions/{id}`](#delete-price-submissionsid) | user | Delete one of the caller's own prices while it's still pending (flagged) |
 | [`GET /admin/price-submissions`](#get-adminprice-submissions) | admin | Review queue (flagged prices) |
 | [`PATCH /admin/price-submissions/{id}`](#patch-adminprice-submissionsid) | admin | Accept or reject a flagged price |
 | [`POST /product-requests/image-upload-url`](#post-product-requestsimage-upload-url) | user | Get a one-time URL to upload a new product's picture, or an evidence photo for its price |
@@ -165,7 +169,7 @@ GET /products/search?q=milk&hcs=false&maxPriceCents=500
 - **`total`** is the number of results and **`catalogSize`** the number of products, for "12 of 42 products".
 - No pagination: every match is returned.
 
-Errors: `400 VALIDATION_ERROR` (`q`, `hcs`, `minPriceCents`, `maxPriceCents`; `maxPriceCents` also when it's below `minPriceCents`).
+Errors: `400 VALIDATION_ERROR` (`q`, `category`, `brand` or `dietary` over 100 characters, `hcs`, `minPriceCents`, `maxPriceCents`; `maxPriceCents` also when it's below `minPriceCents`).
 
 ### `POST /price-submissions/image-upload-url`
 
@@ -211,6 +215,7 @@ Errors:
 - `400 VALIDATION_ERROR` naming each bad field together: `productId`, `retailerId`, `contentType`, `sizeBytes`. An unknown id gives `"productId": "Unknown product"` or `"retailerId": "Unknown store"`.
 - `400 IMAGE_TOO_LARGE`
 - `401`
+- `429 UPLOAD_RATE_LIMITED`: more than 60 upload links this clock hour (UTC), counting product-request uploads too. Each link counts when it's issued, used or not.
 
 ### Uploading the photo to S3
 
@@ -274,7 +279,7 @@ POST /price-submissions
 }
 ```
 
-**Evidence photos are for admin verification only.** Contributors see that a photo is attached (`photoKey`, type and size) but never get a `photoUrl` to view it; only the admin endpoints include one.
+**Evidence photos:** the response, and the contributor's own list (`GET /price-submissions/mine`), include a 5-minute `photoUrl` so contributors can see the photo they sent. Admins get one on the review endpoints. Nobody sees anyone else's submissions except admins.
 
 **`status` is decided by the server:**
 
@@ -290,14 +295,14 @@ Errors, in the order they're checked:
 | 400 | `INVALID_BODY` | Body isn't a JSON object |
 | 400 | `VALIDATION_ERROR` | `fieldErrors` names the bad fields (`productId`, `retailerId`, `priceCents`, `observedAt`, `photoKey`), including unknown product or store ids |
 | 429 | `RATE_LIMITED` | Over 30 submissions in the past hour |
-| 409 | `DUPLICATE_SUBMISSION` | This user already submitted the same product, store and price for the same Singapore day |
+| 409 | `DUPLICATE_SUBMISSION` | This user already has a price for this product at this store for the same Singapore day (observed date), **whatever the price**. A rejected or deleted one doesn't count. Message: "You've already submitted a price for this product at this store today." |
 | 400 | `VALIDATION_ERROR` | `photoKey` isn't one of the caller's own uploads **for this product** |
 | 400 | `PHOTO_NOT_FOUND` | Nothing was uploaded for that `photoKey` |
-| 400 | `INVALID_PHOTO` | The uploaded object isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `INVALID_PHOTO` | The uploaded object isn't a JPEG/PNG of 5 MiB or less, or its bytes aren't the image type it was uploaded as. A file that fails the second check is deleted. |
 
 ### `GET /price-submissions/mine`
 
-The caller's own submissions in every status, newest first. There's no `photoUrl`; evidence photos are for admins only.
+The caller's own submissions in every status, newest first. Each one with an evidence photo has a `photoUrl` to show it, which works for 5 minutes; fetch the list again if the image fails to load.
 
 | Query | Default | Notes |
 |---|---|---|
@@ -310,6 +315,18 @@ The caller's own submissions in every status, newest first. There's no `photoUrl
 ```
 
 Errors: `400 VALIDATION_ERROR` (`limit`), `400 INVALID_PAGE_TOKEN`, `401`.
+
+### `DELETE /price-submissions/{id}`
+
+User. Deletes one of the caller's own prices **while it's still pending**: `status` is `flagged`, i.e. the system flagged it as outside the product's usual range and no admin has reviewed it yet. Accepted prices may already be in the daily averages, and rejected ones are decided, so neither can be deleted. No body.
+
+| Response | Show |
+|---|---|
+| `204` | Gone, along with its evidence photo. It no longer counts toward the hourly limit or the one-price-a-day rule, so the same product and store can be priced again straight away. |
+| `404 NOT_FOUND` | "This submission no longer exists." It was deleted already, or it isn't the caller's (someone else's is reported as missing). Refresh the list. |
+| `409 ALREADY_MODERATED` | An admin has just decided it. Show `message` ("This submission is already accepted."), then refresh the list. |
+
+An admin deciding a price its contributor has just deleted gets `404 NOT_FOUND`.
 
 ### `GET /admin/price-submissions`
 
@@ -366,7 +383,7 @@ User. Returns a one-time, 5-minute upload form, exactly like the [evidence uploa
 
 The response is the same as the evidence upload link's. It carries `productImageKey` when `purpose` is `product-image`, or `photoKey` when it is `evidence`. Keep the key for `POST /product-requests`.
 
-Errors: `400 VALIDATION_ERROR` (`purpose`, `contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`.
+Errors: `400 VALIDATION_ERROR` (`purpose`, `contentType`, `sizeBytes`), `400 IMAGE_TOO_LARGE`, `401`, `429 UPLOAD_RATE_LIMITED` (the same hourly allowance as price photos).
 
 ### `POST /product-requests`
 
@@ -418,7 +435,7 @@ Errors, in the order they're checked:
 | 409 | `PRODUCT_EXISTS` | The catalog already has this product (same name, brand, pack size and units per pack, ignoring case and spacing; a 6 × 1 L pack is not a duplicate of a single 1 L). The response includes **`productId`** so the user can submit a price for it instead. |
 | 409 | `PRODUCT_ALREADY_REQUESTED` | Someone has already proposed this product and it's waiting for an admin |
 | 400 | `VALIDATION_ERROR` | `productImageKey` or `photoKey` isn't one of the caller's own uploads for a product request |
-| 400 | `PHOTO_NOT_FOUND` / `INVALID_PHOTO` | Nothing was uploaded for that key, or it isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `PHOTO_NOT_FOUND` / `INVALID_PHOTO` | Nothing was uploaded for that key, or it isn't a real JPEG/PNG of 5 MiB or less |
 
 ### `GET /product-requests/mine`
 
@@ -427,7 +444,7 @@ User. The caller's own product requests in every status, newest first, paginated
 - `rejectionReason` when rejected
 - `productId` once approved, the id of the published product
 
-There's no evidence `photoUrl`.
+When the request has an evidence photo, its contributor also gets a 5-minute `photoUrl` for it.
 
 ### `DELETE /product-requests/{id}`
 
@@ -631,7 +648,7 @@ Errors: `400 INVALID_BODY`, `400 VALIDATION_ERROR` (`items`, `items[i]`, `items[
 | `observedAt`, `submittedAt` | string (ISO 8601 UTC) | Always |
 | `status` | `accepted` \| `flagged` \| `rejected` | Always |
 | `photoKey`, `photoContentType`, `photoSizeBytes` | string, string, integer | When a photo was attached |
-| `photoUrl` | string | **Admin endpoints only**, when a photo was attached. A signed link that **expires 5 minutes** after the response; if the image fails to load, fetch the list again. |
+| `photoUrl` | string | When a photo was attached, on the admin endpoints and in the contributor's own records (`POST /price-submissions`, `GET /price-submissions/mine`). A signed link that **expires 5 minutes** after the response; if the image fails to load, fetch the list again. |
 | `productRequestId` | string | Only on the first price of a product published from a product request |
 | `reviewedAt`, `reviewedBy` | string | After an admin decision (also on a published product's first price) |
 | `rejectionReason` | string | When rejected |
@@ -655,7 +672,7 @@ export interface ApiSubmission {
   photoKey?: string
   photoContentType?: "image/jpeg" | "image/png"
   photoSizeBytes?: number
-  photoUrl?: string                   // admin endpoints only
+  photoUrl?: string                   // admin endpoints, and the contributor's own records
   productRequestId?: string
   reviewedAt?: string
   reviewedBy?: string
@@ -695,7 +712,7 @@ export interface ApiProductRequest {
   photoKey?: string                   // evidence photo, if one was sent
   photoContentType?: "image/jpeg" | "image/png"
   photoSizeBytes?: number
-  photoUrl?: string                   // admin endpoints only, 5 minutes
+  photoUrl?: string                   // admin endpoints, and the contributor's own requests; 5 minutes
   submitterName?: string | null       // admin endpoints only
   submitterEmail?: string | null      // admin endpoints only
   suggestedMinCents?: number          // admin endpoints, pending requests only
@@ -818,18 +835,19 @@ Errors from the backend always have this shape:
 | 400 | `VALIDATION_ERROR` | See `fieldErrors` |
 | 400 | `IMAGE_TOO_LARGE` | Upload request over 5 MiB |
 | 400 | `PHOTO_NOT_FOUND` | `photoKey` or `productImageKey` has no uploaded file |
-| 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less |
+| 400 | `INVALID_PHOTO` | Uploaded file isn't a JPEG/PNG of 5 MiB or less, or its bytes aren't the image type it was uploaded as (the file is then deleted) |
 | 400 | `INVALID_PAGE_TOKEN` | `nextToken` was altered, or came from a different list |
 | 401 | `UNAUTHENTICATED` | Token missing its user (rare, see below) |
 | 403 | `FORBIDDEN` | Admin route called by a non-admin |
 | 404 | `NOT_FOUND` | Submission or product request doesn't exist |
-| 409 | `DUPLICATE_SUBMISSION` | Same product, store and price already submitted today |
+| 409 | `DUPLICATE_SUBMISSION` | A price for the same product and store already submitted today (any price) |
 | 409 | `ALREADY_MODERATED` | Submission isn't flagged, or product request isn't pending, any more |
 | 409 | `PRODUCT_EXISTS` | The proposed product is already in the catalog; `productId` says which |
 | 409 | `PRODUCT_ALREADY_REQUESTED` | The proposed product is already waiting for an admin |
 | 409 | `PRODUCT_IMAGE_MISSING` | A pending request's picture is gone; the admin should reject it |
 | 409 | `OBSERVATION_TOO_OLD` | A pending request's price is more than 30 days old; the admin should reject it |
 | 429 | `RATE_LIMITED` | Too many submissions this hour, or product requests today |
+| 429 | `UPLOAD_RATE_LIMITED` | More than 60 photo upload links in this clock hour |
 | 500 | `INTERNAL_ERROR` | Backend bug. Report the `requestId` to Gareth. |
 
 **API Gateway errors don't use that shape.** They come before the backend runs and contain only `{"message": "…"}`:
@@ -838,6 +856,7 @@ Errors from the backend always have this shape:
 |---|---|---|
 | 401 | `Unauthorized` (or `The incoming token has expired`) | No token, an expired or invalid token, or an ID token instead of an access token. Refresh the session or send the user to log in. |
 | 403 | `Missing Authentication Token`, or `Invalid key=value pair … in Authorization header` when a token was sent | **Wrong path or method.** API Gateway reports unknown routes this way; it isn't a login problem. |
+| 429 | `Too Many Requests` | Over the API's throttle (20 a second, bursts of 40, for all callers together). Wait a moment and retry. |
 | 502 / 504 | `Internal server error` / timeout | Backend crashed or timed out |
 
 ## 6. Limits
@@ -847,13 +866,16 @@ Errors from the backend always have this shape:
 | Image types | `image/jpeg`, `image/png` |
 | Image size | 5 MiB (5,242,880 bytes), one image per upload link |
 | Upload URL lifetime | 5 minutes |
-| `photoUrl` lifetime (evidence, admins only) | 5 minutes |
+| `photoUrl` lifetime (evidence: admins, and the contributor who sent it) | 5 minutes |
 | `imageUrl` / `productImageUrl` lifetime (product pictures) | 1 hour |
 | Price | 1 – 100000 cents |
 | `observedAt` | Not in the future (5-minute clock tolerance). A date: up to 30 days before today (Singapore time). A datetime: at most 30 days old. A product request can only be approved while its price is still within those 30 days. |
 | Submissions per user | 30 per rolling hour (counts every status) |
 | Product requests per user | 10 per rolling 24 hours (counts every status) |
-| Duplicate rule | One submission per user, product, store, price and Singapore day |
+| Photo upload links per user | 60 per clock hour (UTC), price photos and product requests together |
+| API throughput | 20 requests a second, bursts of 40, all callers together |
+| Search filters (`q`, `category`, `brand`, `dietary`) | 100 characters each |
+| Duplicate rule | One price per user, product, store and Singapore day, whatever the price. Rejected and deleted prices don't count. |
 | Rejection reason | 500 characters |
 | Page size | Default 50, max 100 |
 | Basket | 1–50 products, 1–99 of each |

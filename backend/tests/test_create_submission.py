@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import boto3
 import pytest
+from botocore.exceptions import ClientError
 
-from conftest import MILK_ID, OTHER_USER_ID, USER_ID, api_event, call, put_photo
+from conftest import BUCKET, MILK_ID, OTHER_USER_ID, REGION, USER_ID, api_event, call, put_photo
 from handlers import create_submission
 
 SGT = timezone(timedelta(hours=8))
@@ -101,25 +103,40 @@ def test_id_token_claims_rejected(aws):
     assert status == 401
 
 
-def test_duplicate_same_day_is_409(aws):
+def test_one_price_per_product_and_store_a_day(aws):
     assert submit(valid_body())[0] == 201
-    status, error = submit(valid_body())
-    assert status == 409 and error["code"] == "DUPLICATE_SUBMISSION"
-    # A different price, store or user is not a duplicate.
-    assert submit(valid_body(priceCents=365))[0] == 201
+    for body in (valid_body(), valid_body(priceCents=365)):  # the same price again, or a different one
+        status, error = submit(body)
+        assert status == 409 and error["code"] == "DUPLICATE_SUBMISSION"
+        assert error["message"] == "You've already submitted a price for this product at this store today."
+    # Another store, another day or another person is fine.
     assert submit(valid_body(retailerId="shengsiong"))[0] == 201
+    yesterday = (datetime.now(SGT) - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert submit(valid_body(observedAt=yesterday))[0] == 201
     assert submit(valid_body(), user_id=OTHER_USER_ID)[0] == 201
+
+
+def test_a_rejected_price_frees_the_day_for_a_corrected_one(aws):
+    from handlers import admin_submissions
+    status, flagged = submit(valid_body(priceCents=9999))
+    assert status == 201 and flagged["status"] == "flagged"
+    assert submit(valid_body(priceCents=363))[0] == 409  # still pending, so it counts
+    event = api_event("PATCH", "/admin/price-submissions/{id}", {"decision": "rejected", "reason": "Typo"},
+                      user_id="admin", groups="admin", path_params={"id": flagged["id"]})
+    assert call(admin_submissions.handler, event)[0] == 200
+    status, corrected = submit(valid_body(priceCents=363))
+    assert status == 201 and corrected["status"] == "accepted"
 
 
 def test_rate_limit(aws, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_PER_HOUR", "2")
-    assert submit(valid_body(priceCents=300))[0] == 201
-    assert submit(valid_body(priceCents=301))[0] == 201
-    status, error = submit(valid_body(priceCents=302))
+    assert submit(valid_body(retailerId="fairprice"))[0] == 201
+    assert submit(valid_body(retailerId="shengsiong"))[0] == 201
+    status, error = submit(valid_body(retailerId="coldstorage"))
     assert status == 429 and error["code"] == "RATE_LIMITED"
 
 
-def test_photo_is_verified_and_recorded_but_not_shown_to_contributor(aws):
+def test_photo_is_verified_recorded_and_shown_to_its_contributor(aws):
     key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.png"
     put_photo(key)
     status, record = submit(valid_body(photoKey=key))
@@ -127,7 +144,7 @@ def test_photo_is_verified_and_recorded_but_not_shown_to_contributor(aws):
     assert record["photoKey"] == key
     assert record["photoContentType"] == "image/png"
     assert record["photoSizeBytes"] == 1024
-    assert "photoUrl" not in record  # evidence photos are for admins only
+    assert record["photoUrl"].startswith("https://")  # a short-lived link, so they can see their photo
 
 
 def test_photo_from_another_users_prefix_rejected(aws):
@@ -162,3 +179,32 @@ def test_wrong_photo_type_rejected(aws):
     put_photo(key, content_type="application/pdf")
     status, error = submit(valid_body(photoKey=key))
     assert status == 400 and error["code"] == "INVALID_PHOTO"
+
+
+def _exists(key):
+    try:
+        boto3.client("s3", region_name=REGION).head_object(Bucket=BUCKET, Key=key)
+        return True
+    except ClientError:
+        return False
+
+
+@pytest.mark.parametrize("content_type, contents", [
+    ("image/png", b"<html><script>alert(1)</script></html>"),  # a web page labelled as an image
+    ("image/png", b"GIF89a" + b"x" * 100),                      # another image type
+    ("image/jpeg", b"\x89PNG\r\n\x1a\n" + b"x" * 100),          # a PNG declared as a JPEG
+])
+def test_a_file_that_isnt_the_image_it_claims_is_refused_and_deleted(aws, content_type, contents):
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.{'png' if content_type == 'image/png' else 'jpg'}"
+    put_photo(key, content_type=content_type, body=contents)
+    status, error = submit(valid_body(photoKey=key))
+    assert status == 400 and error["code"] == "INVALID_PHOTO"
+    assert error["fieldErrors"] == {"photoKey": "Not a JPG or PNG image"}
+    assert not _exists(key)
+
+
+def test_a_real_jpeg_is_accepted(aws):
+    key = f"price-evidence/{USER_ID}/{MILK_ID}/abc.jpg"
+    put_photo(key, content_type="image/jpeg")
+    status, record = submit(valid_body(photoKey=key))
+    assert status == 201 and record["photoContentType"] == "image/jpeg"

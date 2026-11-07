@@ -29,7 +29,7 @@ def moderate(submission_id, body, groups="admin"):
 
 def test_my_submissions_only_returns_callers_newest_first(aws):
     first = submit(300)
-    second = submit(310)
+    second = submit(310, retailer="shengsiong")  # one price per product and store a day
     submit(320, user_id=OTHER_USER_ID)
     status, body = call(my_submissions.handler, api_event("GET", "/price-submissions/mine"))
     assert status == 200
@@ -39,8 +39,8 @@ def test_my_submissions_only_returns_callers_newest_first(aws):
 
 
 def test_my_submissions_pagination(aws):
-    for price in (300, 301, 302):
-        submit(price)
+    for retailer in ("fairprice", "shengsiong", "coldstorage"):
+        submit(300, retailer=retailer)
     status, page1 = call(my_submissions.handler, api_event("GET", "/price-submissions/mine", query={"limit": "2"}))
     assert status == 200 and len(page1["items"]) == 2 and page1["nextToken"]
     status, page2 = call(my_submissions.handler, api_event("GET", "/price-submissions/mine", query={"limit": "2", "nextToken": page1["nextToken"]}))
@@ -99,7 +99,7 @@ def test_groups_claim_formats(aws):
 
 def test_queue_lists_only_flagged_with_submitter(aws):
     submit(363)
-    flagged = submit(9999)
+    flagged = submit(9999, retailer="shengsiong")
     status, body = admin_list()
     assert status == 200
     assert [i["id"] for i in body["items"]] == [flagged["id"]]
@@ -107,15 +107,18 @@ def test_queue_lists_only_flagged_with_submitter(aws):
     assert body["items"][0]["submitterEmail"] == "alex@example.com"
 
 
-def test_evidence_photo_link_only_for_admins(aws):
+def test_evidence_photo_links_for_admins_and_its_contributor(aws):
     key = f"price-evidence/{USER_ID}/{MILK_ID}/shelf.png"
     put_photo(key)
     flagged = submit(9999, photo_key=key)
+    submit(363, user_id=OTHER_USER_ID)
 
     status, mine = call(my_submissions.handler, api_event("GET", "/price-submissions/mine"))
     assert status == 200
-    assert mine["items"][0]["photoKey"] == key  # the contributor can see a photo is attached...
-    assert "photoUrl" not in mine["items"][0]   # ...but gets no link to view it
+    assert mine["items"][0]["photoKey"] == key
+    assert mine["items"][0]["photoUrl"].startswith("https://")  # the contributor can see their own photo
+    status, theirs = call(my_submissions.handler, api_event("GET", "/price-submissions/mine", user_id=OTHER_USER_ID))
+    assert [i["userId"] for i in theirs["items"]] == [OTHER_USER_ID]  # ...and nobody else's submissions
 
     status, queue = admin_list()
     assert status == 200 and queue["items"][0]["id"] == flagged["id"]
@@ -187,3 +190,11 @@ def test_catalog_signs_product_pictures(aws):
     picture = next(p for p in body["items"] if p["id"] == "p-1")
     assert status == 200
     assert "product-images/p-1.png" in picture["imageUrl"] and "X-Amz-Expires=3600" in picture["imageUrl"]
+
+
+def test_rejection_reason_with_hidden_characters_is_refused(aws):
+    flagged = submit(9999)
+    status, error = moderate(flagged["id"], {"decision": "rejected", "reason": "Label​ unreadable"})
+    assert status == 400 and error["fieldErrors"]["reason"] == "Must not contain hidden or control characters"
+    status, record = moderate(flagged["id"], {"decision": "rejected", "reason": "Label unreadable.\nPlease retake."})
+    assert status == 200 and record["rejectionReason"] == "Label unreadable.\nPlease retake."

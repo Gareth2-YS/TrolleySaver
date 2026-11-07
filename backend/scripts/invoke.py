@@ -13,6 +13,7 @@ Usage (from backend/; see TESTING.md for a full walkthrough):
     .venv/Scripts/python scripts/invoke.py mine
     .venv/Scripts/python scripts/invoke.py review-queue --as admin
     .venv/Scripts/python scripts/invoke.py moderate --as admin --id <id> --set decision=rejected --set reason="Unreadable label"
+    .venv/Scripts/python scripts/invoke.py delete-submission --id <id>         # only while it's pending (flagged)
     .venv/Scripts/python scripts/invoke.py upload-request-image --file oat.png                              # prints a productImageKey
     .venv/Scripts/python scripts/invoke.py request-product --set name="Oat Milk" ... --set dietary=[vegan,halal]
     .venv/Scripts/python scripts/invoke.py my-product-requests
@@ -58,6 +59,7 @@ ROUTES = {
     "upload-url": ("upload-url", "upload_url", "POST", "/price-submissions/image-upload-url", True),
     "submit": ("create-submission", "create_submission", "POST", "/price-submissions", True),
     "mine": ("my-submissions", "my_submissions", "GET", "/price-submissions/mine", True),
+    "delete-submission": ("delete-submission", "delete_submission", "DELETE", "/price-submissions/{id}", True),
     "review-queue": ("admin-submissions", "admin_submissions", "GET", "/admin/price-submissions", True),
     "moderate": ("admin-submissions", "admin_submissions", "PATCH", "/admin/price-submissions/{id}", True),
     "basket": ("basket", "basket", "POST", "/basket/compare", False),
@@ -239,7 +241,7 @@ def main():
     parser.add_argument("--body", help="Raw JSON request body (fields from --set are added on top)")
     parser.add_argument("--body-file", help="Read the raw JSON request body from this file instead of --body")
     parser.add_argument("--query", action="append", default=[], metavar="KEY=VALUE", help="Query string parameter (repeatable)")
-    parser.add_argument("--id", help="Submission or product-request id (moderate, moderate-product, delete-product-request)")
+    parser.add_argument("--id", help="Submission or product-request id (moderate, delete-submission, moderate-product, delete-product-request)")
     parser.add_argument("--file", help="Image to upload (upload-photo, upload-request-image)")
     parser.add_argument("--product", help="Product id the evidence photo is for (upload-photo)")
     parser.add_argument("--retailer", default="fairprice", help="Store id the evidence photo is for (upload-photo; default fairprice)")
@@ -252,7 +254,7 @@ def main():
     if args.route == "cleanup":
         cleanup(args.env, args.region, [args.user_id] if args.user_id else [DEFAULT_USER_ID, DEFAULT_ADMIN_ID])
         return
-    if args.route in ("moderate", "moderate-product", "delete-product-request") and not args.id:
+    if args.route in ("moderate", "delete-submission", "moderate-product", "delete-product-request") and not args.id:
         parser.error(f"{args.route} needs --id")
     if args.route in ("upload-photo", "upload-request-image") and not args.file:
         parser.error(f"{args.route} needs --file")

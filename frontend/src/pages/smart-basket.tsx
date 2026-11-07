@@ -343,6 +343,13 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
       return terms.every((term) => text.includes(term))
     })
   }, [brand, category, products, query])
+  const filtering = Boolean(query.trim() || category || brand)
+
+  function clearFilters() {
+    setQuery("")
+    setCategory("")
+    setBrand("")
+  }
 
   // Like the backend's healthier basket: a non-HCS product can swap for any HCS product in its category.
   const alternatives = useMemo(() => {
@@ -550,9 +557,10 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
           <Card className="lg:col-span-2" aria-labelledby="add-heading">
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
               <div className="min-w-0 flex-[1_1_240px]"><CardTitle id="add-heading" icon={ShoppingBag} title="Add groceries" description="Search the catalog and add items to your basket" /></div>
-              <div className="flex w-full gap-2 sm:w-auto sm:flex-[0_1_440px] sm:flex-wrap sm:justify-end">
+              <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto sm:flex-[0_1_560px] sm:justify-end">
                 <Filter label="Product type" value={category} options={categories} allLabel="All product types" onChange={setCategory} />
                 <Filter label="Brand" value={brand} options={brands} allLabel="All brands" onChange={setBrand} />
+                <Button type="button" variant="ghost" className="h-11 shrink-0 px-3 text-[13px]" disabled={!filtering} onClick={clearFilters}><X className="size-4" />Clear filters</Button>
               </div>
             </div>
 
@@ -563,6 +571,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                 id="product-search"
                 ref={searchRef}
                 type="search"
+                maxLength={100}
                 className="h-12 pl-[42px] text-base"
                 placeholder="Search by product, brand or category"
                 value={query}
@@ -578,6 +587,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
               ) : matches.length === 0 ? (
                 <li className="rounded-[10px] border border-dashed px-4 py-5 text-center text-[13px] text-muted-foreground">
                   {catalogError ? "Products are unavailable." : query.trim() ? `No products match “${query.trim()}”.` : "No products match these filters."}
+                  {!catalogError && filtering && <Button type="button" variant="outline" size="sm" className="ml-3 mt-2 sm:mt-0" onClick={clearFilters}>Clear filters</Button>}
                 </li>
               ) : matches.map((product) => {
                 const inBasket = basket.find((item) => item.productId === product.id)
@@ -588,9 +598,10 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                       <div className="min-w-0">
                       <p className="mb-1 text-sm font-semibold leading-snug">{product.name}</p>
                       <p className="text-xs text-muted-foreground">{product.brand} · {packLabel(product)} · {product.category}</p>
+                      {/* Under the details, as on Search, so names start level with the picture on every row */}
+                      {product.hcs && <HcsBadge className="mt-1.5 border border-primary/35" />}
                       </div>
                     </div>
-                    {product.hcs && <HcsBadge />}
                     <Button
                       type="button"
                       variant={inBasket ? "default" : "outline"}
@@ -750,13 +761,19 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                               <Leaf className="size-3.5" />Healthier options ({options.length})
                             </button>
                           )}
-                          <div className="order-last flex items-center overflow-hidden rounded-lg border bg-background">
-                            <button type="button" className="grid size-9 place-items-center text-muted-foreground hover:bg-secondary" onClick={() => setQuantity(item.productId, item.quantity - 1)} aria-label={item.quantity === 1 ? `Remove ${product.name}` : `Decrease ${product.name}`}>
-                              {item.quantity === 1 ? <Trash2 className="size-3.5" /> : <Minus className="size-3.5" />}
-                            </button>
-                            <span className="min-w-8 text-center text-sm font-semibold tabular-nums" aria-label={`${product.name} quantity`}>{item.quantity}</span>
-                            <button type="button" className="grid size-9 place-items-center text-muted-foreground hover:bg-secondary disabled:opacity-50" disabled={item.quantity >= MAX_QUANTITY} onClick={() => setQuantity(item.productId, item.quantity + 1)} aria-label={`Increase ${product.name}`}>
-                              <Plus className="size-3.5" />
+                          <div className="order-last flex items-center gap-2">
+                            <div className="flex items-center overflow-hidden rounded-lg border bg-background">
+                              <button type="button" className="grid size-9 place-items-center text-muted-foreground hover:bg-secondary disabled:opacity-50" disabled={item.quantity <= 1} onClick={() => setQuantity(item.productId, item.quantity - 1)} aria-label={`Decrease ${product.name}`}>
+                                <Minus className="size-3.5" />
+                              </button>
+                              <span className="min-w-8 text-center text-sm font-semibold tabular-nums" aria-label={`${product.name} quantity`}>{item.quantity}</span>
+                              <button type="button" className="grid size-9 place-items-center text-muted-foreground hover:bg-secondary disabled:opacity-50" disabled={item.quantity >= MAX_QUANTITY} onClick={() => setQuantity(item.productId, item.quantity + 1)} aria-label={`Increase ${product.name}`}>
+                                <Plus className="size-3.5" />
+                              </button>
+                            </div>
+                            {/* The whole line, however many there are */}
+                            <button type="button" className="grid size-9 place-items-center rounded-lg border bg-background text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setQuantity(item.productId, 0)} aria-label={`Remove ${product.name} from basket`} title="Remove from basket">
+                              <Trash2 className="size-3.5" aria-hidden="true" />
                             </button>
                           </div>
                         </div>

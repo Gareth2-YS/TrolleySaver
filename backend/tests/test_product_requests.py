@@ -6,6 +6,7 @@ from botocore.exceptions import ClientError
 
 from conftest import ADMIN_ID, BUCKET, MILK_ID, OTHER_USER_ID, REGION, USER_ID, api_event, call, put_photo, sgt_today
 from handlers import admin_product_requests, aggregate_prices, catalog, product_requests, search
+from handlers import upload_url as price_upload_url
 
 SGT = timezone(timedelta(hours=8))
 IMAGE_KEY = f"product-images/pending/{USER_ID}/oat.png"
@@ -183,7 +184,7 @@ def test_optional_evidence_photo_is_checked_and_kept(aws):
     evidence = f"price-evidence/{USER_ID}/new-product/shelf.png"
     put_photo(evidence)
     status, record = create(valid_request(photoKey=evidence))
-    assert status == 201 and record["photoKey"] == evidence and "photoUrl" not in record
+    assert status == 201 and record["photoKey"] == evidence and record["photoUrl"].startswith("https://")  # its owner can see it
 
 
 def test_evidence_photo_must_come_from_the_new_product_folder(aws):
@@ -510,3 +511,73 @@ def test_delete_racing_an_approval_is_409(aws, pending, monkeypatch):
     status, error = delete_request(pending["id"])
     assert status == 409 and error["message"] == "This product request is already approved."
     assert aws.Table("unit-product-request").get_item(Key={"requestId": pending["id"]})["Item"]["status"] == "approved"
+
+
+# ---------- hardening: file contents, hidden characters, look-alikes, shared upload allowance ----------
+
+def test_a_product_picture_that_isnt_really_an_image_is_refused_and_deleted(aws):
+    put_photo(IMAGE_KEY, body=b"<svg onload=alert(1)></svg>")
+    status, error = create(valid_request())
+    assert status == 400 and error["code"] == "INVALID_PHOTO" and "productImageKey" in error["fieldErrors"]
+    assert not object_exists(IMAGE_KEY)
+
+
+@pytest.mark.parametrize("override, field", [
+    ({"name": "Oat​Milk Barista"}, "name"),        # zero-width space
+    ({"name": "Oat Milk ‮atsirab"}, "name"),      # right-to-left override
+    ({"brand": "Oat\x00side"}, "brand"),               # NUL
+    ({"category": "milk⁦"}, "category"),          # bidi isolate
+    ({"dietary": ["vegan﻿"]}, "dietary"),         # byte-order mark
+])
+def test_hidden_characters_are_refused(aws, override, field):
+    put_photo(IMAGE_KEY)
+    status, error = create(valid_request(**override))
+    assert status == 400 and error["fieldErrors"][field] == "Must not contain hidden or control characters"
+
+
+def test_text_is_stored_in_one_unicode_form(aws):
+    put_photo(IMAGE_KEY)
+    status, record = create(valid_request(name="Café Latte"))  # "e" followed by a combining accent
+    assert status == 201 and record["name"] == "Café Latte"
+
+
+@pytest.mark.parametrize("name", ["Ｍagnolia Fresh Milk", "Magno‍lia Fresh Milk", "MAGNOLIA  fresh milk"])
+def test_look_alike_names_are_still_duplicates_of_the_catalog(aws, name):
+    put_photo(IMAGE_KEY)
+    status, error = create(valid_request(name=name, brand="Magnolia", packQty=946, packUnit="ml"))
+    assert status == 409 and error["code"] == "PRODUCT_EXISTS" and error["productId"] == MILK_ID
+
+
+def test_admin_search_terms_with_hidden_characters_are_refused(aws, pending):
+    status, error = decide(pending["id"], {"decision": "approved", "changes": {"searchTerms": ["oat", "barista​"]}})
+    assert status == 400 and error["fieldErrors"]["searchTerms"] == "Must not contain hidden or control characters"
+
+
+def test_rejection_reason_with_hidden_characters_is_refused(aws, pending):
+    status, error = decide(pending["id"], {"decision": "rejected", "reason": "Blurry ‮photo"})
+    assert status == 400 and error["fieldErrors"]["reason"] == "Must not contain hidden or control characters"
+
+
+def test_rejection_reason_keeps_its_line_breaks(aws, pending):
+    status, record = decide(pending["id"], {"decision": "rejected", "reason": "  Blurry photo.\nPlease retake it.  "})
+    assert status == 200 and record["rejectionReason"] == "Blurry photo.\nPlease retake it."
+
+
+def test_product_and_price_photo_upload_links_share_one_hourly_allowance(aws, monkeypatch):
+    monkeypatch.setenv("UPLOAD_LINKS_PER_HOUR", "2")
+    picture = {"purpose": "product-image", "contentType": "image/png", "sizeBytes": 2048}
+    assert upload_url(picture)[0] == 200
+    price_photo = {"productId": MILK_ID, "retailerId": "fairprice", "contentType": "image/png", "sizeBytes": 2048}
+    assert call(price_upload_url.handler, api_event("POST", "/price-submissions/image-upload-url", price_photo))[0] == 200
+    status, error = upload_url({**picture, "purpose": "evidence"})
+    assert status == 429 and error["code"] == "UPLOAD_RATE_LIMITED"
+
+
+def test_owner_gets_a_link_to_their_own_evidence_photo_in_mine(aws):
+    put_photo(IMAGE_KEY)
+    evidence = f"price-evidence/{USER_ID}/new-product/e.png"
+    put_photo(evidence)
+    assert create(valid_request(photoKey=evidence))[0] == 201
+    status, body = mine()
+    assert status == 200 and body["items"][0]["photoUrl"].startswith("https://")
+    assert "submitterEmail" not in body["items"][0]  # admin-only details stay admin-only

@@ -1,10 +1,21 @@
-import { LogIn, LogOut, Menu, UserRound, X } from "lucide-react"
+import { LogIn, LogOut, Menu, Moon, Sun, UserRound, X } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom"
 import { useAuth } from "../../auth/auth-context"
+import { toggleTheme, useTheme } from "../../lib/theme"
 import { cn } from "../../lib/utils"
 import { Logo } from "../brand/logo"
 import { Button } from "../ui/button"
+
+function ThemeToggle({ className }: { className?: string }) {
+  const theme = useTheme()
+  const label = theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+  return (
+    <Button type="button" variant="ghost" size="icon" className={cn("text-white hover:bg-white/10 hover:text-white", className)} onClick={toggleTheme} aria-label={label} title={label}>
+      {theme === "dark" ? <Sun className="size-[18px]" aria-hidden="true" /> : <Moon className="size-[18px]" aria-hidden="true" />}
+    </Button>
+  )
+}
 
 const navigation = [
   ["Smart basket", "/basket"],
@@ -40,6 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="hidden items-center gap-2 md:flex">
+            <ThemeToggle />
             {user ? (
               <>
                 <span className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[13px] text-white/90" title={user.email}>
@@ -51,9 +63,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Button asChild variant="band" size="sm"><Link to="/login" state={loginState}><LogIn className="size-4" />Log in</Link></Button>
             )}
           </div>
-          <Button className="text-white hover:bg-white/10 hover:text-white md:hidden" variant="ghost" size="icon" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "Close menu" : "Open menu"}>
-            {open ? <X /> : <Menu />}
-          </Button>
+          <div className="flex items-center gap-1 md:hidden">
+            <ThemeToggle />
+            <Button className="text-white hover:bg-white/10 hover:text-white" variant="ghost" size="icon" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "Close menu" : "Open menu"}>
+              {open ? <X /> : <Menu />}
+            </Button>
+          </div>
         </div>
         {open && (
           <nav className="rounded-b-[20px] border-t border-white/10 bg-band px-3 pb-5 pt-2 md:hidden" aria-label="Mobile navigation">

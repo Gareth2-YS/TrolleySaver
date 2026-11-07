@@ -134,8 +134,16 @@ def call(handler, event):
     return result["statusCode"], json.loads(result["body"]) if result["body"] else None
 
 
-def put_photo(key, content_type="image/png", size=1024):
-    boto3.client("s3", region_name=REGION).put_object(Bucket=BUCKET, Key=key, Body=b"x" * size, ContentType=content_type)
+FILE_STARTS = {"image/png": b"\x89PNG\r\n\x1a\n", "image/jpeg": b"\xff\xd8\xff\xe0"}
+
+
+def put_photo(key, content_type="image/png", size=1024, body=None):
+    """Put an upload in the bucket as the browser would. By default its bytes start like a real file
+    of `content_type`; pass `body` to upload something else under that type."""
+    if body is None:
+        start = FILE_STARTS.get(content_type, b"")
+        body = start + b"x" * (size - len(start))
+    boto3.client("s3", region_name=REGION).put_object(Bucket=BUCKET, Key=key, Body=body, ContentType=content_type)
 
 
 def iso(dt):

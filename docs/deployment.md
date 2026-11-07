@@ -98,7 +98,7 @@ That's the whole deployment. It stops at the first problem and says what to do. 
 | `--skip-tests` | Skip step 2, e.g. right after a green CI run on the same commit |
 | `--backend-only` | Deploy the stack but not the web app |
 | `--frontend-only` | Rebuild and upload only the web app (much faster; the stack must already exist) |
-| `--smoke` | Finish with the end-to-end smoke test: 64 checks against the live API, cleaning up after itself |
+| `--smoke` | Finish with the end-to-end smoke test: 71 checks against the live API, cleaning up after itself |
 | `--env staging` | Deploy another environment (needs a `[staging.*]` section in `backend/samconfig.toml`) |
 
 ### What each step does, and why
@@ -125,11 +125,50 @@ The app decides which page to show in the browser (`/basket`, `/search`, `/contr
 
 ### Why Origin Access Control
 
-The site bucket blocks all public access. CloudFront signs each request to it, and the bucket policy only accepts requests from this one distribution. Visitors can only reach the files through CloudFront's HTTPS URL, which also adds security headers:
-- `strict-transport-security`
-- `x-content-type-options: nosniff`
-- `x-frame-options`
-- `referrer-policy`
+The site bucket blocks all public access. CloudFront signs each request to it, and the bucket policy only accepts requests from this one distribution. Visitors can only reach the files through CloudFront's HTTPS URL, which also adds the [security headers](#security-headers).
+
+### Security headers
+
+CloudFront adds these to every file it serves. They are set by `FrontendSecurityHeaders` in [backend/template.yaml](../backend/template.yaml), and step 8 of the deploy fails if the Content-Security-Policy is missing.
+
+| Header | Value | What it does |
+|---|---|---|
+| `Content-Security-Policy` | see below | Says where the app may load code, styles, images and fonts from, and which servers it may talk to. Script injected into a page can't run, and data can't be sent anywhere else. |
+| `Strict-Transport-Security` | `max-age=31536000` | Browsers use only HTTPS for the site for a year |
+| `X-Content-Type-Options` | `nosniff` | Browsers treat each file as the type it says it is |
+| `X-Frame-Options` | `DENY` | Other sites can't show the app inside a frame (clickjacking) |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Other sites only see the domain a visitor came from, not the page |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` | The app uses none of these features, so nothing in it may |
+| `Cross-Origin-Opener-Policy` | `same-origin` | A page opened from another site can't reach into the app's window |
+
+What the Content-Security-Policy allows:
+
+| Directive | Allows | For |
+|---|---|---|
+| `script-src` | `'self'` | The app's own JavaScript files only: no inline script, no `eval` |
+| `style-src` | `'self' 'unsafe-inline'` | The app's CSS, plus the `<style>` tag the toast library adds |
+| `img-src` | `'self' data: blob:` and the photo bucket | Icons, the preview of a chosen photo, signed picture links |
+| `font-src` | `'self' data:` | The bundled Inter and Nunito fonts |
+| `connect-src` | `'self'`, `https://*.execute-api.ap-southeast-1.amazonaws.com`, `https://cognito-idp.ap-southeast-1.amazonaws.com` and the photo bucket | API calls, sign-in, photo uploads |
+| `frame-ancestors`, `object-src` | `'none'` | No embedding the app, no plugins |
+| `base-uri`, `form-action` | `'self'` | No redirecting relative links or forms elsewhere |
+
+**Adding anything external** means adding its host to the policy in `template.yaml` and deploying the stack. That includes a font or image CDN, analytics, a map, or another API. Otherwise browsers block it, and the console names the directive. `npm run dev` sends no CSP, so check new features on the deployed site.
+
+### Limits on abuse
+
+| What | Limit | Where |
+|---|---|---|
+| API requests, all callers together | 20 a second, bursts of 40; then `429` | `MethodSettings` on `Api` in `template.yaml` |
+| Price submissions | 30 per user per hour | `RATE_LIMIT_PER_HOUR` |
+| Product requests | 10 per user per day | `PRODUCT_REQUESTS_PER_DAY` |
+| Photo upload links | 60 per user per hour, price photos and product requests together | `UPLOAD_LINKS_PER_HOUR` |
+
+Other protections:
+- **Uploads:** S3 enforces each file's type and size. The backend then checks the file's first bytes really are a JPG or PNG, and deletes it if not. The browser redraws every photo before upload, which drops its metadata, such as the GPS location phones record.
+- **Text:** names, brands, categories, tags, search terms and reasons can't contain hidden characters, such as a zero-width space or a right-to-left override. The sign-up trigger applies the registration form's name rules, so calling Cognito directly can't skip them.
+- **API responses** are sent with `nosniff` and `Cache-Control: no-store`, so nothing keeps a copy of people's data.
+- **Backups:** every table has point-in-time recovery: it can be restored to any second in the last 35 days. See [7. Rolling back and troubleshooting](#7-rolling-back-and-troubleshooting).
 
 ## 4. How settings reach the frontend
 
@@ -196,6 +235,14 @@ git checkout -     # back to where you were
 | `The stack has no SiteUrl output yet` | Run once without `--frontend-only`, so the stack creates the site |
 | The site shows an old version | Reload normally. If it persists, check step 7 finished, and look in the browser's developer tools for errors. |
 | A CORS error in the browser console | Check the page's address is one of the [two allowed origins](#5-cors-which-sites-may-call-the-api) |
+| `Refused to load` / `Refused to connect` (Content-Security-Policy) in the browser console | The page used a host the policy doesn't list. Add it to `FrontendSecurityHeaders` in `template.yaml` ([Security headers](#security-headers)), then deploy the stack. |
+| `429` / `Too Many Requests` | Over the [API throttle](#limits-on-abuse), or a person's upload-link limit. Wait and retry. |
+
+**To restore a table** after data is deleted by mistake, restore it to a new table as it was at a moment in the last 35 days, then copy back what's missing:
+
+```powershell
+aws dynamodb restore-table-to-point-in-time --source-table-name trolleysaver-dev-price-submission --target-table-name trolleysaver-dev-price-submission-restored --restore-date-time 2026-11-06T09:00:00Z
+```
 
 **To tear the stack down:**
 1. Empty the site and photo buckets: `aws s3 rm s3://<bucket> --recursive`.
@@ -206,7 +253,13 @@ git checkout -     # back to where you were
 These are known and accepted for this project.
 
 - **Email addresses aren't verified.** Sign-up auto-confirms accounts (a team decision: no verification codes). Anyone can register with any address.
-- **Abandoned uploads.** When a submission fails after its photo was uploaded, the photo stays in the bucket with nothing pointing to it. There's no automatic clean-up, because a blanket expiry rule could delete evidence that's still in use.
+- **Abandoned uploads.** When a submission fails after its photo was uploaded, the photo stays in the bucket with nothing pointing to it. There's no automatic clean-up, because a blanket expiry rule could delete evidence that's still in use. The upload-link limit (60 per user per hour) caps how fast this can grow.
+- **Security measures not in place**, because of cost or the work involved:
+  - **Per-visitor rate limiting** (AWS WAF, about US$6 a month or more). The API throttle is shared by everyone, so one heavy caller can slow the API for others.
+  - **Cognito threat protection** (compromised-password and unusual sign-in checks; a paid tier).
+  - **MFA for admin accounts.** It needs new sign-in screens.
+  - **A CAPTCHA on sign-up.** It needs a third-party service.
+  - **Sign-in tokens are kept in `localStorage`** (Amplify's default), so a session survives closing the tab. The Content-Security-Policy is what stops injected script from reading them.
 - **Duplicate check race.** Two people proposing the same product at the same instant could both pass the "already proposed" check. This is unlikely at this scale, and an admin would see both.
 - **Products priced at only some stores** are supported. The Smart Basket lists them as unpriced at the other stores, ranks stores that price everything first, and compares savings only on items both stores price.
 

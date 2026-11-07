@@ -1,28 +1,22 @@
-import { LoaderCircle, RefreshCw } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "../auth/auth-context"
 import { FormAlert } from "../components/auth/form-alert"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { ProductImage } from "../components/product-image"
-import { contributionSchema, earliestObservedDate, packUnits, productCorrectionsSchema, productFieldsSchema, singaporeDateString, validateImage, validationMessages } from "../contributions/schema"
-import { SubmissionServiceError } from "../contributions/service"
-import type { CatalogRetailer, ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
+import { packUnits, productCorrectionsSchema, reasonError, singaporeDateString, validationMessages } from "../contributions/schema"
+import { errorText, SubmissionServiceError } from "../contributions/service"
+import type { ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 import { formatCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { cn } from "../lib/utils"
 import { Select } from "../components/ui/select"
 import hcsSymbol from "../../assets/brand/healthier-choice-symbol.png"
 
-const emptyProduct: ProductFields = { name: "", brand: "", category: "", packQty: 0, packUnit: "ml", packCount: 1, hcs: false, dietary: [] }
-type Facets = { categories: string[]; dietary: string[] }
-function errorText(error: unknown) {
-  if (error instanceof SubmissionServiceError && error.fieldErrors) return `${error.message} ${Object.entries(error.fieldErrors).map(([field, message]) => `${field}: ${message}`).join("; ")}`
-  return error instanceof Error ? error.message : "Could not complete the request. Please retry."
-}
-
-function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFields; onChange: (value: ProductFields) => void; facets: Facets; prefix: string }) {
+export const emptyProduct: ProductFields = { name: "", brand: "", category: "", packQty: 0, packUnit: "ml", packCount: 1, hcs: false, dietary: [] }
+export type Facets = { categories: string[]; dietary: string[] }
+export function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFields; onChange: (value: ProductFields) => void; facets: Facets; prefix: string }) {
   function set<K extends keyof ProductFields>(key: K, next: ProductFields[K]) { onChange({ ...value, [key]: next }) }
   const tags = [...new Set([...facets.dietary, ...value.dietary])]
   return <div className="grid gap-5 sm:grid-cols-2">
@@ -45,149 +39,13 @@ function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFiel
   </div>
 }
 
-function ImagePicker({ label, file, onChange, id }: { label: string; file: File | null; onChange: (file: File | null) => void; id: string }) {
-  const [preview, setPreview] = useState<string>()
-  const [error, setError] = useState<string | null>(null)
-  const input = useRef<HTMLInputElement>(null)
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
-  function select(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0] ?? null
-    const message = next ? validateImage(next) : null
-    setError(message); onChange(message ? null : next)
-    setPreview(next && !message ? URL.createObjectURL(next) : undefined)
-    if (message) event.target.value = ""
-  }
-  return <div className="space-y-3 rounded-xl border p-4">
-    <Label htmlFor={id}>{label}</Label><p id={`${id}-help`} className="text-sm text-muted-foreground">JPG or PNG · Up to 5 MB</p>
-    <Input ref={input} id={id} type="file" accept="image/jpeg,image/png" aria-describedby={`${id}-help`} onChange={select} />
-    {preview && <img src={preview} alt={`Selected ${label.toLowerCase()} preview`} className="max-h-64 w-full rounded-lg object-contain" />}
-    {file && <Button type="button" variant="outline" onClick={() => { onChange(null); setPreview(undefined); if (input.current) input.current.value = "" }}>Remove {label.toLowerCase()}</Button>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-  </div>
-}
-
-export function ProductRequestForm({ service, onDone, onExisting }: { service: SubmissionService; onDone: () => void; onExisting: (id: string) => Promise<void> }) {
-  const { user, getAccessToken } = useAuth()
-  const [product, setProduct] = useState(emptyProduct)
-  const [facets, setFacets] = useState<Facets>({ categories: [], dietary: [] })
-  const [stores, setStores] = useState<CatalogRetailer[]>([])
-  const [storeId, setStoreId] = useState("")
-  const [price, setPrice] = useState("")
-  const [date, setDate] = useState(singaporeDateString())
-  const [picture, setPicture] = useState<File | null>(null)
-  const [evidence, setEvidence] = useState<File | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [existingId, setExistingId] = useState<string>()
-  const [busy, setBusy] = useState(false)
-  const [ready, setReady] = useState(false)
-  useEffect(() => {
-    let active = true
-    Promise.all([service.listFacets(), service.listRetailers()]).then(([f, r]) => { if (active) { setFacets(f); setStores(r); setReady(true) } }).catch((e) => { if (active) setError(errorText(e)) })
-    return () => { active = false }
-  }, [service])
-  async function submit(event: React.FormEvent) {
-    event.preventDefault(); setError(null); setExistingId(undefined)
-    const fields = productFieldsSchema.safeParse(product)
-    const contribution = contributionSchema.safeParse({ productId: "new", storeId, price, observedDate: date })
-    if (!fields.success) { setError(validationMessages(fields.error.issues)); return }
-    if (!contribution.success) { setError(validationMessages(contribution.error.issues)); return }
-    if (!picture) { setError("A product picture is required for every new product."); return }
-    setBusy(true)
-    try {
-      const token = await getAccessToken()
-      if (!token || !user) throw new Error("Sign in again and retry.")
-      const target = await service.requestProductImageUpload(picture, "product-image", token)
-      await service.uploadImage(target, picture)
-      let photoKey: string | undefined
-      if (evidence) {
-        const photo = await service.requestProductImageUpload(evidence, "evidence", token)
-        await service.uploadImage(photo, evidence); photoKey = photo.photoKey
-      }
-      await service.createProductRequest({ ...fields.data, retailerId: storeId, priceCents: Math.round(Number(price) * 100), observedAt: date, productImageKey: target.photoKey, ...(photoKey ? { photoKey } : {}) }, user.id, token)
-      onDone()
-    } catch (e) {
-      setError(errorText(e))
-      if (e instanceof SubmissionServiceError && e.code === "PRODUCT_EXISTS") setExistingId(e.productId)
-    } finally { setBusy(false) }
-  }
-  return <form onSubmit={submit} noValidate className="space-y-6">
-    <p className="text-base text-muted-foreground">Share the product details and a clear packaging picture. An administrator reviews each new find before it joins the catalog. Its price becomes available after nightly aggregation.</p>
-    <FormAlert message={error} />
-    {existingId && <Button type="button" variant="outline" disabled={busy} onClick={() => { setBusy(true); void onExisting(existingId).catch((e) => setError(errorText(e))).finally(() => setBusy(false)) }}>Submit a price for this product instead</Button>}
-    <fieldset disabled={busy || !ready} className="space-y-6">
-      <ProductEditor value={product} onChange={setProduct} facets={facets} prefix="new-product" />
-      <div className="grid gap-5 sm:grid-cols-3">
-        <div className="space-y-2"><Label htmlFor="request-store">Store</Label><Select id="request-store" value={storeId} onChange={(e) => setStoreId(e.target.value)}><option value="">Choose a store</option>{stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></div>
-        <div className="space-y-2"><Label htmlFor="request-price">Price (SGD)</Label><Input id="request-price" type="number" min="0.01" max="1000" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
-        <div className="space-y-2"><Label htmlFor="request-date">Observed date</Label><Input id="request-date" type="date" min={earliestObservedDate()} max={singaporeDateString()} value={date} onChange={(e) => setDate(e.target.value)} /></div>
-      </div>
-      <div className="grid gap-5 md:grid-cols-2"><ImagePicker id="product-picture" label="Product picture (required)" file={picture} onChange={setPicture} /><ImagePicker id="request-evidence" label="Price evidence (optional)" file={evidence} onChange={setEvidence} /></div>
-      <Button type="submit">{busy ? "Saving…" : "Submit new product for review"}</Button>
-    </fieldset>
-  </form>
-}
-
-function RequestImages({ item, admin, refresh }: { item: ProductRequest; admin: boolean; refresh: () => void }) {
+// The product picture and, if one was attached, the price evidence photo. Admins and the request's
+// own contributor get a link to the evidence; without one, the card just says it's there.
+function RequestImages({ item, refresh }: { item: ProductRequest; refresh: () => void }) {
   return <div className="grid gap-3 sm:grid-cols-2">
     <ProductImage url={item.productImageUrl} name={`Product picture for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} />
-    {item.photoKey && (admin && item.photoUrl ? <ProductImage url={item.photoUrl} name={`Price evidence for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} /> : <p className="rounded-xl border p-4 text-sm">Photo attached · visible to administrators</p>)}
+    {item.photoKey && (item.photoUrl ? <ProductImage url={item.photoUrl} name={`Price evidence for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} /> : <p className="rounded-xl border p-4 text-sm">Photo attached</p>)}
   </div>
-}
-
-export function ProductRequestHistory({ service, refreshKey }: { service: SubmissionService; refreshKey: boolean }) {
-  const { user, getAccessToken } = useAuth()
-  const [items, setItems] = useState<ProductRequest[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  // True until the first list arrives, and while any refresh is in flight.
-  const [loading, setLoading] = useState(true)
-  const loadsInFlight = useRef(0)
-  const historyVersion = useRef(0)
-  const load = useCallback(async (message: string | null = null) => {
-    const version = ++historyVersion.current
-    loadsInFlight.current += 1
-    setLoading(true)
-    try {
-      const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
-      const records = await service.listMyProductRequests(user.id, token)
-      if (version === historyVersion.current) { setItems(records); setError(message) }
-    } catch (e) { if (version === historyVersion.current) setError(message ? `${message} Could not refresh the list: ${errorText(e)}` : errorText(e)) }
-    finally {
-      loadsInFlight.current -= 1
-      if (loadsInFlight.current === 0) setLoading(false)
-    }
-  }, [service, user, getAccessToken])
-  async function deletePending(id: string) {
-    if (deletingId || !window.confirm("Delete this request? Its product picture and price evidence photo will be removed too. This cannot be undone.")) return
-    ++historyVersion.current
-    setDeletingId(id); setError(null)
-    try {
-      const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
-      await service.deleteProductRequest(id, { id: user.id, role: user.role }, token)
-      ++historyVersion.current
-      setItems((current) => current.filter((item) => item.id !== id))
-    } catch (e) {
-      if (e instanceof SubmissionServiceError && ((e.status === 404 && e.code === "NOT_FOUND") || (e.status === 409 && e.code === "ALREADY_MODERATED"))) {
-        await load(e.code === "NOT_FOUND" ? "This request no longer exists." : errorText(e))
-      } else setError(errorText(e))
-    } finally { setDeletingId(null) }
-  }
-  useEffect(() => { async function fetchHistory() { await load() } void fetchHistory() }, [load, refreshKey])
-  return <section className="surface-card space-y-5 p-5 sm:p-7" aria-label="Your product submissions" aria-busy={loading}>
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-xl font-extrabold">Your product submissions</h2><Button variant="outline" disabled={deletingId !== null || loading} onClick={() => void load()}><RefreshCw className={cn("size-4", loading && "animate-spin")} aria-hidden="true" />Refresh product submissions</Button></div>
-    <FormAlert message={error} />
-    {items.length === 0 && (loading
-      ? <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />Loading your product submissions…</p>
-      : <p className="text-sm text-muted-foreground">New product submissions will appear here.</p>)}
-    <div className={cn("grid gap-4 transition-opacity", loading && items.length > 0 && "opacity-60")}>{items.map((item) => <article key={item.id} className="space-y-3 rounded-xl border p-4">
-      <h3 className="font-display font-extrabold">{item.name} · <span className="capitalize">{item.status}</span></h3>
-      <p>{item.brand} · {item.packCount} × {item.packQty} {item.packUnit} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)}</p>
-      <RequestImages item={item} admin={false} refresh={() => void load()} />
-      {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
-      {item.status === "pending" && <Button variant="outline" disabled={deletingId !== null} onClick={() => void deletePending(item.id)}>{deletingId === item.id ? "Deleting…" : "Delete pending product request"}</Button>}
-      {item.status === "approved" && <p className="text-sm">Added to the catalog. Public prices update after nightly aggregation; reload Search or Smart Basket to see the product.</p>}
-    </article>)}</div>
-  </section>
 }
 
 function RequestReviewCard({ item, service, facets, refresh, notify }: { item: ProductRequest; service: SubmissionService; facets: Facets; refresh: () => Promise<void>; notify: (message: string) => void }) {
@@ -209,6 +67,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
       if (!result.success) { setError(validationMessages(result.error.issues)); return }
       changes = result.data
     } else if (!reason.trim() || reason.trim().length > 500) { setError("Enter a reason of 1–500 characters before rejecting."); return }
+    else if (reasonError(reason)) { setError(reasonError(reason)); return }
     setBusy(true)
     try {
       const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
@@ -222,14 +81,14 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
   return <article className="space-y-5 rounded-xl border p-5">
     <h3 className="font-display text-lg font-extrabold">{item.name} · {item.status}</h3>
     <p className="text-sm">{item.submitterName ?? item.userId} {item.submitterEmail} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)} · observed {singaporeDateString(new Date(item.observedAt))}</p>
-    <RequestImages item={item} admin refresh={() => void refresh()} />
+    <RequestImages item={item} refresh={() => void refresh()} />
     <FormAlert message={error} />
     {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
     {item.status === "pending" && <fieldset disabled={busy} className="space-y-5">
       <ProductEditor value={fields} onChange={setFields} facets={facets} prefix={`review-${item.id}`} />
       <p className="text-sm text-muted-foreground">Suggested range: {item.suggestedMinCents}–{item.suggestedMaxCents} cents. Review this range before approval; it applies across stores.</p>
       <div className="grid gap-4 sm:grid-cols-2">{([["Minimum cents", min, setMin], ["Maximum cents", max, setMax]] as const).map(([label, value, set]) => <label key={label} className="space-y-2">{label}<Input type="number" min="1" max="100000" step="1" value={value || ""} onChange={(e) => set(Number(e.target.value))} /></label>)}</div>
-      <label className="block space-y-2">Search terms (comma separated)<Input value={terms} onChange={(e) => setTerms(e.target.value)} /></label>
+      <label className="block space-y-2">Search terms (comma separated)<Input value={terms} maxLength={320} onChange={(e) => setTerms(e.target.value)} /></label>
       <label className="flex min-h-12 items-start gap-3 rounded-xl border bg-accent/40 p-4"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /><span>I reviewed the packaging, product fields, HCS and dietary claims, and price range. Correct unsupported claims before approval. If evidence is unclear, leave the request pending or reject it with a reason.</span></label>
       <label className="block space-y-2">Reason for rejection<textarea maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className={cn(inputClass, "h-auto min-h-24 resize-y")} /></label>
       <div className="flex flex-wrap gap-3"><Button disabled={!checked} onClick={() => void decide("approved")}>Approve product</Button><Button variant="destructive" onClick={() => void decide("rejected")}>Reject product</Button></div>
