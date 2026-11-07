@@ -54,6 +54,39 @@ def test_facets_come_from_the_whole_catalog(catalog):
     }
 
 
+def test_facet_counts_cover_the_whole_catalog_with_no_filters(catalog):
+    status, result = find()
+    assert result["facetCounts"] == {
+        "categories": {"bread": 2, "cereal": 1, "detergent": 1, "milk": 1},
+        "brands": {"Magnolia": 1, "Quaker": 1, "Sunshine": 2, "Top": 1},
+        "dietary": {"halal": 1, "vegetarian": 1},
+    }
+
+
+def test_each_facet_narrows_to_the_other_filters_but_not_its_own(catalog):
+    # With a type picked, Brand only offers that type's brands, but Type still offers every type.
+    status, result = find({"category": "bread"})
+    counts = result["facetCounts"]
+    assert counts["brands"] == {"Sunshine": 2}
+    assert counts["categories"] == {"bread": 2, "cereal": 1, "detergent": 1, "milk": 1}
+    assert counts["dietary"] == {}
+    # Starting from a brand narrows Type instead.
+    assert find({"brand": "sunshine"})[1]["facetCounts"]["categories"] == {"bread": 2}
+
+
+def test_facet_counts_follow_the_search_text_and_switch(catalog):
+    counts = find({"q": "bread", "hcs": "true"})[1]["facetCounts"]
+    assert counts["categories"] == {"bread": 1} and counts["brands"] == {"Sunshine": 1}
+
+
+def test_a_combination_with_no_products_still_offers_a_way_out(catalog):
+    # Milk from Sunshine doesn't exist: each list shows what the other choice allows.
+    status, result = find({"category": "milk", "brand": "sunshine"})
+    assert result["items"] == []
+    assert result["facetCounts"]["categories"] == {"bread": 2}
+    assert result["facetCounts"]["brands"] == {"Magnolia": 1}
+
+
 @pytest.mark.parametrize("q, expected", [
     ("sunshine", [WHITE_ID, WHOLEMEAL_ID]),
     ("WHOLEMEAL", [WHOLEMEAL_ID]),

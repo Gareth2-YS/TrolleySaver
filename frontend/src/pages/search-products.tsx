@@ -1,5 +1,5 @@
 import { ProductImage } from "../components/product-image"
-import { Filter, LoaderCircle, Plus, Search, X } from "lucide-react"
+import { Filter, LoaderCircle, Plus, RotateCcw, Search, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
@@ -7,11 +7,12 @@ import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { useBasketItems } from "../basket/use-basket-items"
 import { getCategoryIcon } from "../lib/category-icons"
-import { formatCents, isWholeCents, limitToCents } from "../lib/format"
+import { facetOptions, isStale } from "../lib/facets"
+import { formatCents, formatDollars, isWholeCents, limitToCents } from "../lib/format"
 import { cn } from "../lib/utils"
 import { HcsBadge } from "../components/hcs-badge"
 import { PageHeader } from "../components/layout/page-header"
-import { Select } from "../components/ui/select"
+import { FacetSelect } from "../components/facet-select"
 import { usePageTitle } from "../lib/use-page-title"
 
 interface StorePrice {
@@ -43,6 +44,8 @@ interface SearchResult {
   total: number
   catalogSize: number
   facets: { categories: string[]; brands: string[]; dietary: string[] }
+  // For each filter, how many products each option gives with the other filters kept
+  facetCounts?: { categories: Record<string, number>; brands: Record<string, number>; dietary: Record<string, number> }
 }
 
 interface SearchCriteria {
@@ -53,6 +56,14 @@ interface SearchCriteria {
   hcsOnly: boolean
   minimumPrice: string
   maximumPrice: string
+}
+
+interface AppliedFilter {
+  name: string
+  label: string
+  // Fits nothing alongside the other filters
+  stale: boolean
+  clear: () => void
 }
 
 interface Retailer {
@@ -353,9 +364,10 @@ export function SearchProductsPage() {
     () => new Map(basketItems.map((item) => [item.productId, item.quantity])),
     [basketItems],
   )
-  const categories = useMemo(() => result?.facets.categories ?? [], [result])
-  const brands = result?.facets.brands ?? []
-  const dietaryOptions = result?.facets.dietary ?? []
+  // Each list narrows to what the other filters leave, so filters can be picked in any order.
+  const typeOptions = facetOptions(result?.facetCounts?.categories, category ?? "", result?.facets.categories)
+  const brandOptions = facetOptions(result?.facetCounts?.brands, brand, result?.facets.brands)
+  const dietaryOptions = facetOptions(result?.facetCounts?.dietary, dietary, result?.facets.dietary)
 
   useEffect(() => { saveBasket(basketItems) }, [basketItems, saveBasket])
 
@@ -409,8 +421,7 @@ export function SearchProductsPage() {
   const activeFilterCount = Number(Boolean(category)) + Number(Boolean(brand))
     + Number(Boolean(dietary)) + Number(Boolean(minimumPrice)) + Number(Boolean(maximumPrice))
 
-  function clearFilters() {
-    setQuery("")
+  function resetFilters() {
     setCategory(null)
     setHcsOnly(false)
     setBrand("")
@@ -418,6 +429,23 @@ export function SearchProductsPage() {
     setMinimumPrice("")
     setMaximumPrice("")
   }
+
+  function clearSearchAndFilters() {
+    setQuery("")
+    resetFilters()
+  }
+
+  // What's applied, shown above the results whether or not the Filters panel is open.
+  const priceLabel = minimumPrice && maximumPrice ? `${formatDollars(Number(minimumPrice))} – ${formatDollars(Number(maximumPrice))}`
+    : minimumPrice ? `from ${formatDollars(Number(minimumPrice))}` : maximumPrice ? `up to ${formatDollars(Number(maximumPrice))}` : ""
+  const appliedFilters: AppliedFilter[] = []
+  if (category) appliedFilters.push({ name: "type", label: `Type: ${formatLabel(category)}`, stale: isStale(typeOptions, category), clear: () => setCategory(null) })
+  if (brand) appliedFilters.push({ name: "brand", label: `Brand: ${brand}`, stale: isStale(brandOptions, brand), clear: () => setBrand("") })
+  if (dietary) appliedFilters.push({ name: "dietary", label: `Dietary: ${formatLabel(dietary)}`, stale: isStale(dietaryOptions, dietary), clear: () => setDietary("") })
+  if (hcsOnly) appliedFilters.push({ name: "Healthier Choice", label: "Healthier Choice only", stale: false, clear: () => setHcsOnly(false) })
+  if (priceLabel) appliedFilters.push({ name: "price", label: `Price ${priceLabel}`, stale: false, clear: () => { setMinimumPrice(""); setMaximumPrice("") } })
+  // Choices that fit nothing alongside the others; the empty results offer to clear each one.
+  const staleFilters = appliedFilters.filter((filter) => filter.stale)
 
   return (
     <AppShell>
@@ -474,24 +502,15 @@ export function SearchProductsPage() {
             <div id="advanced-filters" className="grid gap-4 rounded-xl border bg-background/60 p-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="type-filter">Type</Label>
-                <Select id="type-filter" value={category ?? ""} onChange={(event) => setCategory(event.target.value || null)}>
-                  <option value="">All types</option>
-                  {categories.map((value) => <option key={value} value={value}>{formatLabel(value)}</option>)}
-                </Select>
+                <FacetSelect id="type-filter" value={category ?? ""} options={typeOptions} allLabel="All types" format={formatLabel} onChange={(value) => setCategory(value || null)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="brand-filter">Brand</Label>
-                <Select id="brand-filter" value={brand} onChange={(event) => setBrand(event.target.value)}>
-                  <option value="">All brands</option>
-                  {brands.map((value) => <option key={value} value={value}>{value}</option>)}
-                </Select>
+                <FacetSelect id="brand-filter" value={brand} options={brandOptions} allLabel="All brands" onChange={setBrand} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="dietary-filter">Dietary</Label>
-                <Select id="dietary-filter" value={dietary} onChange={(event) => setDietary(event.target.value)}>
-                  <option value="">All dietary options</option>
-                  {dietaryOptions.map((value) => <option key={value} value={value}>{formatLabel(value)}</option>)}
-                </Select>
+                <FacetSelect id="dietary-filter" value={dietary} options={dietaryOptions} allLabel="All dietary options" format={formatLabel} onChange={setDietary} />
               </div>
               <fieldset className="space-y-2 sm:col-span-2">
                 <legend className="text-sm font-semibold">Lowest price range ($)</legend>
@@ -528,10 +547,27 @@ export function SearchProductsPage() {
                   <p role="alert" className="text-xs text-destructive">{priceRangeError}</p>
                 )}
               </fieldset>
-              <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
-                <p className="text-xs text-muted-foreground">Price filtering uses each product’s lowest current retailer price.</p>
-                <Button type="button" size="sm" variant="ghost" onClick={clearFilters}><X className="size-4" />Clear search and filters</Button>
-              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">Each list only offers choices that still have products, with how many. Price filtering uses each product’s lowest current retailer price.</p>
+            </div>
+          )}
+
+          {appliedFilters.length > 0 && (
+            <div role="group" aria-label="Applied filters" className="flex flex-wrap items-center gap-2">
+              {appliedFilters.map((filter) => (
+                <button
+                  key={filter.name}
+                  type="button"
+                  onClick={filter.clear}
+                  aria-label={`Remove ${filter.label}`}
+                  className={cn(
+                    "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    filter.stale ? "border-amber-600 text-amber-800 dark:border-amber-400 dark:text-amber-200" : "border-primary/40 bg-accent/60 text-accent-foreground",
+                  )}
+                >
+                  {filter.label}<X aria-hidden="true" className="size-3.5" />
+                </button>
+              ))}
+              <Button type="button" size="sm" variant="ghost" className="text-[13px]" onClick={resetFilters}><RotateCcw className="size-4" />Reset filters</Button>
             </div>
           )}
         </div>
@@ -553,8 +589,15 @@ export function SearchProductsPage() {
         ) : products.length === 0 ? (
           <div className="surface-card p-10 text-center">
             <h2 className="font-display text-lg font-extrabold">No matching products</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Try a different search or clear some filters.</p>
-            <Button type="button" variant="outline" className="mt-4" onClick={clearFilters}>Clear search and filters</Button>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {staleFilters.length > 1 ? `${staleFilters.map((filter) => filter.label).join(" and ")} don’t go together. Clear one to see what’s available.` : "Try a different search or clear some filters."}
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {staleFilters.length > 1 && staleFilters.map((filter) => (
+                <Button key={filter.name} type="button" variant="outline" onClick={filter.clear}>Clear {filter.name}</Button>
+              ))}
+              <Button type="button" variant={staleFilters.length > 1 ? "ghost" : "outline"} onClick={clearSearchAndFilters}>Clear search and filters</Button>
+            </div>
           </div>
         ) : (
           <div className={`grid gap-5 transition-opacity sm:grid-cols-2 xl:grid-cols-3 ${searching ? "opacity-60" : ""}`} aria-live="polite" aria-busy={searching}>

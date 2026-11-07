@@ -580,4 +580,28 @@ describe("one form for existing and new products", () => {
     expect(within(section).getByRole("heading", { name: /Oat milk/ })).toBeInTheDocument()
     expect(within(section).queryByRole("heading", { name: flaggedSubmission.productName })).not.toBeInTheDocument()
   })
+
+  it("shows each submission's pack, and can hide what an admin has already decided", async () => {
+    const user = userEvent.setup()
+    const accepted: PriceSubmission = { ...flaggedSubmission, id: "submission-2", productId: "milo", productName: "Milo Cereal", status: "accepted" }
+    renderContribution("user", submissionService({
+      listProducts: vi.fn().mockResolvedValue([
+        { id: flaggedSubmission.productId, name: flaggedSubmission.productName, packQty: 600, packUnit: "g", packCount: 1 },
+        { id: "milo", name: "Milo Cereal", packQty: 300, packUnit: "g", packCount: 2 },
+      ]),
+      listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission, accepted]),
+      listMyProductRequests: vi.fn().mockResolvedValue([{ ...requestRecord, status: "approved" }]),
+    }))
+    const section = await screen.findByRole("region", { name: "Your submissions" })
+    const milo = (await within(section).findByRole("heading", { name: "Milo Cereal" })).closest("li")!
+    expect(within(milo).getByText("2 × 300 g")).toBeInTheDocument()
+    expect(within(section).getByText("600 g")).toBeInTheDocument()
+    expect(within(section).getByText("1 L")).toBeInTheDocument()
+
+    await user.click(within(section).getByRole("switch", { name: "Pending only" }))
+    expect(within(section).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual([flaggedSubmission.productName])
+    expect(within(section).getByRole("button", { name: /^All/ })).toHaveTextContent("All1")
+    await user.click(within(section).getByRole("button", { name: /^New products/ }))
+    expect(within(section).getByRole("heading", { name: "Nothing waiting for review" })).toBeInTheDocument()
+  })
 })

@@ -9,6 +9,9 @@ export interface CatalogProduct {
   category?: string
   searchTerms?: string[]
   dietary?: string[]
+  packQty?: number
+  packUnit?: string
+  packCount?: number
   minCents?: number
   maxCents?: number
 }

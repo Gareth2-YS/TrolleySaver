@@ -37,11 +37,15 @@ function anonymousAuth(): AuthService {
 
 const catalogRetailers = [{ id: "coldstorage", name: "Cold Storage" }, { id: "fairprice", name: "FairPrice" }, { id: "shengsiong", name: "Sheng Siong" }]
 
-function renderSearch(items: object[], retailers: object[] = catalogRetailers) {
-  const result = { items, total: items.length, catalogSize: items.length, facets: { categories: ["bread", "milk"], brands: [], dietary: [] } }
+// facetCounts can depend on the request, as the backend's do.
+function renderSearch(items: object[], retailers: object[] = catalogRetailers, facetCounts?: object | ((url: string) => object), facets = { categories: ["bread", "milk"], brands: [] as string[], dietary: [] as string[] }) {
+  const result = (url: string) => ({
+    items, total: items.length, catalogSize: Math.max(items.length, 1), facets,
+    facetCounts: typeof facetCounts === "function" ? facetCounts(url) : facetCounts,
+  })
   vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => ({
     ok: true,
-    json: async () => (url.endsWith("/retailers") ? { items: retailers } : result),
+    json: async () => (url.endsWith("/retailers") ? { items: retailers } : result(url)),
   })))
   return render(<MemoryRouter><AuthProvider serviceOverride={anonymousAuth()}><SearchProductsPage /></AuthProvider></MemoryRouter>)
 }
@@ -135,10 +139,64 @@ describe("search page", () => {
     await user.click(toggle)
     expect(toggle).toHaveAttribute("aria-checked", "true")
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("hcs=true"))).toBe(true))
-    // The switch shows its own state, so it isn't counted on the Filters button.
-    await user.click(screen.getByRole("button", { name: "Filters" }))
-    await user.click(screen.getByRole("button", { name: "Clear search and filters" }))
+    // The switch shows its own state, so it isn't counted on the Filters button, but it can be removed like any filter.
+    expect(screen.getByRole("button", { name: "Filters" })).toHaveTextContent(/^Filters$/)
+    await user.click(screen.getByRole("button", { name: "Remove Healthier Choice only" }))
     expect(toggle).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("offers only filter options that still have products, with counts", async () => {
+    const user = userEvent.setup()
+    renderSearch([milk], catalogRetailers, {
+      categories: { bread: 2, milk: 1 }, brands: { Meiji: 1, Gardenia: 0 }, dietary: {},
+    })
+    await screen.findByRole("button", { name: "View details for Fresh Milk" })
+    await user.click(screen.getByRole("button", { name: "Filters" }))
+    const options = (label: string) => [...within(screen.getByLabelText(label)).getAllByRole("option")].map((option) => option.textContent)
+    expect(options("Type")).toEqual(["All types", "Bread (2)", "Milk (1)"])
+    expect(options("Brand")).toEqual(["All brands", "Meiji (1)"])
+    expect(options("Dietary")).toEqual(["All dietary options"])
+  })
+
+  it("keeps a choice that no longer fits, marked, and offers to clear it", async () => {
+    const user = userEvent.setup()
+    // Gardenia milk doesn't exist: once both are picked, each list holds only what the other choice allows.
+    renderSearch([], catalogRetailers, (url) => url.includes("category=milk") && url.includes("brand=Gardenia")
+      ? { categories: { bread: 2 }, brands: { Meiji: 1 }, dietary: {} }
+      : { categories: { bread: 2, milk: 1 }, brands: { Gardenia: 2, Meiji: 1 }, dietary: {} })
+    await screen.findByText("No matching products")
+    await user.click(screen.getByRole("button", { name: "Filters" }))
+    await user.selectOptions(screen.getByLabelText("Type"), "milk")
+    await user.selectOptions(screen.getByLabelText("Brand"), "Gardenia")
+    expect(await within(screen.getByLabelText("Brand")).findByRole("option", { name: "Gardenia (0)" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Brand")).toHaveAccessibleDescription("Nothing fits your other filters")
+    expect(await screen.findByText(/Type: Milk and Brand: Gardenia don’t go together/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clear brand" }))
+    expect(screen.getByLabelText("Brand")).toHaveValue("")
+    expect(screen.getByLabelText("Type")).toHaveValue("milk")
+  })
+
+  it("shows applied filters above the results and resets them all at once, keeping the search", async () => {
+    const user = userEvent.setup()
+    renderSearch([milk])
+    await screen.findByRole("button", { name: "View details for Fresh Milk" })
+    const search = screen.getByRole("searchbox", { name: "Search products or brands" })
+    await user.type(search, "milk")
+    await user.click(screen.getByRole("switch", { name: "Healthier Choice only" }))
+    await user.click(screen.getByRole("button", { name: "Filters" }))
+    await user.selectOptions(screen.getByLabelText("Type"), "milk")
+    await user.type(screen.getByLabelText("To"), "5")
+    // The panel can close: the applied filters stay in view.
+    await user.click(screen.getByRole("button", { name: "Filters (2)" }))
+
+    const applied = screen.getByRole("group", { name: "Applied filters" })
+    expect(within(applied).getAllByRole("button").map((button) => button.textContent)).toEqual(
+      ["Type: Milk", "Healthier Choice only", "Price up to $5.00", "Reset filters"],
+    )
+    await user.click(within(applied).getByRole("button", { name: "Reset filters" }))
+    expect(screen.queryByRole("group", { name: "Applied filters" })).not.toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Healthier Choice only" })).toHaveAttribute("aria-checked", "false")
+    expect(search).toHaveValue("milk")
   })
 
   it("keeps the price range in dollars and cents", async () => {

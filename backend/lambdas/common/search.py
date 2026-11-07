@@ -49,7 +49,7 @@ def matches(product, lowest, criteria):
 
 
 def facets(products):
-    """The filter options the page offers, taken from the whole catalog so they don't shrink as filters apply."""
+    """Every category, brand and dietary tag in the whole catalog, for forms that need the full lists."""
     return {
         "categories": sorted({p["category"] for p in products if p.get("category")}),
         "brands": sorted({p["brand"] for p in products if p.get("brand")}),
@@ -57,12 +57,41 @@ def facets(products):
     }
 
 
-def search(products, prices, retailers, criteria):
-    """Matching products in the order given, each with its store prices and lowest price."""
+# Each facet and the search criterion it filters on.
+FACET_CRITERIA = {"categories": "category", "brands": "brand", "dietary": "dietary"}
+
+
+def _facet_values(product, criterion):
+    if criterion == "dietary":
+        return product.get("dietary") or []
+    value = product.get(criterion)
+    return [value] if value else []
+
+
+def priced(products, prices, retailers):
+    """Each product with its store prices and lowest price, as the Search page shows it."""
     items = []
     for product in products:
         product_prices = prices.get(product["id"], {})
-        lowest = lowest_price(product_prices, retailers)
-        if matches(product, lowest, criteria):
-            items.append({**product, "prices": product_prices, "lowestPrice": lowest})
+        items.append({**product, "prices": product_prices, "lowestPrice": lowest_price(product_prices, retailers)})
     return items
+
+
+def search(items, criteria):
+    """The priced products that match, in the order given."""
+    return [item for item in items if matches(item, item["lowestPrice"], criteria)]
+
+
+def facet_counts(items, criteria):
+    """For each filter, how many products each option would give with all the other filters kept.
+
+    An option is left out when it would give none, so the dropdowns only offer choices that lead
+    somewhere, whichever filter the shopper picks first.
+    """
+    counts = {name: {} for name in FACET_CRITERIA}
+    for item in items:
+        for name, criterion in FACET_CRITERIA.items():
+            if matches(item, item["lowestPrice"], {**criteria, criterion: None}):
+                for value in _facet_values(item, criterion):
+                    counts[name][value] = counts[name].get(value, 0) + 1
+    return {name: dict(sorted(found.items(), key=lambda entry: entry[0].casefold())) for name, found in counts.items()}

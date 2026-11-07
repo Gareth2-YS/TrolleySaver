@@ -7,6 +7,7 @@ import {
   Minus,
   PiggyBank,
   Plus,
+  RotateCcw,
   Search,
   ShoppingBag,
   ShoppingBasket,
@@ -18,7 +19,8 @@ import { FormAlert } from "../components/auth/form-alert"
 import { AppShell } from "../components/layout/app-shell"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
-import { Select } from "../components/ui/select"
+import { FacetSelect } from "../components/facet-select"
+import { countBy, facetOptions, type FacetOption } from "../lib/facets"
 import { HcsBadge } from "../components/hcs-badge"
 import { PageHeader } from "../components/layout/page-header"
 import { usePageTitle } from "../lib/use-page-title"
@@ -26,7 +28,7 @@ import { createBasketService } from "../basket/service"
 import { useBasketItems, type BasketItems } from "../basket/use-basket-items"
 import type { BasketItem, BasketResult, BasketService, BasketStore, Product } from "../basket/types"
 import { getCategoryIcon } from "../lib/category-icons"
-import { formatCents } from "../lib/format"
+import { formatCents, packLabel } from "../lib/format"
 import { cn } from "../lib/utils"
 
 const MAX_QUANTITY = 99
@@ -37,12 +39,6 @@ const COMPARE_MAX_LINES = 50
 // One swap, recorded so it can be undone. `added` is what a merge actually added after the quantity cap,
 // and `toQuantity` the swapped-in line's quantity right after the swap.
 interface SwapRecord { fromId: string; fromQuantity: number; fromIndex: number; merged: boolean; added: number; toQuantity: number }
-
-function packLabel(item: { packQty: number | null; packUnit: string | null; packCount?: number }) {
-  if (item.packQty === null || item.packUnit === null) return ""
-  const size = `${item.packQty} ${item.packUnit}`
-  return item.packCount && item.packCount > 1 ? `${item.packCount} × ${size}` : size
-}
 
 function plural(count: number, word: string) {
   return `${count} ${count === 1 ? word : `${word}s`}`
@@ -67,15 +63,12 @@ function CardTitle({ id, icon: Icon, title, description }: { id: string; icon: t
   )
 }
 
-function Filter({ label, value, options, allLabel, onChange }: { label: string; value: string; options: string[]; allLabel: string; onChange: (value: string) => void }) {
+function Filter({ id, label, value, options, allLabel, onChange }: { id: string; label: string; value: string; options: FacetOption[]; allLabel: string; onChange: (value: string) => void }) {
   return (
-    <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm font-semibold sm:max-w-[220px] sm:basis-[170px]">
-      {label}
-      <Select value={value} onChange={(event) => onChange(event.target.value)} className={cn("capitalize", value && "border-primary")}>
-        <option value="">{allLabel}</option>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </Select>
-    </label>
+    <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-[220px] sm:basis-[170px]">
+      <label htmlFor={id} className="text-sm font-semibold">{label}</label>
+      <FacetSelect id={id} value={value} options={options} allLabel={allLabel} onChange={onChange} className="capitalize" />
+    </div>
   )
 }
 
@@ -332,23 +325,33 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
   const comparing = basket.length > 0 && settled?.key !== basketKey
   const compareError = basket.length > 0 && settled?.key === basketKey ? settled.error : null
 
-  const categories = useMemo(() => [...new Set(products.map((product) => product.category))].sort(), [products])
-  const brands = useMemo(() => [...new Set(products.map((product) => product.brand))].sort((a, b) => a.localeCompare(b)), [products])
-
-  const matches = useMemo(() => {
+  const textMatches = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    return products.filter((product) => {
-      if ((category && product.category !== category) || (brand && product.brand !== brand)) return false
-      const text = `${product.name} ${product.brand} ${product.category}`.toLowerCase()
-      return terms.every((term) => text.includes(term))
-    })
-  }, [brand, category, products, query])
-  const filtering = Boolean(query.trim() || category || brand)
+    return products.filter((product) => terms.every((term) => `${product.name} ${product.brand} ${product.category}`.toLowerCase().includes(term)))
+  }, [products, query])
+  // Like Search: each list only offers what the search and the other filter leave, so either can go first.
+  const typeOptions = useMemo(
+    () => facetOptions(countBy(textMatches.filter((product) => !brand || product.brand === brand), (product) => product.category), category),
+    [brand, category, textMatches],
+  )
+  const brandOptions = useMemo(
+    () => facetOptions(countBy(textMatches.filter((product) => !category || product.category === category), (product) => product.brand), brand),
+    [brand, category, textMatches],
+  )
+  const matches = useMemo(
+    () => textMatches.filter((product) => (!category || product.category === category) && (!brand || product.brand === brand)),
+    [brand, category, textMatches],
+  )
+  const filtered = Boolean(category || brand)
 
-  function clearFilters() {
-    setQuery("")
+  function resetFilters() {
     setCategory("")
     setBrand("")
+  }
+
+  function clearSearchAndFilters() {
+    setQuery("")
+    resetFilters()
   }
 
   // Like the backend's healthier basket: a non-HCS product can swap for any HCS product in its category.
@@ -558,9 +561,9 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
               <div className="min-w-0 flex-[1_1_240px]"><CardTitle id="add-heading" icon={ShoppingBag} title="Add groceries" description="Search the catalog and add items to your basket" /></div>
               <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto sm:flex-[0_1_560px] sm:justify-end">
-                <Filter label="Product type" value={category} options={categories} allLabel="All product types" onChange={setCategory} />
-                <Filter label="Brand" value={brand} options={brands} allLabel="All brands" onChange={setBrand} />
-                <Button type="button" variant="ghost" className="h-11 shrink-0 px-3 text-[13px]" disabled={!filtering} onClick={clearFilters}><X className="size-4" />Clear filters</Button>
+                <Filter id="basket-type-filter" label="Product type" value={category} options={typeOptions} allLabel="All product types" onChange={setCategory} />
+                <Filter id="basket-brand-filter" label="Brand" value={brand} options={brandOptions} allLabel="All brands" onChange={setBrand} />
+                <Button type="button" variant="ghost" className="h-11 shrink-0 self-start px-3 text-[13px] sm:mt-[26px]" disabled={!filtered} onClick={resetFilters}><RotateCcw className="size-4" />Reset filters</Button>
               </div>
             </div>
 
@@ -587,7 +590,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
               ) : matches.length === 0 ? (
                 <li className="rounded-[10px] border border-dashed px-4 py-5 text-center text-[13px] text-muted-foreground">
                   {catalogError ? "Products are unavailable." : query.trim() ? `No products match “${query.trim()}”.` : "No products match these filters."}
-                  {!catalogError && filtering && <Button type="button" variant="outline" size="sm" className="ml-3 mt-2 sm:mt-0" onClick={clearFilters}>Clear filters</Button>}
+                  {!catalogError && (filtered || query.trim()) && <Button type="button" variant="outline" size="sm" className="ml-3 mt-2 sm:mt-0" onClick={clearSearchAndFilters}>Clear search and filters</Button>}
                 </li>
               ) : matches.map((product) => {
                 const inBasket = basket.find((item) => item.productId === product.id)

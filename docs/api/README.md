@@ -158,6 +158,7 @@ GET /products/search?q=milk&hcs=false&maxPriceCents=500
   "total": 1,
   "catalogSize": 42,
   "facets": { "categories": ["bread", "cereal", "milk", …], "brands": ["Gardenia", "Magnolia", …], "dietary": ["halal", "vegetarian"] },
+  "facetCounts": { "categories": { "milk": 2 }, "brands": { "Magnolia": 1, "Meiji": 1 }, "dietary": {} },
   "priceMaxAgeDays": 30,
   "pricesUpdated": "2026-10-25T16:05:01.230Z"
 }
@@ -165,7 +166,8 @@ GET /products/search?q=milk&hcs=false&maxPriceCents=500
 
 - **Prices** are the same daily averages the Smart Basket uses ([how they're worked out](#post-basketcompare)). A store with no price, or only one more than `priceMaxAgeDays` old, is missing from `prices`.
 - **`lowestPrice`** is the cheapest store, with ties going to the alphabetically first retailer id. It's `null` when no store has a current price.
-- **`facets`** lists every category, brand and dietary tag in the **whole catalog**, not just the results, so dropdowns don't shrink as filters are applied.
+- **`facets`** lists every category, brand and dietary tag in the **whole catalog**, not just the results, for forms that need the full lists (such as adding a new product).
+- **`facetCounts`** is what the Search filters offer. For each filter, it counts how many products each option would give with **every other** filter (and the search text) kept, leaving out options that would give none. A filter's own choice doesn't narrow its own list, so shoppers can pick filters in any order and never land on a combination with no products.
 - **`total`** is the number of results and **`catalogSize`** the number of products, for "12 of 42 products".
 - No pagination: every match is returned.
 
@@ -748,6 +750,7 @@ export interface ApiSearchResult {
   total: number
   catalogSize: number
   facets: { categories: string[]; brands: string[]; dietary: string[] }
+  facetCounts: { categories: Record<string, number>; brands: Record<string, number>; dietary: Record<string, number> }
   priceMaxAgeDays: number
   pricesUpdated: string | null
 }
