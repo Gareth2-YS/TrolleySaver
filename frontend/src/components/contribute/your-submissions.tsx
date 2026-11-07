@@ -1,14 +1,13 @@
 import { CalendarDays, Image, ImageOff, LoaderCircle, RefreshCw, Store, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useAuth } from "../../auth/auth-context"
-import { SubmissionServiceError } from "../../contributions/service"
+import { errorText, SubmissionServiceError } from "../../contributions/service"
 import type { PriceSubmission, ProductRequest, SubmissionService } from "../../contributions/types"
 import { getCategoryIcon } from "../../lib/category-icons"
 import { formatCents, formatDay, formatDollars, formatTimestamp } from "../../lib/format"
 import { cn } from "../../lib/utils"
 import { FormAlert } from "../auth/form-alert"
 import { EnlargeableImage } from "../enlargeable-image"
-import { ProductImage } from "../product-image"
 import { Button } from "../ui/button"
 import { PriceStatusBadge, RequestStatusBadge } from "./status-badge"
 
@@ -22,17 +21,9 @@ const EMPTY: Record<Filter, string> = {
   new: "New products you add will appear here while an admin checks them.",
 }
 
-function errorText(error: unknown) {
-  return error instanceof Error ? error.message : "Could not complete the request. Please retry."
-}
-
 function packLabel(item: ProductRequest) {
   const size = `${item.packQty} ${item.packUnit}`
   return item.packCount > 1 ? `${item.packCount} × ${size}` : size
-}
-
-function Thumb({ children }: { children?: ReactNode }) {
-  return children ?? <span className="product-tile grid size-12 place-items-center text-muted-foreground sm:size-14"><Image aria-hidden="true" className="size-5" /></span>
 }
 
 function Row({ thumb, name, kind, meta, photo, price, badge, after }: { thumb: ReactNode; name: string; kind: "price" | "new"; meta: ReactNode[]; photo?: ReactNode; price: string; badge: ReactNode; after?: ReactNode }) {
@@ -58,13 +49,33 @@ function Row({ thumb, name, kind, meta, photo, price, badge, after }: { thumb: R
   )
 }
 
-// The price photo the contributor sent, as a thumbnail that enlarges like the pictures on Search.
-function YourPhoto({ url, name, onExpired }: { url: string; name: string; onExpired: () => void }) {
+// The row's main picture: what the contributor sent, enlargeable like the pictures on Search.
+// The category icon stands in when they sent no photo, or when the photo can't be loaded.
+function RowPicture({ url, name, category, onExpired }: { url?: string; name: string; category?: string | null; onExpired: () => void }) {
+  const icon = getCategoryIcon(category)
+  if (url) return <EnlargeableImage url={url} name={name} fallback={icon} onExpired={onExpired} className="size-12 object-cover p-0 sm:size-14" />
+  if (icon) return <img src={icon} alt="" className="product-tile size-12 sm:size-14" />
+  return <span className="product-tile grid size-12 place-items-center text-muted-foreground sm:size-14"><Image aria-hidden="true" className="size-5" /></span>
+}
+
+// Names a pending item well enough to tell it from others of the same product: what, where and when.
+function itemLabel(name: string, store: string, seen: string) {
+  return `${name} at ${store}, seen ${formatDay(seen)}`
+}
+
+// The one Delete button for anything still pending. Its accessible name says which item it deletes.
+function DeleteButton({ itemName, deleting, disabled, onClick }: { itemName: string; deleting: boolean; disabled: boolean; onClick: () => void }) {
   return (
-    <div className="flex items-center gap-2.5 pt-1.5">
-      <EnlargeableImage url={url} name={name} onExpired={onExpired} className="size-11 object-cover p-0" />
-      <span className="text-xs text-muted-foreground">Your price photo</span>
-    </div>
+    <Button
+      variant="outline"
+      size="sm"
+      className="border-destructive/40 text-destructive hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
+      disabled={disabled}
+      aria-label={`${deleting ? "Deleting" : "Delete"} ${itemName}`}
+      onClick={onClick}
+    >
+      <Trash2 className="size-4" aria-hidden="true" />{deleting ? "Deleting…" : "Delete"}
+    </Button>
   )
 }
 
@@ -97,6 +108,8 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
   const historyVersion = useRef(0)
 
   const load = useCallback(async (message: string | null = null) => {
+    // Until the signed-in user is known there is nothing to load; the list keeps showing it's loading.
+    if (!user) return
     const version = ++historyVersion.current
     loadsInFlight.current += 1
     setRequestsLoading(true)
@@ -207,30 +220,26 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
           {shown.map((entry) => {
             if (entry.kind === "price") {
               const item = entry.item
-              const icon = getCategoryIcon(categoryOf(item.productId))
               return (
                 <Row
                   key={`price-${item.id}`}
                   kind="price"
                   name={item.productName}
-                  thumb={<Thumb>{icon && <img src={icon} alt="" className="product-tile size-12 sm:size-14" />}</Thumb>}
+                  thumb={<RowPicture url={item.photo?.previewUrl} name={`Price evidence for ${item.productName}`} category={categoryOf(item.productId)} onExpired={() => { if (item.photo?.storage === "private-s3") void refreshPrices().catch(() => undefined) }} />}
                   meta={[
                     <Meta key="store" icon={Store}>{item.storeName}</Meta>,
                     <Meta key="seen" icon={CalendarDays}>Seen {formatDay(item.observedDate)}</Meta>,
                     item.photo ? (item.photo.previewUrl ? null : <Meta key="photo" icon={Image}>Photo attached</Meta>) : <Meta key="photo" icon={ImageOff}>No photo</Meta>,
                     <Meta key="sent">Sent {formatTimestamp(item.submittedAt)}</Meta>,
                   ]}
-                  photo={item.photo?.previewUrl && <YourPhoto url={item.photo.previewUrl} name={`Price evidence for ${item.productName}`} onExpired={() => { if (item.photo?.storage === "private-s3") void refreshPrices().catch(() => undefined) }} />}
                   price={formatDollars(item.price)}
                   badge={<PriceStatusBadge status={item.status} />}
                   after={
                     item.rejectionReason ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"><strong>Rejection reason:</strong> {item.rejectionReason}</p>
                     : item.status === "flagged" ? (
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm text-muted-foreground">This price is unusual, so an admin checks it first.</p>
-                        <Button variant="ghost" size="sm" disabled={deletingId !== null} onClick={() => void deletePendingPrice(item)}>
-                          <Trash2 className="size-4" aria-hidden="true" />{deletingId === item.id ? "Deleting…" : "Delete price"}
-                        </Button>
+                        <p className="text-sm text-muted-foreground">This price is far from the usual range, so an admin checks it first.</p>
+                        <DeleteButton itemName={itemLabel(item.productName, item.storeName, item.observedDate)} deleting={deletingId === item.id} disabled={deletingId !== null} onClick={() => void deletePendingPrice(item)} />
                       </div>
                     )
                     : null
@@ -244,7 +253,7 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
                 key={`new-${item.id}`}
                 kind="new"
                 name={item.name}
-                thumb={<Thumb><ProductImage url={item.productImageUrl} fallback={getCategoryIcon(item.category)} name={`Product picture for ${item.name}`} className="product-tile size-12 sm:size-14" onExpired={() => void load()} /></Thumb>}
+                thumb={<RowPicture url={item.productImageUrl} name={`Product picture for ${item.name}`} category={item.category} onExpired={() => void load()} />}
                 meta={[
                   <Meta key="pack">{packLabel(item)}</Meta>,
                   <Meta key="store" icon={Store}>{item.retailerName ?? item.retailerId}</Meta>,
@@ -252,7 +261,13 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
                   item.photoKey && !item.photoUrl ? <Meta key="photo" icon={Image}>Photo attached</Meta> : null,
                   <Meta key="sent">Sent {formatTimestamp(item.submittedAt)}</Meta>,
                 ]}
-                photo={item.photoUrl && <YourPhoto url={item.photoUrl} name={`Price evidence for ${item.name}`} onExpired={() => void load()} />}
+                photo={item.photoUrl && (
+                  // The shelf label or receipt sent with the new product's price.
+                  <div className="flex items-center gap-2.5 pt-1.5">
+                    <EnlargeableImage url={item.photoUrl} name={`Price evidence for ${item.name}`} onExpired={() => void load()} className="size-11 object-cover p-0" />
+                    <span className="text-xs text-muted-foreground">Your price photo</span>
+                  </div>
+                )}
                 price={formatCents(item.priceCents)}
                 badge={<RequestStatusBadge status={item.status} />}
                 after={
@@ -260,9 +275,7 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
                   : item.status === "pending" ? (
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm text-muted-foreground">An admin checks the pack picture and details first.</p>
-                      <Button variant="ghost" size="sm" disabled={deletingId !== null} onClick={() => void deletePending(item.id)}>
-                        <Trash2 className="size-4" aria-hidden="true" />{deletingId === item.id ? "Deleting…" : "Delete request"}
-                      </Button>
+                      <DeleteButton itemName={itemLabel(item.name, item.retailerName ?? item.retailerId, item.observedAt)} deleting={deletingId === item.id} disabled={deletingId !== null} onClick={() => void deletePending(item.id)} />
                     </div>
                   )
                   : item.status === "approved" ? <p className="text-sm text-muted-foreground">Added to the catalog. Reload Search or Smart Basket to see it; its price shows after the nightly update.</p>

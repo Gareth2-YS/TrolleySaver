@@ -36,6 +36,12 @@ export class SubmissionServiceError extends Error {
   }
 }
 
+/** A failure as one line for an alert, including any per-field messages from the API. */
+export function errorText(error: unknown) {
+  if (error instanceof SubmissionServiceError && error.fieldErrors) return `${error.message} ${Object.entries(error.fieldErrors).map(([field, message]) => `${field}: ${message}`).join("; ")}`
+  return error instanceof Error ? error.message : "Could not complete the request. Please retry."
+}
+
 function requireToken(token: string) {
   if (!token) throw new SubmissionServiceError("Your session has ended. Sign in again and retry.", 401, "SESSION_ENDED")
 }

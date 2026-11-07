@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { ProductImage } from "../components/product-image"
 import { packUnits, productCorrectionsSchema, reasonError, singaporeDateString, validationMessages } from "../contributions/schema"
-import { SubmissionServiceError } from "../contributions/service"
+import { errorText, SubmissionServiceError } from "../contributions/service"
 import type { ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 import { formatCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
@@ -16,11 +16,6 @@ import hcsSymbol from "../../assets/brand/healthier-choice-symbol.png"
 
 export const emptyProduct: ProductFields = { name: "", brand: "", category: "", packQty: 0, packUnit: "ml", packCount: 1, hcs: false, dietary: [] }
 export type Facets = { categories: string[]; dietary: string[] }
-export function errorText(error: unknown) {
-  if (error instanceof SubmissionServiceError && error.fieldErrors) return `${error.message} ${Object.entries(error.fieldErrors).map(([field, message]) => `${field}: ${message}`).join("; ")}`
-  return error instanceof Error ? error.message : "Could not complete the request. Please retry."
-}
-
 export function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFields; onChange: (value: ProductFields) => void; facets: Facets; prefix: string }) {
   function set<K extends keyof ProductFields>(key: K, next: ProductFields[K]) { onChange({ ...value, [key]: next }) }
   const tags = [...new Set([...facets.dietary, ...value.dietary])]

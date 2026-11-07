@@ -40,14 +40,14 @@ import {
   type ContributionInput,
   type ContributionValues,
 } from "../contributions/schema"
-import { createSubmissionService, SubmissionServiceError } from "../contributions/service"
+import { createSubmissionService, errorText, SubmissionServiceError } from "../contributions/service"
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, ProductFields, SubmissionService } from "../contributions/types"
 import { getCategoryIcon } from "../lib/category-icons"
 import { formatDay, formatDollars, formatTimestamp, limitToCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
-import { emptyProduct, errorText, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
+import { emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
 
 // Whether the price is for a product already on TrolleySaver, or for one being added.
 type Mode = "existing" | "new"
@@ -322,7 +322,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
             setProducts(catalog)
             switchMode("existing")
             chooseProduct(canonical)
-            setNotice(`${error.message} It's selected below, so you can send your price for it instead.`)
+            setNotice(`${error.message} It’s now selected below, with your store, price and photos kept.`)
           } catch (recoveryError) { setLoadError(errorText(recoveryError)) }
         } else setLoadError(errorText(error))
       } finally {
@@ -356,7 +356,9 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
       }, token)
       setSubmissions((current) => [created, ...current])
       clearForm()
-      toast.success(created.status === "accepted" ? "Price accepted; public prices update after nightly aggregation" : "Submission sent for administrator review")
+      if (created.status === "accepted") toast.success("Price accepted. It shows on TrolleySaver after the nightly update.")
+      else if (created.status === "flagged") toast.success("Price sent to an admin to check, as it’s far from the usual range.")
+      else toast.error("This price wasn’t accepted. Check it against the shelf label and try again.")
     } catch (error) {
       if (error instanceof SubmissionServiceError && error.fieldErrors) {
         const fieldMap = { productId: "productId", retailerId: "storeId", priceCents: "price", observedAt: "observedDate" } as const
@@ -524,7 +526,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
     <div className="space-y-6 sm:space-y-8">
       <PageHeader
         title="Share a price you spotted"
-        description="Add a price you saw on the shelf, with a photo if you have one. Usual prices count straight away; unusual ones and new products are checked by an admin first."
+        description="Add a price you saw on the shelf, with a photo if you have one. You can also add a product that isn’t on TrolleySaver yet."
       />
       <FormAlert message={loadError} />
       {notice && (
@@ -637,8 +639,8 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
         <div className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:pl-6 lg:col-span-12">
           <p className="max-w-[72ch] text-sm text-muted-foreground">
             {mode === "new"
-              ? <><strong className="font-semibold text-foreground">An admin reviews every new product.</strong> Once it’s added, it appears in Search and Smart Basket, and its price shows after the nightly update.</>
-              : <><strong className="font-semibold text-foreground">Usual prices count straight away.</strong> Unusual ones wait for an admin. Public prices update overnight.</>}
+              ? <><strong className="font-semibold text-foreground">An admin checks every new product first.</strong> Once it’s approved, it appears in Search and Smart Basket, and its price shows after the nightly update.</>
+              : <><strong className="font-semibold text-foreground">Most prices are accepted straight away</strong> and show on TrolleySaver after the nightly update. A price far from the usual range goes to an admin to check first.</>}
           </p>
           <div className="flex shrink-0 flex-col-reverse gap-3 sm:flex-row">
             <Button type="button" variant="outline" onClick={clearForm}>Clear</Button>

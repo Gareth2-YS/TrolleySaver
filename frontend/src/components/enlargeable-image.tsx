@@ -10,8 +10,15 @@ import { Button } from "./ui/button"
  * Esc or a click on the backdrop. `onExpired` is called once if the signed link has expired, so the
  * caller can fetch a fresh one.
  */
-export function EnlargeableImage({ url, name, onExpired, className }: { url: string; name: string; onExpired: () => void; className?: string }) {
+export function EnlargeableImage({ url, name, onExpired, fallback, className }: { url: string; name: string; onExpired: () => void; fallback?: string; className?: string }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  // The thumbnail and the enlarged copy load the same link, so an expired one is reported once, not twice.
+  const reported = useRef<string | null>(null)
+  function expired() {
+    if (reported.current === url) return
+    reported.current = url
+    onExpired()
+  }
   return (
     <>
       <button
@@ -21,7 +28,7 @@ export function EnlargeableImage({ url, name, onExpired, className }: { url: str
         title="Click to enlarge image"
         onClick={() => dialog.current?.showModal()}
       >
-        <ProductImage url={url} name={name} onExpired={onExpired} className={cn("product-tile", className)} />
+        <ProductImage url={url} fallback={fallback} name={name} onExpired={expired} className={cn("product-tile", className)} />
       </button>
       <dialog
         ref={dialog}
@@ -35,7 +42,7 @@ export function EnlargeableImage({ url, name, onExpired, className }: { url: str
             <X className="size-4" />
           </Button>
         </div>
-        <ProductImage url={url} name={name} onExpired={onExpired} className="mx-auto max-h-[82vh] max-w-full rounded-lg bg-white object-contain" />
+        <ProductImage url={url} fallback={fallback} name={name} onExpired={expired} className="mx-auto max-h-[82vh] max-w-full rounded-lg bg-white object-contain" />
       </dialog>
     </>
   )

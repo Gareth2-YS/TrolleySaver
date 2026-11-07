@@ -149,9 +149,12 @@ describe("search page", () => {
     expect(screen.getByLabelText("From")).toHaveValue(3.63)
   })
 
-  it("shows the Healthier Choice pill at the top of the card, above a long name", async () => {
+  it("shows the Healthier Choice pill first among the card's labels, not above the name", async () => {
     renderSearch([{ ...bread, name: "Gardenia Wholemeal Bread With Extra Grains And Seeds, Family Size" }])
     const card = (await screen.findByRole("button", { name: /View details for Gardenia Wholemeal/ })).closest("article")!
-    expect(card.firstElementChild).toHaveTextContent("Healthier Choice")
+    // The card opens with the picture and name, so it lines up with the cards beside it.
+    expect(card.firstElementChild).not.toHaveTextContent("Healthier Choice")
+    const labels = within(card).getByLabelText("Labels")
+    expect(labels.firstElementChild).toHaveTextContent("Healthier Choice")
   })
 })

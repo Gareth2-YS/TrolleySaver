@@ -596,10 +596,10 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
                     <div className="flex min-w-0 flex-[999_1_200px] items-center gap-3">
                       <ZoomableImage product={product} onOpen={setPreviewId} onExpired={refreshImages} className="size-12" />
                       <div className="min-w-0">
-                      {/* Above the name, so long names keep the row's full width */}
-                      {product.hcs && <HcsBadge className="mb-1.5" />}
                       <p className="mb-1 text-sm font-semibold leading-snug">{product.name}</p>
                       <p className="text-xs text-muted-foreground">{product.brand} · {packLabel(product)} · {product.category}</p>
+                      {/* Under the details, as on Search, so names start level with the picture on every row */}
+                      {product.hcs && <HcsBadge className="mt-1.5 border border-primary/35" />}
                       </div>
                     </div>
                     <Button

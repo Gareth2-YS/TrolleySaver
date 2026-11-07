@@ -9,6 +9,7 @@ import type { PriceSubmission, SubmissionService } from "../contributions/types"
 import { ContributePage } from "./contribute"
 import { SubmissionServiceError } from "../contributions/service"
 import { singaporeDateString } from "../contributions/schema"
+import { formatDay } from "../lib/format"
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -28,6 +29,8 @@ const flaggedSubmission: PriceSubmission = {
   submittedAt: "2026-10-20T10:00:00.000Z",
   photo: { fileName: "shelf.png", contentType: "image/png", sizeBytes: 1200, photoKey: "local-evidence/shelf.png", previewUrl: "blob:shelf", storage: "browser-object-url" },
 }
+// The Delete buttons are named by what, where and when, so two prices for one product can be told apart.
+const deletePriceName = `Delete ${flaggedSubmission.productName} at ${flaggedSubmission.storeName}, seen ${formatDay(flaggedSubmission.observedDate)}`
 
 function authService(role: AuthRole | null): AuthService {
   return {
@@ -241,6 +244,7 @@ const requestRecord = {
   submittedAt: new Date().toISOString(), status: "pending" as const, productImageKey: "picture", productImageUrl: "https://images.test/product.png",
   photoKey: "private", photoUrl: "https://images.test/evidence.png", suggestedMinCents: 175, suggestedMaxCents: 525,
 }
+const deleteRequestName = `Delete ${requestRecord.name} at ${requestRecord.retailerName}, seen ${formatDay(requestRecord.observedAt)}`
 
 describe("integrated product request screens", () => {
   it("does not replace a selected history filter with a late pending-queue response", async () => {
@@ -269,8 +273,8 @@ describe("integrated product request screens", () => {
     expect(screen.getByRole("button", { name: `Enlarge image of Price evidence for ${flaggedSubmission.productName}` })).toBeInTheDocument()
     expect(screen.queryByText(/visible to administrators|admins only/)).not.toBeInTheDocument()
     expect(screen.getAllByRole("img", { name: /Product picture/ })).toHaveLength(3)
-    expect(screen.getAllByRole("button", { name: "Delete request" })).toHaveLength(1)
-    expect(screen.getAllByRole("button", { name: "Delete price" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: deleteRequestName })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: deletePriceName })).toHaveLength(1)
   })
 
   it("sends selected product and retailer for an existing-product evidence upload", async () => {
@@ -330,7 +334,7 @@ describe("integrated product request screens", () => {
     await user.upload(screen.getByLabelText("Product picture"), file)
     await user.upload(screen.getByLabelText("Price evidence photo"), file)
     await user.click(screen.getByRole("button", { name: "Submit product for review" }))
-    expect(await screen.findByText("Already in the catalog. It's selected below, so you can send your price for it instead.")).toBeInTheDocument()
+    expect(await screen.findByText("Already in the catalog. It’s now selected below, with your store, price and photos kept.")).toBeInTheDocument()
     expect(service.requestProductImageUpload).toHaveBeenNthCalledWith(1, expect.any(File), "product-image", "test-token")
     expect(service.requestProductImageUpload).toHaveBeenNthCalledWith(2, expect.any(File), "evidence", "test-token")
     expect(service.createSubmission).not.toHaveBeenCalled()
@@ -349,16 +353,16 @@ describe("new products and deletion", () => {
     let finishDelete!: () => void
     const service = submissionService({ mode, listMyProductRequests: vi.fn().mockResolvedValue([requestRecord]), listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission]), deleteProductRequest: vi.fn().mockImplementation(() => new Promise<void>((resolve) => { finishDelete = resolve })) })
     renderContribution("user", service)
-    const remove = await screen.findByRole("button", { name: "Delete request" })
+    const remove = await screen.findByRole("button", { name: deleteRequestName })
     await user.click(remove)
     expect(service.deleteProductRequest).not.toHaveBeenCalled()
     expect(confirm).toHaveBeenCalledWith("Delete this request? Its product picture and price evidence photo will be removed too. This cannot be undone.")
     await user.click(remove)
     expect(service.deleteProductRequest).toHaveBeenCalledWith("request-1", { id: "user-1", role: "user" }, "test-token")
-    expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: deleteRequestName.replace(/^Delete/, "Deleting") })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled()
     finishDelete()
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Deleting…" })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole("button", { name: deleteRequestName.replace(/^Delete/, "Deleting") })).not.toBeInTheDocument())
     expect(screen.queryByRole("heading", { name: /Oat milk/ })).not.toBeInTheDocument()
     expect(screen.getByText(flaggedSubmission.productName)).toBeInTheDocument()
     expect(service.deleteSubmission).not.toHaveBeenCalled()
@@ -370,9 +374,9 @@ describe("new products and deletion", () => {
     let finishRefresh!: (items: typeof requestRecord[]) => void
     const service = submissionService({ mode: "api", listMyProductRequests: vi.fn().mockResolvedValueOnce([requestRecord]).mockImplementation(() => new Promise<typeof requestRecord[]>((resolve) => { finishRefresh = resolve })) })
     renderContribution("user", service)
-    await screen.findByRole("button", { name: "Delete request" })
+    await screen.findByRole("button", { name: deleteRequestName })
     await user.click(screen.getByRole("button", { name: "Refresh" }))
-    await user.click(screen.getByRole("button", { name: "Delete request" }))
+    await user.click(screen.getByRole("button", { name: deleteRequestName }))
     await waitFor(() => expect(screen.queryByRole("heading", { name: /Oat milk/ })).not.toBeInTheDocument())
     await act(async () => { finishRefresh([requestRecord]) })
     expect(screen.queryByRole("heading", { name: /Oat milk/ })).not.toBeInTheDocument()
@@ -389,6 +393,8 @@ describe("new products and deletion", () => {
     expect(await within(section).findByText("Loading your submissions…")).toBeInTheDocument()
     expect(within(section).queryByText("Nothing here yet")).not.toBeInTheDocument()
     expect(within(section).getByRole("button", { name: "Refresh" })).toBeDisabled()
+    // The list asks for the requests once the signed-in user is known; answer that request.
+    await waitFor(() => expect(service.listMyProductRequests).toHaveBeenCalledTimes(1))
     await act(async () => { finishLoad([requestRecord]) })
     expect(await within(section).findByRole("heading", { name: /Oat milk/ })).toBeInTheDocument()
     expect(section).toHaveAttribute("aria-busy", "false")
@@ -410,10 +416,10 @@ describe("new products and deletion", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true)
     const service = submissionService({ mode: "api", listMyProductRequests: vi.fn().mockResolvedValueOnce([requestRecord]).mockResolvedValue(refreshed), deleteProductRequest: vi.fn().mockRejectedValue(new SubmissionServiceError(message, status, code)) })
     renderContribution("user", service)
-    await user.click(await screen.findByRole("button", { name: "Delete request" }))
+    await user.click(await screen.findByRole("button", { name: deleteRequestName }))
     expect(await screen.findByRole("alert")).toHaveTextContent(message)
     await waitFor(() => expect(service.listMyProductRequests).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole("button", { name: "Delete request" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: deleteRequestName })).not.toBeInTheDocument()
     if (status === 409) expect(screen.getByText(/Added to the catalog/)).toBeInTheDocument()
   })
 
@@ -422,7 +428,7 @@ describe("new products and deletion", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true)
     const service = submissionService({ mode: "api", listMyProductRequests: vi.fn().mockResolvedValueOnce([requestRecord]).mockRejectedValue(new Error("Offline")), deleteProductRequest: vi.fn().mockRejectedValue(new SubmissionServiceError("This product request is already rejected.", 409, "ALREADY_MODERATED")) })
     renderContribution("user", service)
-    await user.click(await screen.findByRole("button", { name: "Delete request" }))
+    await user.click(await screen.findByRole("button", { name: deleteRequestName }))
     expect(await screen.findByRole("alert")).toHaveTextContent("This product request is already rejected. Could not refresh the list: Offline")
   })
 
@@ -463,8 +469,8 @@ describe("new products and deletion", () => {
     ]) })
     renderContribution("user", service)
     expect(await screen.findByRole("region", { name: "Your submissions" })).toBeInTheDocument()
-    expect(await screen.findAllByRole("button", { name: "Delete price" })).toHaveLength(1)
-    expect(screen.queryByRole("button", { name: "Delete request" })).not.toBeInTheDocument()
+    expect(await screen.findAllByRole("button", { name: deletePriceName })).toHaveLength(1)
+    expect(screen.queryByRole("button", { name: deleteRequestName })).not.toBeInTheDocument()
     expect(service.deleteSubmission).not.toHaveBeenCalled()
     expect(await screen.findByText("Accepted")).toBeInTheDocument()
     expect(screen.getByText("Rejected")).toBeInTheDocument()
@@ -478,13 +484,13 @@ describe("withdrawing and viewing your own prices", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true)
     const service = submissionService({ listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission]) })
     renderContribution("user", service)
-    const remove = await screen.findByRole("button", { name: "Delete price" })
+    const remove = await screen.findByRole("button", { name: deletePriceName })
     await user.click(remove)
     expect(confirm).toHaveBeenCalledWith("Delete this price submission? Its photo will be removed too. This cannot be undone.")
     expect(service.deleteSubmission).not.toHaveBeenCalled()
     await user.click(remove)
     await waitFor(() => expect(service.deleteSubmission).toHaveBeenCalledWith("submission-1", { id: "user-1", role: "user" }, "test-token"))
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete price" })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole("button", { name: deletePriceName })).not.toBeInTheDocument())
     expect(screen.queryByRole("heading", { name: flaggedSubmission.productName })).not.toBeInTheDocument()
   })
 
@@ -496,9 +502,9 @@ describe("withdrawing and viewing your own prices", () => {
       deleteSubmission: vi.fn().mockRejectedValue(new SubmissionServiceError("This submission is already accepted.", 409, "ALREADY_MODERATED")),
     })
     renderContribution("user", service)
-    await user.click(await screen.findByRole("button", { name: "Delete price" }))
+    await user.click(await screen.findByRole("button", { name: deletePriceName }))
     expect(await screen.findByText("This submission is already accepted.")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Delete price" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: deletePriceName })).not.toBeInTheDocument()
     expect(screen.getByText("Accepted")).toBeInTheDocument()
   })
 

@@ -166,8 +166,6 @@ function ProductCard({
       <article
         className="surface-card flex h-full flex-col p-5 text-left transition-colors hover:border-primary/50"
       >
-        {/* At the top, so a long product name keeps the row's full width */}
-        {product.hcs && <HcsBadge className="mb-3 self-start" />}
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -209,8 +207,12 @@ function ProductCard({
           {priceUpdated && <p className="mt-0.5 text-xs text-muted-foreground">{priceUpdated}</p>}
         </div>
 
+        {/* The labels take at least 160px and wrap within it, so Add to basket sits bottom-right on every card;
+            on a card too narrow for both, the button moves to its own line, on every card alike. */}
         <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-0 flex-[1_1_160px] flex-wrap gap-2" aria-label="Labels">
+            {/* With the other labels, first, rather than above the name: that kept the cards in a row from lining up */}
+            {product.hcs && <HcsBadge className="border border-primary/35" />}
             {product.category && (
               <span className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
                 {formatLabel(product.category)}
@@ -225,6 +227,7 @@ function ProductCard({
           <Button
             type="button"
             size="sm"
+            className="ml-auto"
             variant={basketQuantity > 0 ? "default" : "outline"}
             disabled={basketQuantity >= 99}
             aria-label={basketQuantity >= 99 ? `${product.name} is already at the maximum basket quantity` : basketQuantity > 0 ? `Add another ${product.name}; ${basketQuantity} currently in basket` : `Add ${product.name} to basket`}
