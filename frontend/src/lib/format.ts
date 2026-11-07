@@ -22,6 +22,13 @@ export function isWholeCents(value: number) {
   return Math.abs(value * 100 - Math.round(value * 100)) < 1e-6
 }
 
+// A product's pack, e.g. "956 ml" or "6 × 180 mL"; empty when the size isn't known.
+export function packLabel(item: { packQty?: number | null; packUnit?: string | null; packCount?: number | null }) {
+  if (item.packQty == null || !item.packUnit) return ""
+  const size = `${item.packQty} ${item.packUnit}`
+  return item.packCount && item.packCount > 1 ? `${item.packCount} × ${size}` : size
+}
+
 // Dates and times are shown in Singapore time, whatever the browser's time zone.
 const DAY_FORMAT = new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Singapore" })
 const TIMESTAMP_FORMAT = new Intl.DateTimeFormat("en-SG", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Singapore" })

@@ -44,7 +44,7 @@ import {
 import { createSubmissionService, errorText, SubmissionServiceError } from "../contributions/service"
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, ProductFields, SubmissionService } from "../contributions/types"
 import { getCategoryIcon } from "../lib/category-icons"
-import { formatDay, formatDollars, formatTimestamp, limitToCents } from "../lib/format"
+import { formatDay, formatDollars, formatTimestamp, limitToCents, packLabel } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
@@ -179,6 +179,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const selectedProductId = watch("productId")
   const priceField = register("price")
 
+  const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
   const productCategories = useMemo(
     () => [...new Set(products.map((product) => product.category?.trim()).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b)),
     [products],
@@ -496,7 +497,10 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
                     {icon
                       ? <img src={icon} alt="" className="product-tile size-8" />
                       : <span className="product-tile grid size-8 place-items-center text-muted-foreground"><Package className="size-4" aria-hidden="true" /></span>}
-                    <span className="min-w-0 flex-1">{product.name}</span>
+                    <span className="min-w-0 flex-1">
+                      {product.name}
+                      {packLabel(product) && <span className="block text-xs text-muted-foreground">{[product.brand, packLabel(product)].filter(Boolean).join(" · ")}</span>}
+                    </span>
                     {product.category && <span className="shrink-0 text-xs capitalize text-muted-foreground">{product.category}</span>}
                   </div>
                 )
@@ -673,6 +677,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
         pricesLoading={loading}
         refreshPrices={loadMine}
         onPriceDeleted={(id) => setSubmissions((current) => current.filter((item) => item.id !== id))}
+        packOf={(productId) => packLabel(productById.get(productId) ?? {})}
         refreshKey={historyKey}
       />
     </div>

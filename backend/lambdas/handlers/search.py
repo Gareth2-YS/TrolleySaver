@@ -10,7 +10,7 @@ from common import db
 from common.http import api_handler, response
 from common.images import with_image_url
 from common.pricing import max_age_days, stored_prices
-from common.search import facets, search
+from common.search import facet_counts, facets, priced, search
 from common.validation import validate_search
 
 
@@ -23,12 +23,14 @@ def handler(event, context):
     max_age = max_age_days()
     prices, prices_updated = stored_prices([p["id"] for p in products], list(retailers), datetime.now(timezone.utc), max_age)
 
-    items = search(products, prices, retailers, criteria)
+    catalog = priced(products, prices, retailers)
+    items = search(catalog, criteria)
     return response(200, {
         "items": items,
         "total": len(items),
         "catalogSize": len(products),
         "facets": facets(products),
+        "facetCounts": facet_counts(catalog, criteria),
         "priceMaxAgeDays": max_age,
         "pricesUpdated": prices_updated,
     })

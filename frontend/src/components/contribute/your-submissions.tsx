@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useAuth } from "../../auth/auth-context"
 import { errorText, SubmissionServiceError } from "../../contributions/service"
 import type { PriceSubmission, ProductRequest, SubmissionService } from "../../contributions/types"
-import { formatCents, formatDay, formatDollars, formatTimestamp } from "../../lib/format"
+import { formatCents, formatDay, formatDollars, formatTimestamp, packLabel } from "../../lib/format"
 import { cn } from "../../lib/utils"
 import { FormAlert } from "../auth/form-alert"
 import { EnlargeableImage } from "../enlargeable-image"
@@ -20,9 +20,9 @@ const EMPTY: Record<Filter, string> = {
   new: "New products you add will appear here while an admin checks them.",
 }
 
-function packLabel(item: ProductRequest) {
-  const size = `${item.packQty} ${item.packUnit}`
-  return item.packCount > 1 ? `${item.packCount} × ${size}` : size
+// Still waiting for an admin: a flagged price, or a new product not yet decided.
+function isPending(entry: Entry) {
+  return entry.kind === "price" ? entry.item.status === "flagged" : entry.item.status === "pending"
 }
 
 function Row({ thumb, name, kind, meta, photo, price, badge, after }: { thumb: ReactNode; name: string; kind: "price" | "new"; meta: ReactNode[]; photo?: ReactNode; price: string; badge: ReactNode; after?: ReactNode }) {
@@ -88,12 +88,14 @@ function Meta({ icon: Icon, children }: { icon?: typeof Store; children: ReactNo
  * Everything the contributor has sent, prices and new products in one list, newest first.
  * Price submissions come from the page (it adds new ones as they are sent); product requests are loaded here.
  */
-export function YourSubmissions({ service, priceSubmissions, pricesLoading, refreshPrices, onPriceDeleted, refreshKey }: {
+export function YourSubmissions({ service, priceSubmissions, pricesLoading, refreshPrices, onPriceDeleted, packOf, refreshKey }: {
   service: SubmissionService
   priceSubmissions: PriceSubmission[]
   pricesLoading: boolean
   refreshPrices: () => Promise<void>
   onPriceDeleted: (id: string) => void
+  // The pack of a catalog product, e.g. "956 ml"; price submissions don't carry it themselves.
+  packOf: (productId: string) => string
   refreshKey: number
 }) {
   const { user, getAccessToken } = useAuth()
@@ -101,6 +103,7 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>("all")
+  const [pendingOnly, setPendingOnly] = useState(false)
   // True until the first list arrives, and while any refresh is in flight.
   const [requestsLoading, setRequestsLoading] = useState(true)
   const [pricesRefreshing, setPricesRefreshing] = useState(false)
@@ -169,8 +172,14 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
     ...priceSubmissions.map((item): Entry => ({ kind: "price", at: item.submittedAt, item })),
     ...requests.map((item): Entry => ({ kind: "new", at: item.submittedAt, item })),
   ].sort((a, b) => b.at.localeCompare(a.at))
-  const counts: Record<Filter, number> = { all: entries.length, price: priceSubmissions.length, new: requests.length }
-  const shown = entries.filter((entry) => filter === "all" || entry.kind === filter)
+  // "Pending only" hides what an admin has already decided; the counts follow it.
+  const visible = pendingOnly ? entries.filter(isPending) : entries
+  const counts: Record<Filter, number> = {
+    all: visible.length,
+    price: visible.filter((entry) => entry.kind === "price").length,
+    new: visible.filter((entry) => entry.kind === "new").length,
+  }
+  const shown = visible.filter((entry) => filter === "all" || entry.kind === filter)
   const busy = requestsLoading || pricesLoading || pricesRefreshing
   const firstLoad = entries.length === 0 && busy
 
@@ -203,7 +212,21 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
             </button>
           ))}
         </div>
-        <span className="text-xs text-muted-foreground">Newest first</span>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={pendingOnly}
+            onClick={() => setPendingOnly((value) => !value)}
+            className="inline-flex items-center gap-2 rounded-lg text-[13px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span aria-hidden="true" className={cn("relative h-5 w-9 shrink-0 rounded-full bg-input/40 transition-colors", pendingOnly && "bg-primary")}>
+              <span className={cn("absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform", pendingOnly && "translate-x-4")} />
+            </span>
+            Pending only
+          </button>
+          <span className="text-xs text-muted-foreground">Newest first</span>
+        </div>
       </div>
 
       <FormAlert message={error} />
@@ -212,8 +235,17 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
         <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />Loading your submissions…</p>
       ) : shown.length === 0 ? (
         <div className="rounded-xl border border-dashed p-8 text-center">
-          <h3 className="font-semibold">Nothing here yet</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{EMPTY[filter]}</p>
+          {pendingOnly && entries.length > 0 ? (
+            <>
+              <h3 className="font-semibold">Nothing waiting for review</h3>
+              <p className="mt-1 text-sm text-muted-foreground">An admin has already checked everything here. Turn off Pending only to see it.</p>
+            </>
+          ) : (
+            <>
+              <h3 className="font-semibold">Nothing here yet</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{EMPTY[filter]}</p>
+            </>
+          )}
         </div>
       ) : (
         <ul className={cn("transition-opacity", busy && "opacity-60")}>
@@ -227,6 +259,7 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
                   name={item.productName}
                   thumb={<RowPicture url={item.photo?.previewUrl} name={`Price evidence for ${item.productName}`} attached={Boolean(item.photo)} onExpired={() => { if (item.photo?.storage === "private-s3") void refreshPrices().catch(() => undefined) }} />}
                   meta={[
+                    packOf(item.productId) ? <Meta key="pack">{packOf(item.productId)}</Meta> : null,
                     <Meta key="store" icon={Store}>{item.storeName}</Meta>,
                     <Meta key="seen" icon={CalendarDays}>Seen {formatDay(item.observedDate)}</Meta>,
                     <Meta key="sent">Sent {formatTimestamp(item.submittedAt)}</Meta>,
