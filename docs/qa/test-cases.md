@@ -34,14 +34,14 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 | [3. Search & filter](#3-search--filter) | 22 | 8 | 0 |
 | [4. Smart Basket](#4-smart-basket) | 23 | 11 | 0 |
 | [5. Contributor: submit a price](#5-contributor-submit-a-price) | 28 | 11 | 0 |
-| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 23 | 10 | 0 |
+| [6. Contributor: new product requests](#6-contributor-new-product-requests) | 26 | 12 | 0 |
 | [7. Admin: price review](#7-admin-price-review) | 8 | 4 | 0 |
 | [8. Admin: product request review](#8-admin-product-request-review) | 10 | 5 | 0 |
 | [9. Price freshness](#9-price-freshness) | 7 | 2 | 0 |
 | [10. Known issues](#10-known-issues) | 2 | 0 | 0 |
 | [11. Deployed site](#11-deployed-site) | 10 | 6 | 1 |
 | [12. Look and feel](#12-look-and-feel) | 11 | 4 | 0 |
-| **Total** | **173** | **72** | **2** |
+| **Total** | **176** | **74** | **2** |
 
 ## 1. Navigation and access
 
@@ -182,7 +182,7 @@ Log in as a contributor, open `/contribute` and choose the "New product" tab. Us
 
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|
-| NPR-01 | Choose the "New product" tab, then "Existing product", then "New product" again. Also focus a tab and press the arrow keys. | "New product" shows "Product name", "Brand", "Category" (with suggestions), "Pack quantity", "Pack unit" (ml, L, g, kg, pcs, rolls), "Units per pack", and "Does it have any of these labels?" with "Healthier Choice Symbol" (the Health Promotion Board symbol beside it) and the dietary tags. "Photos" gains "Product picture" (Required), and the button reads "Submit product for review". The arrow keys move between the tabs. | ⭐ | Not done | Changed 7 Nov: redesigned page. Tabs replace the "Upload a new product" pop-up. |
+| NPR-01 | Choose the "New product" tab, then "Existing product", then "New product" again. Also focus a tab and press the arrow keys. | "New product" shows "Product name", "Brand" and "Category" (both with suggestions), "Pack quantity", "Pack unit" (ml, L, g, kg, pcs, rolls), "Units per pack", and "Does it have any of these labels?" with "Healthier Choice Symbol" (the Health Promotion Board symbol beside it) and the dietary tags. "Photos" gains "Product picture" (Required), and the button reads "Submit product for review". The arrow keys move between the tabs. | ⭐ | Not done | Changed 7 Nov: redesigned page. Tabs replace the "Upload a new product" pop-up. |
 | NPR-02 | Fill in every field correctly, but add no product picture. Submit. | "Add a picture of the pack. Every new product needs one." under "Product picture". | ⭐ | Not done | Changed 7 Nov. |
 | NPR-03 | Fill in a store, price and date, then Brand and Category. Set Product name to "x", leave Pack quantity empty, and set Units per pack to `1.5`. Submit. | One message: "Product name must be 2–120 characters; Pack quantity must be more than 0 and at most 100000; Units per pack must be a whole number from 1 to 100". There are no field codes (like `packQty:`) and no "Too small" or "Invalid input". | ⭐ | Not done | Fixed 4 Nov: it used to show the validation library's own messages. |
 | NPR-04 | With valid product fields, leave Store empty and set the price to `0`. Submit. | "Choose a store" under Store and "Price must be greater than $0" under Price. | | Not done | Changed 7 Nov. |
@@ -205,6 +205,9 @@ Log in as a contributor, open `/contribute` and choose the "New product" tab. Us
 | NPR-21 | Choose a renamed text file (`pack.png`) as the product picture. | "This file isn't a readable JPG or PNG image", and no preview. | | Not done | Added 6 Nov. |
 | NPR-22 | Propose a product using a phone photo with GPS as its picture. After an admin approves it, open its picture on Search (open the image in a new tab and save it) and check it in an EXIF viewer. | The published picture has no GPS or other EXIF data. | ⭐ | Not done | Added 6 Nov. Product pictures are public. |
 | NPR-23 | Propose a product with both a product picture and a price evidence photo. Look at it in "Your submissions". | The row's picture is the product picture, and under its details a smaller "Your price photo"; both enlarge when clicked. A request without evidence shows only the product picture. | | Not done | Changed 7 Nov: redesigned page. |
+| NPR-24 | Click "Category" without typing. Then type "co". Then change it to "milk". | A list styled like the rest of the site (not the browser's own) with every category in the catalog, A to Z, written like "Soft Drinks" and "Toilet Rolls" (not lower case), each with its number of products. "co" leaves Coffee and Cookies, with "Co" in bold, under a "New category: “co”" row with a green + and "New to the catalogue. It’s added when the product is approved." With "milk" there's no New row, and Milk has a tick. | ⭐ | Not done | Added 8 Nov. Replaces the browser's own suggestion list. |
+| NPR-25 | Click "Brand" and type "nestle". Press ↓ and Enter. Then type "Test Brand" and click its "New brand" row. | The catalog's brands, spelled as they are there (e.g. "Coca-Cola", "NUYOLK"), each with its number of products. "nestle" finds "Nestlé": accents don't matter. Enter fills in "Nestlé" and doesn't send the form. The New row reads "New brand: “Test Brand”" and "Spell it as it’s printed on the pack.", and clicking it keeps "Test Brand". | ⭐ | Not done | Added 8 Nov. |
+| NPR-26 | Open Category's list and press Esc. Open it again and press Tab. Repeat at phone width and in dark mode. As an admin, open a pending request's corrections. | Esc closes the list and keeps what you typed. Tab closes it and moves to "Pack quantity". At phone width the list fits under the field and scrolls inside itself; in dark mode it's dark, with readable text. The admin's correction form has the same Brand and Category lists. | | Not done | Added 8 Nov. |
 
 ## 7. Admin: price review
 

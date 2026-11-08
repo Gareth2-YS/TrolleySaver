@@ -48,7 +48,7 @@ import { formatDay, formatDollars, formatTimestamp, limitToCents, packLabel } fr
 import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
-import { emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
+import { emptyFacets, emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
 
 // Whether the price is for a product already on TrolleySaver, or for one being added.
 type Mode = "existing" | "new"
@@ -140,7 +140,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   const [submissions, setSubmissions] = useState<PriceSubmission[]>([])
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [stores, setStores] = useState<CatalogRetailer[]>([])
-  const [facets, setFacets] = useState<Facets>({ categories: [], dietary: [] })
+  const [facets, setFacets] = useState<Facets>(emptyFacets)
   const [productSearch, setProductSearch] = useState("")
   const [productCategory, setProductCategory] = useState("")
   const [productListOpen, setProductListOpen] = useState(false)

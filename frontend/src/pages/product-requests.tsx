@@ -7,24 +7,43 @@ import { Label } from "../components/ui/label"
 import { ProductImage } from "../components/product-image"
 import { packUnits, productCorrectionsSchema, reasonError, singaporeDateString, validationMessages } from "../contributions/schema"
 import { errorText, SubmissionServiceError } from "../contributions/service"
-import type { ProductCorrections, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
+import type { ProductCorrections, ProductFacets, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 import { formatCents } from "../lib/format"
 import { inputClass } from "../lib/styles"
 import { cn } from "../lib/utils"
 import { Select } from "../components/ui/select"
+import { SuggestionInput } from "../components/suggestion-input"
+import { titleCase, toSuggestions } from "../lib/suggestions"
 import hcsSymbol from "../../assets/brand/healthier-choice-symbol.png"
 
 export const emptyProduct: ProductFields = { name: "", brand: "", category: "", packQty: 0, packUnit: "ml", packCount: 1, hcs: false, dietary: [] }
-export type Facets = { categories: string[]; dietary: string[] }
+export type Facets = ProductFacets
+export const emptyFacets: Facets = { categories: [], brands: [], dietary: [] }
+
+// Brand and Category suggest what's already in the catalogue but take anything. Categories are saved
+// in lower case, so they're shown as on Search ("Soft Drinks"); brands are shown as they're spelled.
+const SUGGESTION_TEXT = {
+  brand: { noun: "brand", listLabel: "Brands", newHint: "Spell it as it’s printed on the pack." },
+  category: { noun: "category", listLabel: "Categories", newHint: "New to the catalogue. It’s added when the product is approved." },
+}
+
 export function ProductEditor({ value, onChange, facets, prefix }: { value: ProductFields; onChange: (value: ProductFields) => void; facets: Facets; prefix: string }) {
   function set<K extends keyof ProductFields>(key: K, next: ProductFields[K]) { onChange({ ...value, [key]: next }) }
   const tags = [...new Set([...facets.dietary, ...value.dietary])]
+  const suggestions = {
+    brand: toSuggestions(facets.brands, facets.counts?.brands),
+    category: toSuggestions(facets.categories, facets.counts?.categories, titleCase),
+  }
   return <div className="grid gap-5 sm:grid-cols-2">
-    {([['name', 'Product name', 120], ['brand', 'Brand', 60], ['category', 'Category', 40]] as const).map(([field, label, max]) => <div key={field} className="space-y-2">
-      <Label htmlFor={`${prefix}-${field}`}>{label}</Label>
-      <Input id={`${prefix}-${field}`} value={value[field]} required minLength={field === "name" ? 2 : 1} maxLength={max} list={field === "category" ? `${prefix}-categories` : undefined} onChange={(e) => set(field, e.target.value)} />
-    </div>)}
-    <datalist id={`${prefix}-categories`}>{facets.categories.map((category) => <option key={category} value={category} />)}</datalist>
+    {([['name', 'Product name', 120], ['brand', 'Brand', 60], ['category', 'Category', 40]] as const).map(([field, label, max]) => {
+      const props = { id: `${prefix}-${field}`, value: value[field], required: true, minLength: field === "name" ? 2 : 1, maxLength: max }
+      return <div key={field} className="space-y-2">
+        <Label htmlFor={props.id}>{label}</Label>
+        {field === "name"
+          ? <Input {...props} onChange={(e) => set(field, e.target.value)} />
+          : <SuggestionInput {...props} {...SUGGESTION_TEXT[field]} suggestions={suggestions[field]} onChange={(next) => set(field, next)} />}
+      </div>
+    })}
     <div className="space-y-2"><Label htmlFor={`${prefix}-qty`}>Pack quantity</Label><Input id={`${prefix}-qty`} type="number" step="any" min="0.001" max="100000" required value={value.packQty || ""} onChange={(e) => set("packQty", Number(e.target.value))} /></div>
     <div className="space-y-2"><Label htmlFor={`${prefix}-unit`}>Pack unit</Label><Select id={`${prefix}-unit`} value={value.packUnit} onChange={(e) => set("packUnit", e.target.value as ProductFields["packUnit"])}>{packUnits.map((unit) => <option key={unit}>{unit}</option>)}</Select></div>
     <div className="space-y-2"><Label htmlFor={`${prefix}-count`}>Units per pack</Label><Input id={`${prefix}-count`} type="number" min="1" max="100" step="1" required value={value.packCount || ""} onChange={(e) => set("packCount", Number(e.target.value))} /></div>
@@ -100,7 +119,7 @@ export function ProductRequestReview({ service }: { service: SubmissionService }
   const { user, getAccessToken } = useAuth()
   const [status, setStatus] = useState<ProductRequestStatus>("pending")
   const [items, setItems] = useState<ProductRequest[]>([])
-  const [facets, setFacets] = useState<Facets>({ categories: [], dietary: [] })
+  const [facets, setFacets] = useState<Facets>(emptyFacets)
   const [error, setError] = useState<string | null>(null)
   const loadId = useRef(0)
   const load = useCallback(async () => {

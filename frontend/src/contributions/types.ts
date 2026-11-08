@@ -116,12 +116,20 @@ export interface SubmissionActor {
   role: AuthRole
 }
 
+/** The catalogue's categories, brands and dietary tags, for the new-product form, with how many products have each when known. */
+export interface ProductFacets {
+  categories: string[]
+  brands: string[]
+  dietary: string[]
+  counts?: { categories: Record<string, number>; brands: Record<string, number> }
+}
+
 export interface SubmissionService {
   readonly mode: "local" | "api"
   listProducts(): Promise<CatalogProduct[]>
   listRetailers(): Promise<CatalogRetailer[]>
   requestImageUpload(file: File, productId: string, retailerId: string, accessToken: string): Promise<UploadTarget>
-  listFacets(): Promise<{ categories: string[]; dietary: string[] }>
+  listFacets(): Promise<ProductFacets>
   requestProductImageUpload(file: File, purpose: "product-image" | "evidence", accessToken: string): Promise<UploadTarget>
   createProductRequest(input: CreateProductRequestInput, userId: string, accessToken: string): Promise<ProductRequest>
   listMyProductRequests(userId: string, accessToken: string): Promise<ProductRequest[]>
