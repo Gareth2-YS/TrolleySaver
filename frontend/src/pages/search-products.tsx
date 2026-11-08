@@ -283,7 +283,7 @@ function ProductCard({
           </header>
 
           <section aria-labelledby={`product-prices-title-${product.id}`}>
-            <h3 id={`product-prices-title-${product.id}`} className="font-semibold">Current retailer prices</h3>
+            <h3 id={`product-prices-title-${product.id}`} className="font-semibold">Current Retailer Prices</h3>
             <p className="mt-1 text-xs text-muted-foreground">{priceUpdated ?? "No prices yet"}</p>
             <div className="mt-3 divide-y divide-border rounded-lg border border-border">
               {retailerIds.map((retailerId) => {
@@ -310,7 +310,7 @@ function ProductCard({
           </section>
 
           <section aria-labelledby={`product-info-title-${product.id}`}>
-            <h3 id={`product-info-title-${product.id}`} className="font-semibold">Product information</h3>
+            <h3 id={`product-info-title-${product.id}`} className="font-semibold">Product Information</h3>
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <dt className="text-muted-foreground">Category</dt><dd>{product.category ? formatLabel(product.category) : "—"}</dd>
               <dt className="text-muted-foreground">Pack size</dt><dd>{packDescription ?? "—"}</dd>
@@ -450,7 +450,7 @@ export function SearchProductsPage() {
   return (
     <AppShell>
       <section className="space-y-6 sm:space-y-8">
-        <PageHeader title="Search and filter groceries" description="Find a product by name or brand.">
+        <PageHeader title="Search and Filter Groceries" description="Find a product by name or brand.">
           <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
             {(loading || searching) && <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />}
             {loading ? "Loading…" : searching ? "Updating…" : `${result?.total ?? 0} of ${result?.catalogSize ?? 0} products`}

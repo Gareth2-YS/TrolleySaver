@@ -23,6 +23,7 @@ import { toast } from "sonner"
 import { useAuth } from "../auth/auth-context"
 import { FormAlert } from "../components/auth/form-alert"
 import { PhotoDrop, usePhoto } from "../components/contribute/photo-drop"
+import { RejectionReason } from "../components/contribute/rejection-reason"
 import { PriceStatusBadge } from "../components/contribute/status-badge"
 import { YourSubmissions } from "../components/contribute/your-submissions"
 import { AppShell } from "../components/layout/app-shell"
@@ -45,7 +46,6 @@ import { createSubmissionService, errorText, SubmissionServiceError } from "../c
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, ProductFields, SubmissionService } from "../contributions/types"
 import { getCategoryIcon } from "../lib/category-icons"
 import { formatDay, formatDollars, formatTimestamp, limitToCents, packLabel } from "../lib/format"
-import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
 import { emptyFacets, emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
@@ -541,7 +541,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
   return (
     <div className="space-y-6 sm:space-y-8">
       <PageHeader
-        title="Share a price you spotted"
+        title="Share a Price You Spotted"
         description="Add a price you saw on the shelf, with a photo if you have one. You can also add a product that isn’t on TrolleySaver yet."
       />
       <FormAlert message={loadError} />
@@ -589,7 +589,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
             </div>
 
             <div className="space-y-5 border-t pt-6">
-              <SectionHeading icon={Tag} title="Where and how much" description="The same for existing and new products" />
+              <SectionHeading icon={Tag} title="Where and How Much" description="The same for existing and new products" />
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="store">Store</Label>
@@ -694,6 +694,8 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
   const [workingId, setWorkingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [reason, setReason] = useState("")
+  // What's wrong with the reason being typed, shown under its field.
+  const [reasonProblem, setReasonProblem] = useState<string | null>(null)
 
   const loadFlagged = useCallback(async () => {
     if (!user) return
@@ -722,14 +724,15 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
   async function decide(submission: PriceSubmission, decision: "accepted" | "rejected") {
     if (!user) return
     if (decision === "rejected" && !reason.trim()) {
-      setError("Enter a reason before rejecting this submission.")
+      setReasonProblem("Enter a reason before rejecting this submission.")
       return
     }
     const invalidReason = decision === "rejected" ? reasonError(reason) : null
     if (invalidReason) {
-      setError(invalidReason)
+      setReasonProblem(invalidReason)
       return
     }
+    setReasonProblem(null)
     setError(null)
     setWorkingId(submission.id)
     try {
@@ -758,7 +761,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <PageHeader title="Review price evidence" description="Help the community shop with confidence. Match each price to its photo, and give new finds a careful first look.">
+      <PageHeader title="Review Price Evidence" description="Help the community shop with confidence. Match each price to its photo, and give new finds a careful first look.">
         <aside className="surface-card flex flex-[1_1_280px] items-center justify-between p-5">
           <span className="grid size-12 place-items-center rounded-xl bg-accent text-primary"><ShieldCheck className="size-6" /></span>
           <div className="text-right"><strong className="block font-display text-4xl font-extrabold tabular-nums">{loading ? "—" : submissions.length}</strong><span className="text-xs text-muted-foreground">Awaiting review</span></div>
@@ -770,7 +773,7 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
 
       <section className="surface-card p-5 sm:p-7">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h2 className="font-display text-xl font-extrabold">Products and prices awaiting review</h2><p className="mt-1 text-sm text-muted-foreground">Follow the evidence from left to right, then record a decision.</p></div>
+          <div><h2 className="font-display text-xl font-extrabold">Review Flagged Price Submissions</h2><p className="mt-1 text-sm text-muted-foreground">Prices for products already in the catalog that fell outside the usual range. Check each against its photo, then accept or reject it.</p></div>
           <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">Administrator only</span>
         </div>
         <div className="mt-6 space-y-5" aria-live="polite">
@@ -793,30 +796,26 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
                   {submission.photo && <div className="sm:col-span-2"><dt className="text-muted-foreground">Evidence file</dt><dd className="mt-1 break-all font-medium">{submission.photo.fileName} · {(submission.photo.sizeBytes / 1024 / 1024).toFixed(2)} MB</dd></div>}
                 </dl>
                 {rejectingId === submission.id && (
-                  <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
-                    <Label htmlFor={`reason-${submission.id}`}>Reason for rejection</Label>
-                    <textarea
-                      id={`reason-${submission.id}`}
-                      value={reason}
-                      maxLength={500}
-                      onChange={(event) => setReason(event.target.value)}
-                      className={cn(inputClass, "mt-2 h-auto min-h-24 resize-y")}
-                      placeholder="Explain what needs to be corrected"
-                    />
-                    <p className="mt-2 text-xs text-muted-foreground">This helps the contributor understand the decision.</p>
-                  </div>
+                  <RejectionReason
+                    id={`reason-${submission.id}`}
+                    value={reason}
+                    onChange={(next) => { setReason(next); setReasonProblem(null) }}
+                    error={reasonProblem}
+                    placeholder="Explain what needs to be corrected"
+                    className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4"
+                  />
                 )}
                 <div className="mt-5 flex flex-wrap justify-end gap-3">
                   {rejectingId === submission.id ? (
                     <>
-                      <Button variant="ghost" onClick={() => { setRejectingId(null); setReason(""); setError(null) }}>Cancel</Button>
+                      <Button variant="ghost" onClick={() => { setRejectingId(null); setReason(""); setReasonProblem(null); setError(null) }}>Cancel</Button>
                       <Button variant="destructive" disabled={workingId === submission.id} onClick={() => void decide(submission, "rejected")}>
                         {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <X className="size-4" />}Confirm rejection
                       </Button>
                     </>
                   ) : (
                     <>
-                      <Button variant="outline" disabled={Boolean(workingId)} onClick={() => { setRejectingId(submission.id); setReason("") }}><X className="size-4" />Reject</Button>
+                      <Button variant="destructive" disabled={Boolean(workingId)} onClick={() => { setRejectingId(submission.id); setReason(""); setReasonProblem(null) }}><X className="size-4" />Reject</Button>
                       <Button disabled={Boolean(workingId)} onClick={() => void decide(submission, "accepted")}>
                         {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}Accept
                       </Button>

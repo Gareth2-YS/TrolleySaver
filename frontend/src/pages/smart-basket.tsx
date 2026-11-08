@@ -149,7 +149,7 @@ function HealthierChoices({ product, quantity, options, store, cheapest, optionS
         <div className="flex min-w-0 items-start gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-primary"><Leaf className="size-5" /></span>
           <div className="min-w-0">
-            <h2 id="swap-title" className="font-display text-xl font-extrabold leading-snug">Healthier choices</h2>
+            <h2 id="swap-title" className="font-display text-xl font-extrabold leading-snug">Healthier Choices</h2>
             <p className="mt-0.5 text-xs capitalize text-muted-foreground">{product.category}{store && ` · prices at ${storeName(store)}`}</p>
           </div>
         </div>
@@ -534,7 +534,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
     <AppShell>
       <div className="space-y-8">
         <PageHeader
-          title="Smart basket comparison"
+          title="Smart Basket Comparison"
           description="Build your grocery list once and see what the whole basket costs at each supermarket, and how much you save by choosing the cheapest one."
         >
           <aside className="surface-card flex flex-[1_1_260px] items-center gap-4 px-6 py-5">
@@ -559,7 +559,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
           <Card className="lg:col-span-2" aria-labelledby="add-heading">
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-              <div className="min-w-0 flex-[1_1_240px]"><CardTitle id="add-heading" icon={ShoppingBag} title="Add groceries" description="Search the catalog and add items to your basket" /></div>
+              <div className="min-w-0 flex-[1_1_240px]"><CardTitle id="add-heading" icon={ShoppingBag} title="Add Groceries" description="Search the catalog and add items to your basket" /></div>
               <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto sm:flex-[0_1_560px] sm:justify-end">
                 <Filter id="basket-type-filter" label="Product type" value={category} options={typeOptions} allLabel="All product types" onChange={setCategory} />
                 <Filter id="basket-brand-filter" label="Brand" value={brand} options={brandOptions} allLabel="All brands" onChange={setBrand} />
@@ -629,7 +629,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
 
           <Card aria-labelledby="basket-heading">
             <div className="mb-[18px] flex items-start gap-4">
-              <div className="flex-1"><CardTitle id="basket-heading" icon={ShoppingBasket} title="Your basket" description={`${plural(basket.length, "product")} · ${plural(packCount, "pack")}`} /></div>
+              <div className="flex-1"><CardTitle id="basket-heading" icon={ShoppingBasket} title="Your Basket" description={`${plural(basket.length, "product")} · ${plural(packCount, "pack")}`} /></div>
               {basket.length > 0 && <Button type="button" variant="outline" size="sm" className="rounded-lg text-[13px] font-semibold text-muted-foreground" onClick={() => { setItems([]); setSwaps({}); setToastFor(null) }}>Reset</Button>}
             </div>
 
@@ -807,7 +807,7 @@ function SmartBasketView({ serviceOverride, basketItems }: { serviceOverride?: B
           </Card>
 
           <Card aria-labelledby="per-item-heading">
-            <h2 id="per-item-heading" className="mb-1 font-display text-xl font-extrabold tracking-tight">Price per item</h2>
+            <h2 id="per-item-heading" className="mb-1 font-display text-xl font-extrabold tracking-tight">Price per Item</h2>
             <p className="text-[13px] text-muted-foreground">Line totals for each product · lowest price highlighted</p>
             {basket.length === 0 || stores.length === 0 ? (
               <p className="mt-4 rounded-[10px] border border-dashed px-4 py-5 text-center text-[13px] text-muted-foreground">

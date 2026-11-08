@@ -184,10 +184,10 @@ export function YourSubmissions({ service, priceSubmissions, pricesLoading, refr
   const firstLoad = entries.length === 0 && busy
 
   return (
-    <section className="surface-card min-w-0 space-y-4 p-5 sm:p-7" aria-label="Your submissions" aria-busy={busy}>
+    <section className="surface-card min-w-0 space-y-4 p-5 sm:p-7" aria-label="Your Submissions" aria-busy={busy}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="flex items-baseline gap-2.5 font-display text-xl font-extrabold">
-          Your submissions
+          Your Submissions
           {!firstLoad && <span className="font-sans text-sm font-semibold tabular-nums text-muted-foreground">{entries.length}</span>}
         </h2>
         <Button variant="outline" size="sm" disabled={deletingId !== null || busy} onClick={() => void refresh()}>

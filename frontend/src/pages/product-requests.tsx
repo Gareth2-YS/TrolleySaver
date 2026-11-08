@@ -9,9 +9,10 @@ import { packUnits, productCorrectionsSchema, reasonError, singaporeDateString, 
 import { errorText, SubmissionServiceError } from "../contributions/service"
 import type { ProductCorrections, ProductFacets, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
 import { formatCents } from "../lib/format"
-import { inputClass } from "../lib/styles"
 import { cn } from "../lib/utils"
 import { Select } from "../components/ui/select"
+import { RejectionReason } from "../components/contribute/rejection-reason"
+import { RefreshCw } from "lucide-react"
 import { SuggestionInput } from "../components/suggestion-input"
 import { titleCase, toSuggestions } from "../lib/suggestions"
 import hcsSymbol from "../../assets/brand/healthier-choice-symbol.png"
@@ -75,18 +76,21 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
   const [terms, setTerms] = useState("")
   const [checked, setChecked] = useState(false)
   const [reason, setReason] = useState("")
+  // What's wrong with the reason, shown under its field rather than at the top of the card.
+  const [reasonProblem, setReasonProblem] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   async function decide(decision: "approved" | "rejected") {
     setError(null)
+    setReasonProblem(null)
     let changes: ProductCorrections | undefined
     if (decision === "approved") {
       if (!checked) return
       const result = productCorrectionsSchema.safeParse({ ...fields, minCents: min, maxCents: max, searchTerms: terms.trim() ? terms.split(",").map((s) => s.trim()) : [] })
       if (!result.success) { setError(validationMessages(result.error.issues)); return }
       changes = result.data
-    } else if (!reason.trim() || reason.trim().length > 500) { setError("Enter a reason of 1–500 characters before rejecting."); return }
-    else if (reasonError(reason)) { setError(reasonError(reason)); return }
+    } else if (!reason.trim()) { setReasonProblem("Enter a reason before rejecting this request."); return }
+    else if (reasonError(reason)) { setReasonProblem(reasonError(reason)); return }
     setBusy(true)
     try {
       const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
@@ -109,7 +113,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
       <div className="grid gap-4 sm:grid-cols-2">{([["Minimum cents", min, setMin], ["Maximum cents", max, setMax]] as const).map(([label, value, set]) => <label key={label} className="space-y-2">{label}<Input type="number" min="1" max="100000" step="1" value={value || ""} onChange={(e) => set(Number(e.target.value))} /></label>)}</div>
       <label className="block space-y-2">Search terms (comma separated)<Input value={terms} maxLength={320} onChange={(e) => setTerms(e.target.value)} /></label>
       <label className="flex min-h-12 items-start gap-3 rounded-xl border bg-accent/40 p-4"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /><span>I reviewed the packaging, product fields, HCS and dietary claims, and price range. Correct unsupported claims before approval. If evidence is unclear, leave the request pending or reject it with a reason.</span></label>
-      <label className="block space-y-2">Reason for rejection<textarea maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className={cn(inputClass, "h-auto min-h-24 resize-y")} /></label>
+      <RejectionReason id={`reject-${item.id}`} value={reason} onChange={(next) => { setReason(next); setReasonProblem(null) }} error={reasonProblem} required="Required to reject" placeholder="Explain why it can't be added, e.g. the photo doesn't show the pack" />
       <div className="flex flex-wrap gap-3"><Button disabled={!checked} onClick={() => void decide("approved")}>Approve product</Button><Button variant="destructive" onClick={() => void decide("rejected")}>Reject product</Button></div>
     </fieldset>}
   </article>
@@ -122,6 +126,7 @@ export function ProductRequestReview({ service }: { service: SubmissionService }
   const [facets, setFacets] = useState<Facets>(emptyFacets)
   const [error, setError] = useState<string | null>(null)
   const loadId = useRef(0)
+  const [refreshing, setRefreshing] = useState(false)
   const load = useCallback(async () => {
     const currentLoad = ++loadId.current
     try {
@@ -133,7 +138,8 @@ export function ProductRequestReview({ service }: { service: SubmissionService }
   }, [service, status, user, getAccessToken])
   useEffect(() => { async function fetchQueue() { await load() } void fetchQueue(); const timer = window.setInterval(() => void load(), 4 * 60_000); return () => window.clearInterval(timer) }, [load])
   return <section className="surface-card space-y-5 p-5 sm:p-7" aria-label="Product request review">
-    <div className="flex flex-wrap items-center justify-between gap-4"><h2 className="font-display text-xl font-extrabold">Review new product requests</h2><Button variant="outline" onClick={() => void load()}>Refresh request queue</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-display text-xl font-extrabold">Review New Product Requests</h2><p className="mt-1 text-sm text-muted-foreground">Products contributors want added to the catalog, each with its first price. Check the pack picture and details, then approve or reject it.</p></div><Button variant="outline" size="icon" aria-label="Refresh request queue" title="Refresh request queue" disabled={refreshing}
+      onClick={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)) }}><RefreshCw className={cn("size-4", refreshing && "animate-spin")} aria-hidden="true" /></Button></div>
     <label className="flex max-w-xs flex-col gap-1.5 text-sm font-semibold">Request status<Select value={status} onChange={(e) => { setItems([]); setStatus(e.target.value as ProductRequestStatus) }} className="capitalize">{["pending", "approved", "rejected"].map((s) => <option key={s}>{s}</option>)}</Select></label>
     <FormAlert message={error} />
     {items.length === 0 && <p>No {status} product requests.</p>}

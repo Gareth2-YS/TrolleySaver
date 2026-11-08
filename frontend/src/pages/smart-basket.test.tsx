@@ -119,7 +119,7 @@ describe("smart basket page", () => {
     expect(screen.getByText("1 priced · 2 missing at Gamma Foods")).toBeInTheDocument()
     expect(screen.getByText("Total for priced items at Gamma Foods")).toBeInTheDocument()
     // Price per item: bread and milk are each missing at two of the three stores.
-    expect(within(screen.getByRole("region", { name: "Price per item" })).getAllByText("No price")).toHaveLength(4)
+    expect(within(screen.getByRole("region", { name: "Price per Item" })).getAllByText("No price")).toHaveLength(4)
   })
 
   it("swaps a product for a Healthier Choice one in its category", async () => {
@@ -136,7 +136,7 @@ describe("smart basket page", () => {
     await user.click(screen.getByRole("button", { name: "Healthier options (1)" }))
 
     // Options are priced at the selected store (Beta, the cheapest) against the line being swapped.
-    const dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+    const dialog = screen.getByRole("dialog", { name: "Healthier Choices" })
     expect(await within(dialog).findByText("$3.20")).toBeInTheDocument()
     expect(within(dialog).getByText("+$0.70")).toBeInTheDocument()
     expect(within(dialog).getByText(/\$0\.80 \/ 100g/)).toBeInTheDocument()
@@ -210,7 +210,7 @@ describe("smart basket page", () => {
 
     await screen.findByRole("radio", { name: /Beta Grocer/ })
     await user.click(screen.getByRole("button", { name: "Healthier options (1)" }))
-    const dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+    const dialog = screen.getByRole("dialog", { name: "Healthier Choices" })
     await within(dialog).findByText("$3.20")
     await user.click(within(dialog).getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
     // 90 + 20 is capped at 99.
@@ -274,7 +274,7 @@ describe("smart basket page", () => {
 
     await screen.findByRole("radio", { name: /Beta Grocer/ })
     await user.click(screen.getByRole("button", { name: "Healthier options (1)" }))
-    const dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+    const dialog = screen.getByRole("dialog", { name: "Healthier Choices" })
     await within(dialog).findByText("$3.20")
     await user.click(within(dialog).getByRole("button", { name: "Swap White Bread for Wholemeal Bread" }))
     expect(within(screen.getByRole("status")).getByRole("button", { name: "Undo" })).toBeInTheDocument()
@@ -326,7 +326,7 @@ describe("smart basket page", () => {
   it("highlights each item's lowest store price", async () => {
     localStorage.setItem("trolleysaver.basket.v1", JSON.stringify([{ productId: "rice", quantity: 1 }]))
     renderBasket(basketService(fullPrices))
-    const perItem = await screen.findByRole("region", { name: "Price per item" })
+    const perItem = await screen.findByRole("region", { name: "Price per Item" })
     await within(perItem).findByText("$18.60")
     expect(within(perItem).getByText("$18.60").closest("div")).toHaveClass("border-primary")
     expect(within(perItem).getByText("$18.80").closest("div")).not.toHaveClass("border-primary")
@@ -351,7 +351,7 @@ describe("smart basket page", () => {
     async function openOptions(user: ReturnType<typeof userEvent.setup>, count: number) {
       await screen.findByRole("radio", { name: /Beta Grocer/ })
       await user.click(screen.getByRole("button", { name: `Healthier options (${count})` }))
-      return screen.getByRole("dialog", { name: "Healthier choices" })
+      return screen.getByRole("dialog", { name: "Healthier Choices" })
     }
 
     it("sorts by lowest price, or by price per 100 g with unconvertible units last", async () => {
@@ -391,7 +391,7 @@ describe("smart basket page", () => {
       await user.click(within(dialog).getByRole("button", { name: "Close" }))
       await user.click(screen.getByRole("radio", { name: /Alpha Mart/ }))
       await user.click(screen.getByRole("button", { name: "Healthier options (3)" }))
-      dialog = screen.getByRole("dialog", { name: "Healthier choices" })
+      dialog = screen.getByRole("dialog", { name: "Healthier Choices" })
       await waitFor(() => expect(swap()).toBeEnabled())
     })
   })

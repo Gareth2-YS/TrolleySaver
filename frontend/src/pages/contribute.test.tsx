@@ -141,7 +141,7 @@ describe("price and image contribution workflow", () => {
 
   it("renders contributor controls without administrator actions", async () => {
     renderContribution("user")
-    expect(await screen.findByRole("heading", { name: "Share a price you spotted" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Share a Price You Spotted" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Submit price" })).toBeInTheDocument()
     expect(screen.getByLabelText("Price evidence photo")).toHaveAccessibleDescription(/Helps an admin check the price quickly/)
     expect(screen.getByRole("tab", { name: "Existing product" })).toHaveAttribute("aria-selected", "true")
@@ -153,7 +153,7 @@ describe("price and image contribution workflow", () => {
 
   it("renders only the focused administrator review experience", async () => {
     renderContribution("admin")
-    expect(await screen.findByRole("heading", { name: "Review price evidence" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Review Price Evidence" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Accept" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Submit price" })).not.toBeInTheDocument()
     expect(screen.queryByText("Smart basket")).not.toBeInTheDocument()
@@ -163,7 +163,7 @@ describe("price and image contribution workflow", () => {
   it("shows clear required-field validation", async () => {
     const user = userEvent.setup()
     renderContribution("user")
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await user.click(screen.getByRole("button", { name: "Submit price" }))
     expect(await screen.findByText("Choose a product")).toBeInTheDocument()
     expect(screen.getByText("Choose a store")).toBeInTheDocument()
@@ -173,7 +173,7 @@ describe("price and image contribution workflow", () => {
   it("validates and previews a selected shelf image", async () => {
     const user = userEvent.setup()
     renderContribution("user")
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await user.upload(screen.getByLabelText(/Price evidence photo/), new File(["image"], "shelf.png", { type: "image/png" }))
     expect(screen.getByRole("img", { name: "Selected price evidence preview" })).toHaveAttribute("src", "blob:test-image")
     fireEvent.change(screen.getByLabelText(/Price evidence photo/), { target: { files: [new File(["text"], "notes.txt", { type: "text/plain" })] } })
@@ -185,7 +185,7 @@ describe("price and image contribution workflow", () => {
     const user = userEvent.setup()
     const service = submissionService()
     renderContribution("user", service)
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await user.upload(screen.getByLabelText(/Price evidence photo/), new File(["<html>"], "shelf.png", { type: "image/png" }))
     expect(await screen.findByText("This file isn't a readable JPG or PNG image")).toBeInTheDocument()
     expect(screen.queryByRole("img", { name: "Selected price evidence preview" })).not.toBeInTheDocument()
@@ -198,7 +198,7 @@ describe("price and image contribution workflow", () => {
     const user = userEvent.setup()
     const service = submissionService()
     renderContribution("user", service)
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await completeRequiredFields(user)
     await user.click(screen.getByRole("button", { name: "Submit price" }))
     expect(await screen.findByText("$2.80")).toBeInTheDocument()
@@ -210,7 +210,7 @@ describe("price and image contribution workflow", () => {
     const user = userEvent.setup()
     const service = submissionService({ createSubmission: vi.fn().mockRejectedValue(new Error("Production submission is unavailable")) })
     renderContribution("user", service)
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await completeRequiredFields(user)
     await user.click(screen.getByRole("button", { name: "Submit price" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Production submission is unavailable")
@@ -221,9 +221,20 @@ describe("price and image contribution workflow", () => {
     const service = submissionService()
     renderContribution("admin", service)
     await user.click(await screen.findByRole("button", { name: "Reject" }))
+    const reasonField = screen.getByLabelText("Reason for rejection")
+    // The form says the reason is required before anyone tries to reject without one.
+    expect(screen.getByText("Required")).toBeInTheDocument()
+    expect(reasonField).toHaveAttribute("aria-required", "true")
+    expect(reasonField).toHaveAccessibleDescription(/The contributor sees this reason/)
     await user.click(screen.getByRole("button", { name: "Confirm rejection" }))
-    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a reason")
-    await user.type(screen.getByLabelText("Reason for rejection"), "Shelf label is unreadable")
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a reason before rejecting this submission.")
+    // The message is on the field itself, not only at the top of the page.
+    expect(reasonField).toHaveAttribute("aria-invalid", "true")
+    expect(reasonField).toHaveAccessibleDescription(/Enter a reason before rejecting this submission\./)
+    expect(service.moderateSubmission).not.toHaveBeenCalled()
+    await user.type(reasonField, "Shelf label is unreadable")
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.getByText("25/500")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Confirm rejection" }))
     await waitFor(() => expect(service.moderateSubmission).toHaveBeenCalledWith("submission-1", "rejected", "Shelf label is unreadable", { id: "admin-1", role: "admin" }, "test-token"))
     expect(await screen.findByText("Review queue is clear")).toBeInTheDocument()
@@ -280,7 +291,7 @@ describe("integrated product request screens", () => {
   it("sends selected product and retailer for an existing-product evidence upload", async () => {
     const user = userEvent.setup(); const service = submissionService()
     renderContribution("user", service)
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await completeRequiredFields(user)
     await user.upload(screen.getByLabelText("Price evidence photo"), new File(["image"], "e.png", { type: "image/png" }))
     await user.click(screen.getByRole("button", { name: "Submit price" }))
@@ -307,14 +318,22 @@ describe("integrated product request screens", () => {
     const user = userEvent.setup()
     const service = submissionService({ listPendingSubmissions: vi.fn().mockResolvedValue([]), listProductRequests: vi.fn().mockResolvedValueOnce([requestRecord]).mockResolvedValue([]) })
     renderContribution("admin", service)
+    expect(await screen.findByText("Required to reject")).toBeInTheDocument()
     await user.click(await screen.findByRole("button", { name: "Reject product" }))
-    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a reason")
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a reason before rejecting this request.")
+    expect(screen.getByLabelText("Reason for rejection")).toHaveAttribute("aria-invalid", "true")
     expect(service.moderateProductRequest).not.toHaveBeenCalled()
     await user.type(screen.getByLabelText("Reason for rejection"), "Unclear packaging")
     await user.click(screen.getByRole("button", { name: "Reject product" }))
     await waitFor(() => expect(service.moderateProductRequest).toHaveBeenCalledWith("request-1", "rejected", "Unclear packaging", undefined, { id: "admin-1", role: "admin" }, "test-token"))
     await user.selectOptions(screen.getByLabelText("Request status"), "approved")
     await waitFor(() => expect(service.listProductRequests).toHaveBeenLastCalledWith("approved", { id: "admin-1", role: "admin" }, "test-token"))
+    // Refresh is an icon button, still named for screen readers.
+    const calls = vi.mocked(service.listProductRequests).mock.calls.length
+    const refresh = screen.getByRole("button", { name: "Refresh request queue" })
+    expect(refresh).not.toHaveTextContent(/\w/)
+    await user.click(refresh)
+    await waitFor(() => expect(service.listProductRequests).toHaveBeenCalledTimes(calls + 1))
   })
 
   it("switches to the existing product after a duplicate, keeping the shared fields, and uses separate product/evidence uploads", async () => {
@@ -389,7 +408,7 @@ describe("new products and deletion", () => {
     const service = submissionService({ mode: "api", listMyProductRequests: vi.fn().mockImplementation(pending) })
     renderContribution("user", service)
 
-    const section = await screen.findByRole("region", { name: "Your submissions" })
+    const section = await screen.findByRole("region", { name: "Your Submissions" })
     expect(await within(section).findByText("Loading your submissions…")).toBeInTheDocument()
     expect(within(section).queryByText("Nothing here yet")).not.toBeInTheDocument()
     expect(within(section).getByRole("button", { name: "Refresh" })).toBeDisabled()
@@ -493,7 +512,7 @@ describe("new products and deletion", () => {
       { ...flaggedSubmission, id: "rejected", status: "rejected" },
     ]) })
     renderContribution("user", service)
-    expect(await screen.findByRole("region", { name: "Your submissions" })).toBeInTheDocument()
+    expect(await screen.findByRole("region", { name: "Your Submissions" })).toBeInTheDocument()
     expect(await screen.findAllByRole("button", { name: deletePriceName })).toHaveLength(1)
     expect(screen.queryByRole("button", { name: deleteRequestName })).not.toBeInTheDocument()
     expect(service.deleteSubmission).not.toHaveBeenCalled()
@@ -561,7 +580,7 @@ describe("one form for existing and new products", () => {
   it("keeps store and price when switching modes, and restores the chosen product on the way back", async () => {
     const user = userEvent.setup()
     renderContribution("user")
-    await screen.findByRole("heading", { name: "Share a price you spotted" })
+    await screen.findByRole("heading", { name: "Share a Price You Spotted" })
     await completeRequiredFields(user)
     await user.click(screen.getByRole("tab", { name: "New product" }))
     expect(screen.queryByRole("combobox", { name: "Product" })).not.toBeInTheDocument()
@@ -594,7 +613,7 @@ describe("one form for existing and new products", () => {
       listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission]),
       listMyProductRequests: vi.fn().mockResolvedValue([{ ...requestRecord, submittedAt: "2026-10-21T10:00:00.000Z" }]),
     }))
-    const section = await screen.findByRole("region", { name: "Your submissions" })
+    const section = await screen.findByRole("region", { name: "Your Submissions" })
     await within(section).findByRole("heading", { name: /Oat milk/ })
     const names = within(section).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)
     expect(names).toEqual(["Oat milk", flaggedSubmission.productName])
@@ -617,7 +636,7 @@ describe("one form for existing and new products", () => {
       listMySubmissions: vi.fn().mockResolvedValue([flaggedSubmission, accepted]),
       listMyProductRequests: vi.fn().mockResolvedValue([{ ...requestRecord, status: "approved" }]),
     }))
-    const section = await screen.findByRole("region", { name: "Your submissions" })
+    const section = await screen.findByRole("region", { name: "Your Submissions" })
     const milo = (await within(section).findByRole("heading", { name: "Milo Cereal" })).closest("li")!
     expect(within(milo).getByText("2 × 300 g")).toBeInTheDocument()
     expect(within(section).getByText("600 g")).toBeInTheDocument()
