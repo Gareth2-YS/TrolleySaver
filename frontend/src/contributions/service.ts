@@ -1,6 +1,7 @@
+import { countBy } from "../lib/facets"
 import { localProducts, localRetailers } from "./catalog"
 import { contributionSchema, productCorrectionsSchema, productFieldsSchema, validateImage } from "./schema"
-import type { CatalogProduct, CatalogRetailer, CreateSubmissionInput, PriceSubmission, SubmissionActor, SubmissionPhoto, SubmissionService, SubmissionStatus, UploadTarget, CreateProductRequestInput, ProductRequest, ProductRequestStatus, ProductCorrections } from "./types"
+import type { CatalogProduct, CatalogRetailer, CreateSubmissionInput, PriceSubmission, SubmissionActor, SubmissionPhoto, SubmissionService, SubmissionStatus, ProductFacets, UploadTarget, CreateProductRequestInput, ProductRequest, ProductRequestStatus, ProductCorrections } from "./types"
 
 const STORAGE_KEY = "trolleysaver.local.price-submissions.v1"
 
@@ -115,7 +116,15 @@ export class LocalSubmissionService implements SubmissionService {
   }
   async listRetailers() { return localRetailers }
 
-  async listFacets() { return { categories: [...new Set(localProducts.map((p) => p.category).filter((v): v is string => Boolean(v)))], dietary: ["halal", "vegetarian"] } }
+  async listFacets(): Promise<ProductFacets> {
+    const distinct = (values: (string | undefined)[]) => [...new Set(values.filter((v): v is string => Boolean(v)))]
+    return {
+      categories: distinct(localProducts.map((p) => p.category)),
+      brands: distinct(localProducts.map((p) => p.brand)),
+      dietary: ["halal", "vegetarian"],
+      counts: { categories: countBy(localProducts, (p) => p.category), brands: countBy(localProducts, (p) => p.brand) },
+    }
+  }
   async requestProductImageUpload(file: File, purpose: "product-image" | "evidence", token: string) {
     return this.requestImageUpload(file, purpose, "", token)
   }
@@ -251,7 +260,15 @@ export class ApiSubmissionService implements SubmissionService {
   async listProducts() { return (await this.request<{ items: CatalogProduct[] }>("/products")).items }
   async listRetailers() { return (await this.request<{ items: CatalogRetailer[] }>("/retailers")).items }
 
-  async listFacets() { return (await this.request<{ facets: { categories: string[]; dietary: string[] } }>("/products/search")).facets }
+  // The search route's facets list the whole catalogue; with no filters, its counts are per product.
+  async listFacets(): Promise<ProductFacets> {
+    const { facets, facetCounts } = await this.request<{
+      facets: { categories: string[]; brands?: string[]; dietary: string[] }
+      facetCounts?: { categories?: Record<string, number>; brands?: Record<string, number> }
+    }>("/products/search")
+    const counts = facetCounts?.categories && facetCounts.brands ? { categories: facetCounts.categories, brands: facetCounts.brands } : undefined
+    return { categories: facets.categories, brands: facets.brands ?? [], dietary: facets.dietary, counts }
+  }
   async requestProductImageUpload(file: File, purpose: "product-image" | "evidence", token: string): Promise<UploadTarget> {
     requireToken(token)
     const target = await this.request<UploadTarget & { productImageKey?: string }>("/product-requests/image-upload-url", { method: "POST", body: JSON.stringify({ purpose, contentType: file.type, sizeBytes: file.size }) }, token)

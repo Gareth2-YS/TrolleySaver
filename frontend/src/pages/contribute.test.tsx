@@ -45,7 +45,7 @@ function authService(role: AuthRole | null): AuthService {
 function submissionService(overrides: Partial<SubmissionService> = {}): SubmissionService {
   return {
     mode: "local",
-    listFacets: vi.fn().mockResolvedValue({ categories: ["milk", "bread"], dietary: ["halal", "vegetarian"] }),
+    listFacets: vi.fn().mockResolvedValue({ categories: ["milk", "bread", "soft drinks"], brands: ["Meiji", "Gardenia"], dietary: ["halal", "vegetarian"], counts: { categories: { milk: 2, bread: 1, "soft drinks": 1 }, brands: { Meiji: 1, Gardenia: 2 } } }),
     requestProductImageUpload: vi.fn().mockResolvedValue({ uploadUrl: "https://upload.test", fields: {}, photoKey: "product-images/pending/user/p.png" }),
     createProductRequest: vi.fn().mockImplementation(async (input) => ({ ...input, id: "request-1", status: "pending", userId: "user-1" })),
     listMyProductRequests: vi.fn().mockResolvedValue([]),
@@ -459,6 +459,31 @@ describe("new products and deletion", () => {
     await waitFor(() => expect(screen.getByLabelText("Product name")).toHaveValue(""))
     await waitFor(() => expect(service.listMyProductRequests).toHaveBeenCalledTimes(2))
     expect(service.createSubmission).not.toHaveBeenCalled()
+  })
+
+  it("suggests the catalogue's categories in title case and its brands, saving the category in lower case", async () => {
+    const user = userEvent.setup()
+    const service = submissionService()
+    renderContribution("user", service)
+    await user.click(await screen.findByRole("tab", { name: "New product" }))
+    await user.type(screen.getByLabelText("Product name"), "Cola Zero")
+    await user.type(screen.getByLabelText("Pack quantity"), "320")
+    await user.click(screen.getByRole("combobox", { name: "Brand" }))
+    expect(screen.getByRole("listbox", { name: "Brands" })).toBeInTheDocument()
+    await user.type(screen.getByRole("combobox", { name: "Brand" }), "gard")
+    await user.click(screen.getByRole("option", { name: /^Gardenia/ }))
+    expect(screen.getByLabelText("Brand")).toHaveValue("Gardenia")
+    await user.click(screen.getByRole("combobox", { name: "Category" }))
+    expect(within(screen.getByRole("listbox", { name: "Categories" })).getAllByRole("option").map((option) => option.textContent)).toEqual(["Bread1 product", "Milk2 products", "Soft Drinks1 product"])
+    await user.type(screen.getByRole("combobox", { name: "Category" }), "drinks")
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}")
+    expect(screen.getByLabelText("Category")).toHaveValue("Soft Drinks")
+    await waitFor(() => expect(screen.getByLabelText("Store")).not.toBeDisabled())
+    await user.selectOptions(screen.getByLabelText("Store"), "fairprice")
+    await user.type(screen.getByLabelText("Price (SGD)"), "1.20")
+    await user.upload(screen.getByLabelText("Product picture"), new File(["image"], "new.png", { type: "image/png" }))
+    await user.click(screen.getByRole("button", { name: "Submit product for review" }))
+    await waitFor(() => expect(service.createProductRequest).toHaveBeenCalledWith(expect.objectContaining({ brand: "Gardenia", category: "soft drinks" }), "user-1", "test-token"))
   })
 
   it("offers deletion only for a pending price, not a decided one", async () => {
