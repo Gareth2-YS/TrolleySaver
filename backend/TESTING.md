@@ -143,8 +143,8 @@ Later, if a command answers `"productId": "Choose a product"` or `"observedAt": 
 .venv\Scripts\python -m pytest
 ```
 
-**What it checks:** 292 tests of the Lambda code (including the Smart Basket, its daily prices, Search, new product requests, date and pagination rules, CORS, and the security checks: upload limits, image contents, hidden characters and sign-up rules) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
-**You should see:** a row of dots, then `292 passed in …s`.
+**What it checks:** 296 tests of the Lambda code (including the Smart Basket, its daily prices, Search, new product requests, date and pagination rules, CORS, and the security checks: upload limits, image contents, hidden characters and sign-up rules) and the seed script, run against an in-memory fake of AWS. Nothing is sent to the real account.
+**You should see:** a row of dots, then `296 passed in …s`.
 
 ### 1.2 Template check
 
@@ -161,7 +161,7 @@ sam validate --lint
 ```
 
 **What it checks:** the deployed backend over real HTTP, exactly as the frontend will use it. It signs up a throwaway user, logs in and compares a basket. It then uploads a photo (refused for a fake product), submits prices and moderates as a throwaway admin. It also checks CORS: API responses name only the local dev server and the deployed site, and the photo bucket accepts uploads from the site. Finally it proposes a new product with a picture, approves it and finds it in the catalog, and proposes a second one that its owner deletes while it's pending. Everything it created is deleted at the end, including the published product. Takes about a minute.
-**You should see:** 71 lines starting with `PASS`, then:
+**You should see:** 70 lines starting with `PASS`, then:
 
 ```
 PASS  deleting an approved request -> 409
@@ -683,7 +683,7 @@ Check [Common problems](#common-problems) first. Then:
 
 ## 7. Pre-handoff checklist
 
-- [ ] 1.1: `pytest` shows `292 passed`
+- [ ] 1.1: `pytest` shows `296 passed`
 - [ ] 1.2: `sam validate --lint` is clean
 - [ ] 1.3: `smoke_test.py` says `All checks passed`
 - [ ] 2: the catalog is in dev, and `invoke.py products` lists 24 products
@@ -1091,9 +1091,9 @@ Test names are in `tests/test_search.py`, which runs the whole search Lambda aga
 .venv\Scripts\python -m pytest tests\test_search.py -v
 ```
 
-**What it checks:** 25 tests, using an in-memory fake of AWS: text search, each filter alone and combined, the price filter against the lowest price, store prices and `lowestPrice`, stale prices, facets, an empty catalog, and every validation error.
+**What it checks:** 29 tests, using an in-memory fake of AWS: text search, each filter alone and combined, the price filter against the lowest price, store prices and `lowestPrice`, stale prices, facets, an empty catalog, and every validation error.
 
-**You should see:** `25 passed`.
+**You should see:** `29 passed`.
 
 ### 9.2 Call the search Lambda
 

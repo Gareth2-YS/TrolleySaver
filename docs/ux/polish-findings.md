@@ -3,6 +3,8 @@
 **Reviewed:** `main` at b59fe7d (after PR #15) · **Date:** 6 Nov 2026
 **Pages:** Smart Basket · Search · Contribute (contributor + admin) · Log in · Register
 
+> **Status, 8 Nov:** findings 1–17 were addressed in the 6 Nov redesign ("Revamped UI and added enhancements") and the changes since. For example, dark mode now switches on, there's a light/dark toggle, the fonts are bundled, store names come from the catalogue, and "Potential savings, up to —" is gone. The data item under "Outside this pass" is separate and not checked here. Kept as a record of the review.
+
 The findings are grouped in the order I'd fix them. File paths are relative to the repository root.
 
 ## Broken or misleading (5)
