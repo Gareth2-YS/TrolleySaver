@@ -69,12 +69,6 @@ def test_price_max_age_is_configurable(basket_catalog, monkeypatch):
     assert store(result, "coldstorage")["complete"]
 
 
-def test_prices_updated_is_the_latest_job_run(basket_catalog):
-    put_stored_price(MILK_ID, "fairprice", 363, computed_at="2026-10-26T16:05:00.000Z")
-    status, result = compare({"items": [{"productId": WHITE_ID, "quantity": 1}]})
-    assert result["pricesUpdated"] == "2026-10-26T16:05:00.000Z"
-
-
 def test_prices_updated_is_null_before_the_first_run(aws):
     status, result = compare({"items": [{"productId": MILK_ID, "quantity": 1}]})
     assert status == 200 and result["pricesUpdated"] is None and result["basket"]["recommendation"] is None

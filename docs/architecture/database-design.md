@@ -196,7 +196,7 @@ flowchart LR
 | **When** | 00:05 SGT daily (EventBridge Scheduler). A price submitted today reaches the basket after tonight's run. The job can also be run for one date, or to backfill the last N days. |
 | **Product timestamp** | Each product whose price changed at any store gets `priceUpdatedAt` set to the run's `computedAt` (UTC). It isn't touched when nothing new came in, and a deleted product is never recreated. `GET /products` returns it, as `null` for a product never priced. A one-off `syncProductTimestamps` run fills it in from the newest `computedAt` in `retailer-price`. |
 
-The table is small (at most products × stores rows, 72 today), so the basket reads it whole on each request.
+The basket fetches only the rows it needs, by their full key (`productId`, `retailerId`): each basket product and Healthier Choice candidate at each chosen store, with BatchGetItem (up to 100 keys a call). Search lists the whole catalogue, so it reads the table whole (at most products × stores rows, 72 today).
 
 ## 5. New products (`product-request`)
 

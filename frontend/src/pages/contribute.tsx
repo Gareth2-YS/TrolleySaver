@@ -49,6 +49,7 @@ import { inputClass } from "../lib/styles"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
 import { emptyFacets, emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
+import { titleCase } from "../lib/suggestions"
 
 // Whether the price is for a product already on TrolleySaver, or for one being added.
 type Mode = "existing" | "new"
@@ -468,7 +469,7 @@ function ContributorWorkspace({ service }: { service: SubmissionService }) {
           >
             <option value="">All types</option>
             {productCategories.map((category) => (
-              <option key={category} value={category}>{category.charAt(0).toLocaleUpperCase() + category.slice(1)}</option>
+              <option key={category} value={category}>{titleCase(category)}</option>
             ))}
           </Select>
         </div>

@@ -217,14 +217,15 @@ sequenceDiagram
     Note over B,D: whenever the basket page loads
     B->>A: POST /basket/compare {items: [{productId, quantity}]} (no token)
     A->>L: request
-    L->>D: scan product, retailer and retailer-price (small tables)
+    L->>D: scan product and retailer (small tables)
+    L->>D: BatchGetItem retailer-price: each (product, store) pair needed
     L-->>B: basket + healthierBasket: ranked stores, lines, unpriced items, savings, extra cost
 ```
 
 - **Prices:** each store's price for a product is the **daily average** stored in `retailer-price` (rules in [database-design.md §4](database-design.md#4-daily-average-price-retailer-price)).
   - `price-aggregator` averages the accepted submissions that entered the system during the previous Singapore day, separately for each product and store. Pairs with no new submissions keep their last average.
-  - The basket (`common/pricing.py`) ignores averages more than 30 days old (`PRICE_MAX_AGE_DAYS`).
-  - New prices reach the basket after the next nightly run, and the response's `pricesUpdated` says when that was.
+  - The basket (`common/pricing.py` `prices_by_key`) fetches only the rows it needs, by key: every basket product and Healthier Choice candidate at every chosen store, up to 100 keys per BatchGetItem. It ignores averages more than 30 days old (`PRICE_MAX_AGE_DAYS`).
+  - New prices reach the basket after the next nightly run, and the response's `pricesUpdated` says when that was: the newest `priceUpdatedAt` in the catalogue, which the job sets on each product it prices.
 - **Comparison:** `common/basket.py` totals the basket at every store and lists unpriced items. It ranks stores that price everything first, cheapest first, and compares the cheapest with each other store, over the full basket or only the items both price.
 - **Healthier basket:** `common/healthier.py` swaps each product for the cheapest Healthier Choice product in its category at each store, where one exists. The same comparison then runs on the swapped basket, and the extra cost against the original is reported.
 - The Lambda is stateless and public. The frontend keeps the basket.
@@ -310,7 +311,7 @@ sequenceDiagram
 | Product request | 1 GetItem, 1 Query (daily limit), 1 Scan of `product` + 1 Query of pending requests (duplicates), 1–2 S3 HeadObject, 1 PutItem |
 | Product approval | 1 GetItem, 1 Scan of `product` (duplicates), 1 S3 copy + 1 delete, 1 transaction of 4 writes |
 | Product search | 3 Scans (product, retailer and retailer-price tables) |
-| Basket comparison | 3 Scans (product, retailer and retailer-price tables, about 100 small items in all) |
+| Basket comparison | 2 Scans (product and retailer, 27 small items) + ⌈(N + C) × M / 100⌉ BatchGetItem on retailer-price, for N basket products, C Healthier Choice candidates and M chosen stores (1 call for most baskets) |
 | Nightly daily-price job | 1 Query on `ByStatus` (accepted submissions) + 1 BatchWrite per 25 updated prices, once a day |
 
 - **Lambda functions use 256 MB on arm64** (cheaper per millisecond than x86), and typical calls take well under a second.
