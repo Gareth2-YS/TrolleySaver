@@ -54,7 +54,7 @@ describe("log in and register modal", () => {
   it("opens over Smart basket when /login is visited directly, and names the tab", async () => {
     renderApp("/login", service())
     expect(await screen.findByRole("dialog", { name: "Welcome back" })).toHaveProperty("open", true)
-    expect(screen.getByRole("heading", { name: "Smart basket comparison" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Smart Basket Comparison" })).toBeInTheDocument()
     await waitFor(() => expect(document.title).toBe("Log in · TrolleySaver"))
   })
 
@@ -80,7 +80,7 @@ describe("log in and register modal", () => {
     renderApp("/search", service("user"))
     await user.click(await screen.findByRole("link", { name: "Log in" }))
     expect(path()).toBe("/login")
-    expect(screen.getByRole("heading", { name: "Search and filter groceries" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Search and Filter Groceries" })).toBeInTheDocument()
 
     await logIn(user)
     await waitFor(() => expect(path()).toBe("/search"))
