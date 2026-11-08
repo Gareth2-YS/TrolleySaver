@@ -2,6 +2,8 @@
 
 **Date:** 7 Nov 2026 · **From:** Gareth (backend) · **To:** frontend developers · **Status:** deployed to `dev`; **please check the site** (§5)
 
+> **Update, 8 Nov:** §3 is done. YHKok merged the two lists into one "Your submissions" list, with All / Prices / New products filters and a "Pending only" switch. Some details in §1 changed with it: the basket's button is "Reset filters" (the empty list offers "Clear search and filters"), the Healthier Choice pill sits under a product's details, and Search's and the basket's dropdowns count their options. [docs/qa/test-cases.md](../qa/test-cases.md) describes the screens as they are now.
+
 A batch of enhancements, frontend and backend. The frontend parts are built. One part is left for the developer reworking the two submission panels (§3).
 
 ## 1. What's new on the site
@@ -77,7 +79,7 @@ On the deployed site, run these cases in [docs/qa/test-cases.md](../qa/test-case
 - **Frontend:**
   - `lib/theme.test.ts` and `lib/format.test.ts`
   - the new basket, Search, contribute and header tests
-- **Smoke test (71 checks):**
+- **Smoke test (70 checks):**
   - deleting a pending price (204) and an accepted one (409)
   - a second price for the same product and store (409)
   - the owner's photo link working

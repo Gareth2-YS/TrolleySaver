@@ -1,6 +1,6 @@
 # Manual UI test cases
 
-A checklist for testing the TrolleySaver web app by hand in a browser, page by page. Each case says what to do and what you should see, quoting the text on screen. The cases were written from the frontend code (`frontend/src`) on 4 Nov 2026, and updated on 6 Nov for the redesigned Smart basket, enlarging pictures, the review fixes, the deployed site, and then the new look, the log-in window, loading spinners, the Healthier Choice Symbol on the new product form, and modals that keep the page behind them still.
+A checklist for testing the TrolleySaver web app by hand in a browser, page by page. Each case says what to do and what you should see, quoting the text on screen. The cases were written from the frontend code (`frontend/src`) on 4 Nov 2026, and updated on 6 Nov for the redesigned Smart basket, enlarging pictures, the review fixes, the deployed site, and then the new look, the log-in window, loading spinners, the Healthier Choice Symbol on the new product form, and modals that keep the page behind them still. On 7–8 Nov they were brought up to date with the redesigned price upload page and "Your submissions" list, the theme toggle, deleting pending prices, and the filters that count their options; every quoted text was checked against the code on 8 Nov.
 
 ⭐ marks the **key** cases: the ones that must pass before a demo, a handoff or the final report.
 
@@ -9,7 +9,7 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 ## Before you start
 
 - **Testing the deployed site** ([11. Deployed site](#11-deployed-site)) needs no local setup: open the site URL printed by `python infra\deploy.py` (the stack output `SiteUrl`). Everything below is for running the app locally.
-- **Point the app at dev.** In `frontend/.env.local` (copy it from `.env.example`, see [frontend/README.md](../../frontend/README.md#local-ui)):
+- **Point the app at dev.** In `frontend/.env.local` (copy it from `.env.example`, see [frontend/README.md](../../frontend/README.md#run-it-locally)):
   - `VITE_AUTH_MODE=cognito`, `VITE_PRICE_SUBMISSION_MODE=api`, `VITE_SMART_BASKET_MODE=api`
   - `VITE_API_BASE_URL`, `VITE_AWS_REGION`, `VITE_COGNITO_USER_POOL_ID` and `VITE_COGNITO_CLIENT_ID`, from the dev stack's outputs ([backend/README.md → Environment](../../backend/README.md#environment)). Don't commit these values.
 
@@ -31,9 +31,9 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 |---|--:|--:|--:|
 | [1. Navigation and access](#1-navigation-and-access) | 12 | 6 | 0 |
 | [2. Register and log in](#2-register-and-log-in) | 17 | 5 | 1 |
-| [3. Search & filter](#3-search--filter) | 19 | 7 | 0 |
+| [3. Search & filter](#3-search--filter) | 22 | 8 | 0 |
 | [4. Smart Basket](#4-smart-basket) | 23 | 11 | 0 |
-| [5. Contributor: submit a price](#5-contributor-submit-a-price) | 27 | 11 | 0 |
+| [5. Contributor: submit a price](#5-contributor-submit-a-price) | 28 | 11 | 0 |
 | [6. Contributor: new product requests](#6-contributor-new-product-requests) | 26 | 12 | 0 |
 | [7. Admin: price review](#7-admin-price-review) | 8 | 4 | 0 |
 | [8. Admin: product request review](#8-admin-product-request-review) | 10 | 5 | 0 |
@@ -41,7 +41,7 @@ The automated tests (backend, frontend, smoke test) are run by one script instea
 | [10. Known issues](#10-known-issues) | 2 | 0 | 0 |
 | [11. Deployed site](#11-deployed-site) | 10 | 6 | 1 |
 | [12. Look and feel](#12-look-and-feel) | 11 | 4 | 0 |
-| **Total** | **172** | **73** | **2** |
+| **Total** | **176** | **74** | **2** |
 
 ## 1. Navigation and access
 
@@ -107,6 +107,9 @@ Since 6 Nov, Log in and Register open as a window over the page you're on, and t
 | SRCH-17 | Paste 150 characters into "Search product or brand". | The box stops at 100 characters and results still load. There's no "Catalogue unavailable". | | Not done | Added 6 Nov. |
 | SRCH-18 | Find a Healthier Choice product with a long name (or look at one at phone width), next to a product that isn't. | The "Healthier Choice" pill sits first among the card's labels (with e.g. "Soft Drinks" and "Halal"), in green. The pictures and names of cards in the same row start at the same height, and "Add to basket" sits bottom-right on every card. | | Not done | Changed 7 Nov: the pill used to sit above the name and push it down. |
 | SRCH-19 | Open Filters and type `3.639` into "From". | The box shows `3.63`: a third decimal place can't be entered. | | Not done | Added 7 Nov. |
+| SRCH-20 | Click "Filters" and open "Type", "Brand" and "Dietary". Choose a brand, then open "Type" again. Turn on "Healthier Choice only" and open them again. | Each option shows how many products it would give, e.g. "Milk (5)". Options that would give nothing aren't listed. Choosing a brand, or turning on the switch, narrows the other lists and their counts. | ⭐ | Not done | Added 8 Nov. |
+| SRCH-21 | Set a Type, a Brand, the Healthier Choice switch and a price range. Look under the filters, then click each chip. | An "Applied filters" row shows a chip for each one: "Type: …", "Brand: …", "Healthier Choice only", "Price …". Clicking a chip removes just that filter, and the results update. | | Not done | Added 8 Nov. |
+| SRCH-22 | Choose a Type and a Brand that go together (e.g. Milk and Magnolia), then search for a word that matches neither (e.g. "rice"). | "No matching products" and "Type: Milk and Brand: Magnolia don’t go together. Clear one to see what’s available.", with "Clear type", "Clear brand" and "Clear search and filters" buttons. Both pickers are outlined in amber with "Nothing fits your other filters". Each button clears what it says. | | Not done | Added 8 Nov. |
 
 ## 4. Smart Basket
 
@@ -116,7 +119,7 @@ Rewritten 6 Nov for the redesigned page (pictures, Healthier options, per-accoun
 |---|---|---|:-:|---|---|
 | BSK-01 | Open `/basket` with an empty basket. Click "Browse groceries". | "Smart basket comparison", "Your basket is empty" and "Add groceries to compare the full basket total at every supermarket." "Price per item" says "Add items to compare prices at each store." and the savings box says "Add groceries to see what you could save." "Browse groceries" puts the cursor in the search box. | | Not done | |
 | BSK-02 | Under "Add groceries", type "milk" in "Search by product, brand or category" and click "Add" on one. Then search "zzzz". | Only matching products are listed. The product joins "Your basket" ("1 product · 1 pack") and its button reads "Add (1)". "zzzz" shows "No products match “zzzz”." | ⭐ | Not done | |
-| BSK-03 | Choose a product type in "All product types", then a brand in "All brands". Set both back. | Each narrows the list (both together narrow further). With nothing left: "No products match these filters." | | Not done | |
+| BSK-03 | Choose a product type in "All product types", then open "All brands". Set both back. Then choose a brand first and open the product types. Type a search too. | Each narrows the list, and each picker only offers what the search and the other picker leave, each with its count, e.g. "Milk (4)". A choice that no longer fits anything (after changing the search) is outlined in amber, with "Nothing fits your other filters" under it. With nothing left: "No products match these filters." | | Not done | Changed 7 Nov: the pickers count their options. |
 | BSK-04 | Use + and − on a basket item, then press its bin. Add a few items and click "Reset". | + and − change the quantity and the totals; − stops at 1. The bin ("Remove {product} from basket") removes the whole line, at any quantity. + stops at 99. "Reset" empties the basket. | | Not done | Changed 7 Nov: the bin is always there, beside the quantity. |
 | BSK-05 | Add three or more products that every store prices. | "Compare by retailer" shows a card per store with its total. The cheapest has a "Cheapest" badge and "Lowest total"; the others show "+$X.XX more" (or "Same total"). Below the items: "Total at {store} · cheapest". The savings box at the top shows "Save up to $X.XX at {cheapest store} instead of {dearest store}". | ⭐ | Not done | |
 | BSK-06 | Click another store's card. Then press the arrow keys. | The card is selected, each item's price and the total switch to that store ("Total at {store}"), and the line above the cards reads "N priced · N missing at {store}". The arrow keys move between the cards in the same way, wrapping round. | ⭐ | Not done | |
@@ -134,7 +137,7 @@ Rewritten 6 Nov for the redesigned page (pictures, Healthier options, per-accoun
 | BSK-18 | Add a product with the Healthier Choice Symbol. | It shows a "Healthier Choice" badge with a leaf in the search list and in the basket. | | Not done | |
 | BSK-19 | **API mode only.** Add a product that has a Healthier Choice alternative (e.g. white bread), one that is already Healthier Choice, and one with no alternative. Click "Swap N items". Then "Undo" under one item. | Under the store cards: "Healthier basket at {store}", "Swaps in {products}." and "1 item is already Healthier Choice.", its total, and "$X.XX more (N%)" (or "$X.XX less", or "Same as your basket"). The button swaps every item listed at once; each shows "Swapped from …", and the healthier basket line goes. "Undo" puts back just that item. | ⭐ | Not done | Added 6 Nov. The local demo mode has no healthier basket. |
 | BSK-20 | Under "Add groceries", clear the search so the whole catalogue is listed. | The list fades out at its bottom edge, and under it reads "N products · scroll the list for more". | | Not done | Added 6 Nov. |
-| BSK-21 | Under "Add groceries", type a search, and choose a product type and a brand. Click "Clear filters". Then search for "zzzz". | "Clear filters" is greyed out until something is set. It empties the search and sets both pickers back to "All", and the whole catalog shows. "zzzz" shows "No products match “zzzz”." with its own "Clear filters" button. | ⭐ | Not done | Added 7 Nov. |
+| BSK-21 | Under "Add groceries", type a search, and choose a product type and a brand. Click "Reset filters". Then search for "zzzz" and click "Clear search and filters". | "Reset filters" is greyed out until a type or brand is chosen. It sets both pickers back to "All" and keeps the search. "zzzz" shows "No products match “zzzz”." with a "Clear search and filters" button, which empties the search and both pickers, and the whole catalog shows. | ⭐ | Not done | Added 7 Nov; updated 8 Nov for the "Reset filters" button. |
 | BSK-22 | Put 3 of a product in the basket and press its bin. | The whole line goes at once, and the totals update. | ⭐ | Not done | Added 7 Nov. |
 | BSK-23 | Under "Add groceries", find a Healthier Choice product with a long name. | The "Healthier Choice" pill sits under the product's details, so the name starts level with the picture, as on rows without it. | | Not done | Changed 7 Nov: it used to sit above the name. |
 
@@ -150,7 +153,7 @@ Log in as a contributor and open `/contribute`.
 | PRC-04 | Click "Submit price" with nothing filled in. | "Choose a product", "Choose a store" and "Price must be greater than $0". The price box starts empty (showing "0.00") and the date stays at today. | | Not done | |
 | PRC-05 | Enter prices `0`, `1000.01`, then `1000`. | "Price must be greater than $0", then "Price must be $1,000 or less". `1000` is allowed. | | Not done | |
 | PRC-06 | Open the "Date seen" picker. Then type tomorrow's date, then a date 31 days ago. | The picker only offers the last 30 days up to today ("Within the last 30 days" shows under it). Typed dates give "Observed date cannot be in the future" and "Observed date must be within the last 30 days". | | Not done | |
-| PRC-07 | Submit a usual price with no photo: Magnolia Fresh Milk, FairPrice, $3.63, today. | A "Price accepted. It shows on TrolleySaver after the nightly update." message, and the form clears. The price is first in "Your submissions" with a "Price" tag, an "Accepted" badge, "Seen {date}", "No photo" and "Sent {time}". The count beside "Your submissions" goes up. | ⭐ | Not done | Changed 7 Nov: redesigned page. |
+| PRC-07 | Submit a usual price with no photo: Magnolia Fresh Milk, FairPrice, $3.63, today. | A "Price accepted. It shows on TrolleySaver after the nightly update." message, and the form clears. The price is first in "Your submissions" with a "Price" tag, an "Accepted" badge, "Seen {date}", "No image" and "Sent {time}". The count beside "Your submissions" goes up. | ⭐ | Not done | Changed 7 Nov: redesigned page. |
 | PRC-08 | Submit an unusual price with a photo: the same milk at $20 at another store. | A "Price sent to an admin to check, as it's far from the usual range." message. It shows "Pending review", with your photo as the row's picture, "This price is far from the usual range, so an admin checks it first." and a red "Delete" button. | ⭐ | Not done | Changed 7 Nov: redesigned page. |
 | PRC-09 | Click "Add a shelf label or receipt" and choose a JPG under 5 MB. Click "Remove". Then Tab to the photo area and press Enter. | "Preparing image…" briefly, then a preview of the photo; "Remove" clears it. Enter opens the file picker. | | Not done | Changed 7 Nov. |
 | PRC-10 | Choose a GIF (pick "All files" in the picker), then the empty PNG, then the PNG over 5 MB. | "Choose a JPG or PNG image", "Choose a non-empty image", then "Image must be 5 MB or smaller". "Submit price" is disabled while a message shows. | | Not done | |
@@ -166,11 +169,12 @@ Log in as a contributor and open `/contribute`.
 | PRC-20 | Enter the price `3.635` and submit. Then `3.6`. | `3.635`: "Enter the price in dollars and cents, e.g. 3.63". `3.6` is accepted as $3.60. | ⭐ | Not done | Added 6 Nov: it used to be rounded silently. |
 | PRC-21 | Rename a text file to `shelf.png` and choose it as the price photo. | "This file isn't a readable JPG or PNG image", no preview, and "Submit price" is disabled. | | Not done | Added 6 Nov. |
 | PRC-22 | Take a photo with a phone that records location (check it has GPS with any EXIF viewer). Submit an unusual price with it. As an admin, open the flagged price, save the evidence photo and check it in the EXIF viewer. Also try a photo over 2560 px wide. | The saved photo has no GPS or other EXIF data. A wide photo comes back at most 2560 px on its long side, the right way up. | ⭐ | Not done | Added 6 Nov: the browser redraws every photo before upload. |
-| PRC-23 | In "Your submissions", click the picture of a price you sent with a photo. Close it with ✕, Esc, or by clicking outside. | Your photo opens large, titled "Price evidence for {product}". All three ways close it. A price without a photo shows its category icon and "No photo". | | Not done | Changed 7 Nov: redesigned page. |
+| PRC-23 | In "Your submissions", click the picture of a price you sent with a photo. Close it with ✕, Esc, or by clicking outside. | Your photo opens large, titled "Price evidence for {product}". All three ways close it. A price without a photo shows a dashed box saying "No image" instead, which doesn't open. | | Not done | Changed 7 Nov: redesigned page. |
 | PRC-24 | Open `/contribute` in two tabs. As an admin, accept a pending price. In the tab that hasn't refreshed, delete it. | "This submission is already accepted.", and the list refreshes, showing it accepted without a delete button. | | Not done | Added 7 Nov. |
 | PRC-25 | Have an admin reject one of your prices (ADP-04), then submit a corrected price for the same product and store that day. | It's accepted: a rejected price doesn't count toward one-a-day. | | Not done | Added 7 Nov. |
 | PRC-26 | With prices and new products in your list, click "Prices", then "New products", then "All". | Each filter shows only its kind, with its count beside it, newest first. A filter with nothing in it says "Nothing here yet". | | Not done | Added 7 Nov. |
 | PRC-27 | Choose a product, store and price. Switch to the "New product" tab and back. Then type a name that isn't in the catalog and click "Add “{name}” as a new product". | Store, price, date and photo keep their values both ways, and the chosen product comes back. The button switches to "New product" with the typed name in "Product name", ready to type. | ⭐ | Not done | Added 7 Nov. |
+| PRC-28 | With some pending and some decided items in "Your submissions", turn on "Pending only". Switch between "All", "Prices" and "New products". Turn it off. | Only items still waiting for an admin are listed (flagged prices and pending new products), and the counts beside the filters count only those. With nothing pending: "Nothing waiting for review" and "An admin has already checked everything here. Turn off Pending only to see it." Off: everything again. | | Not done | Added 8 Nov. |
 
 ## 6. Contributor: new product requests
 
@@ -212,7 +216,7 @@ Log in as an admin. You need a flagged price from PRC-08.
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|
 | ADP-01 | Open `/contribute`. | "Review price evidence" (no small label above it), and a count of flagged prices with "Awaiting review". Then "Review new product requests" and "Products and prices awaiting review" ("Administrator only"). There's no price form. | ⭐ | Not done | |
-| ADP-02 | Look at a flagged price. | The photo, "Price evidence" and "Help shoppers trust this price" (or "No image" when none was attached). Then the product, "Pending Review", the price in SGD, the store, the observed date, "Submitted by {name} · {email}", "Submitted at" and "Evidence file {file name} · {size} MB". | ⭐ | Not done | |
+| ADP-02 | Look at a flagged price. | The photo, "Price evidence" and "Help shoppers trust this price" (or "No image" when none was attached). Then the product, "Pending review", the price (e.g. "$20.00"), the store, the observed date, "Submitted by {name} · {email}", "Submitted at" and "Evidence file {file name} · {size} MB". | ⭐ | Not done | |
 | ADP-03 | Click "Accept". | A "Flagged price accepted" message. The card disappears and the count goes down. The contributor sees "Accepted" (PRC-16). | ⭐ | Not done | |
 | ADP-04 | Click "Reject", then "Confirm rejection" with no reason. Type a reason and confirm. Also try "Cancel". | A "Reason for rejection" box ("Explain what needs to be corrected"). No reason: "Enter a reason before rejecting this submission." With a reason: a "Flagged price rejected" message, and the card disappears. "Cancel" closes the box. | ⭐ | Not done | |
 | ADP-05 | Open the queue in two admin tabs. Accept a price in the first, then accept the same one in the second. | "This submission is already accepted." The second tab's queue refreshes. | | Not done | |

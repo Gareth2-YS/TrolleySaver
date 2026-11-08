@@ -44,7 +44,7 @@ The site, the API and the input fields were hardened on 6 Nov. Most of it needs 
 
 - API responses now carry `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
 - `GET /products/search` refuses `category`, `brand` or `dietary` over 100 characters, like `q`.
-- Every table now has point-in-time recovery. Data deleted by mistake can be restored to any second in the last 35 days.
+- Tables the template creates now have point-in-time recovery. **Correction, 8 Nov:** dev's hand-made tables don't have it yet; turning it on is in [deployment.md §8](../deployment.md#8-known-limitations).
 
 ## 4. Please check
 

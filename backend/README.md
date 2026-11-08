@@ -14,7 +14,7 @@ Serverless backend for **login** (Cognito), **product search**, **community pric
 
 | Path | What it is |
 |---|---|
-| `template.yaml` | Cognito pool, client, groups and triggers; photo bucket; DynamoDB tables (only for new environments); REST API; Lambdas |
+| `template.yaml` | Cognito pool, client, groups and triggers; photo bucket; DynamoDB tables (only for new environments); REST API; Lambdas; the web app's site bucket, CloudFront distribution and security headers |
 | `samconfig.toml` | Deploy settings for `dev` |
 | `lambdas/common/` | Shared helpers: HTTP responses and errors, caller identity, DynamoDB/S3 handles, validation, image upload links and checks (`images.py`), product-request rules (`product_requests.py`), the daily average price rules (`daily_prices.py`), product search and filters (`search.py`), and the basket's price lookup (`pricing.py`), comparison (`basket.py`) and Healthier Choice swaps (`healthier.py`) |
 | `lambdas/handlers/` | One module per Lambda |
@@ -22,7 +22,7 @@ Serverless backend for **login** (Cognito), **product search**, **community pric
 | `scripts/create_admin.py` | Creates an admin account |
 | `scripts/invoke.py` | Calls any Lambda directly as any user, without Cognito |
 | `scripts/basket_eval.py` | Smart Basket evaluation: checks the backend's totals and savings against figures worked out from the spreadsheet, for the baskets in `scripts/basket_cases.json` |
-| `scripts/smoke_test.py` | 71 end-to-end checks over real HTTP, including the Smart Basket, CORS for the local and deployed sites, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
+| `scripts/smoke_test.py` | 70 end-to-end checks over real HTTP, including the Smart Basket, CORS for the local and deployed sites, a product request from proposal to approval, and deleting a pending one; cleans up after itself |
 | `tests/` | Unit tests (pytest + moto, no AWS needed) |
 
 ## Setup
@@ -73,11 +73,11 @@ Run these from the `backend` folder:
 
 ## Authentication in brief
 
-- **Sign-up:** public sign-ups are confirmed automatically by the **PreSignUp** trigger. The **PostConfirmation** trigger then adds the user to `user` and creates their profile row.
+- **Sign-up:** the **PreSignUp** trigger checks the name and email the way the registration form does, then confirms public sign-ups automatically. The **PostConfirmation** trigger then adds the user to `user` and creates their profile row.
 - **Admins:** created only by `scripts/create_admin.py` ([TESTING.md §5](TESTING.md#5-create-an-admin-account)).
 - **Tokens:** API Gateway's Cognito authorizer requires the scope `aws.cognito.signin.user.admin`, so it accepts **access tokens** and rejects ID tokens.
 - **Identity:** Lambdas take the user id from the verified `sub` claim and check `cognito:groups` for `admin`.
 
 ## Tearing down
 
-`sam delete --stack-name trolleysaver-dev` removes the dev Cognito pool, with every account in it, plus the API, Lambdas and photo bucket. Empty the bucket first with `aws s3 rm s3://trolleysaver-dev-photos-<account-id> --recursive`. The dev tables and their data are left alone, because the stack doesn't own them.
+`sam delete --stack-name trolleysaver-dev` removes the dev Cognito pool, with every account in it, plus the API, Lambdas, photo bucket and the web site. Empty both buckets first; the steps are in [docs/deployment.md §7](../docs/deployment.md#7-rolling-back-and-troubleshooting). The dev tables and their data are left alone, because the stack doesn't own them.

@@ -98,7 +98,7 @@ That's the whole deployment. It stops at the first problem and says what to do. 
 | `--skip-tests` | Skip step 2, e.g. right after a green CI run on the same commit |
 | `--backend-only` | Deploy the stack but not the web app |
 | `--frontend-only` | Rebuild and upload only the web app (much faster; the stack must already exist) |
-| `--smoke` | Finish with the end-to-end smoke test: 71 checks against the live API, cleaning up after itself |
+| `--smoke` | Finish with the end-to-end smoke test: 70 checks against the live API, cleaning up after itself |
 | `--env staging` | Deploy another environment (needs a `[staging.*]` section in `backend/samconfig.toml`) |
 
 ### What each step does, and why
@@ -168,7 +168,7 @@ Other protections:
 - **Uploads:** S3 enforces each file's type and size. The backend then checks the file's first bytes really are a JPG or PNG, and deletes it if not. The browser redraws every photo before upload, which drops its metadata, such as the GPS location phones record.
 - **Text:** names, brands, categories, tags, search terms and reasons can't contain hidden characters, such as a zero-width space or a right-to-left override. The sign-up trigger applies the registration form's name rules, so calling Cognito directly can't skip them.
 - **API responses** are sent with `nosniff` and `Cache-Control: no-store`, so nothing keeps a copy of people's data.
-- **Backups:** every table has point-in-time recovery: it can be restored to any second in the last 35 days. See [7. Rolling back and troubleshooting](#7-rolling-back-and-troubleshooting).
+- **Backups:** tables the template creates have point-in-time recovery, so they can be restored to any second in the last 35 days. **Dev's tables were made by hand and don't have it yet** ([8. Known limitations](#8-known-limitations)).
 
 ## 4. How settings reach the frontend
 
@@ -215,12 +215,12 @@ CI doesn't deploy. Deploying needs AWS credentials, and the team account only is
 - **Failed backend update:** CloudFormation rolls back by itself, and the API keeps serving the previous version.
 - **Failed frontend upload:** the old `index.html` stays in place until the new one is uploaded, so the site keeps working.
 
-**To roll back a release:** check out the previous good commit and deploy again:
+**To roll back a release:** check out the previous good commit, deploy it, then go back to where you were (`git checkout -`):
 
 ```powershell
-git checkout <good commit>
-python infra\deploy.py --profile <profile> --skip-tests
-git checkout -     # back to where you were
+git checkout <good commit>;
+python infra\deploy.py --profile <profile> --skip-tests;
+git checkout -
 ```
 
 **Common problems:**
@@ -238,7 +238,7 @@ git checkout -     # back to where you were
 | `Refused to load` / `Refused to connect` (Content-Security-Policy) in the browser console | The page used a host the policy doesn't list. Add it to `FrontendSecurityHeaders` in `template.yaml` ([Security headers](#security-headers)), then deploy the stack. |
 | `429` / `Too Many Requests` | Over the [API throttle](#limits-on-abuse), or a person's upload-link limit. Wait and retry. |
 
-**To restore a table** after data is deleted by mistake, restore it to a new table as it was at a moment in the last 35 days, then copy back what's missing:
+**To restore a table** after data is deleted by mistake (only once point-in-time recovery is on, see [8. Known limitations](#8-known-limitations)), restore it to a new table as it was at a moment in the last 35 days, then copy back what's missing:
 
 ```powershell
 aws dynamodb restore-table-to-point-in-time --source-table-name trolleysaver-dev-price-submission --target-table-name trolleysaver-dev-price-submission-restored --restore-date-time 2026-11-06T09:00:00Z
@@ -254,6 +254,13 @@ These are known and accepted for this project.
 
 - **Email addresses aren't verified.** Sign-up auto-confirms accounts (a team decision: no verification codes). Anyone can register with any address.
 - **Abandoned uploads.** When a submission fails after its photo was uploaded, the photo stays in the bucket with nothing pointing to it. There's no automatic clean-up, because a blanket expiry rule could delete evidence that's still in use. The upload-link limit (60 per user per hour) caps how fast this can grow.
+- **Dev's tables have no point-in-time recovery.** They were created by hand, so the template's setting doesn't reach them, and data deleted by mistake can't be restored. Turning it on costs cents a month at this size. Run this once, with AWS keys for the team account:
+
+  ```powershell
+  foreach ($t in "product","retailer","price-submission","user","retailer-price","product-request") { aws dynamodb update-continuous-backups --table-name "trolleysaver-dev-$t" --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true --query "ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus" --output text }
+  ```
+
+  It prints `ENABLED` six times.
 - **Security measures not in place**, because of cost or the work involved:
   - **Per-visitor rate limiting** (AWS WAF, about US$6 a month or more). The API throttle is shared by everyone, so one heavy caller can slow the API for others.
   - **Cognito threat protection** (compromised-password and unusual sign-in checks; a paid tier).
