@@ -593,7 +593,7 @@ How it decides:
   - **On each line:** `priceDate` is the day the average comes from, and `submissionCount` is how many prices went into it.
   - **Days with no new prices:** the last average is kept, up to `priceMaxAgeDays` (30) days old.
   - **No usable price:** a product with no price at a store is listed in that store's `unpriced`, not left out.
-  - **`pricesUpdated`:** when the averages were last worked out. It's `null` if they have never been computed.
+  - **`pricesUpdated`:** when the averages were last worked out. It's `null` if they have never been computed. The basket reads it from the newest product `priceUpdatedAt`, which the nightly job sets right after storing the prices, so if a run ever stopped between the two it would show the previous run's time until the next run (rerun the job, or invoke it with `{"syncProductTimestamps": true}`).
 - **Ranking:** stores that price every line (`complete`) come first, cheapest first. Incomplete stores follow, by how many lines they price and then by total. Equal totals are ordered by store name. `totalCents` only adds up the priced lines.
 - **Recommendation:** the top-ranked store, or `null` if no store has a price for anything. When `complete` is `false`, no store sells the whole basket. Say so in the UI.
 - **Savings:** the recommended store compared with each other store.
@@ -852,6 +852,7 @@ Errors from the backend always have this shape:
 | 429 | `RATE_LIMITED` | Too many submissions this hour, or product requests today |
 | 429 | `UPLOAD_RATE_LIMITED` | More than 60 photo upload links in this clock hour |
 | 500 | `INTERNAL_ERROR` | Backend bug. Report the `requestId` to Gareth. |
+| 503 | `SERVICE_BUSY` | The database stayed throttled while the backend was reading it (e.g. the basket's prices), even after retrying for about 1.5 s. Nothing was changed; try again in a moment. |
 
 **API Gateway errors don't use that shape.** They come before the backend runs and contain only `{"message": "…"}`:
 

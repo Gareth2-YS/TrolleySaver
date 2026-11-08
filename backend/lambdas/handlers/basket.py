@@ -4,6 +4,10 @@ Public and stateless: the frontend keeps the basket and sends it whole each time
 the basket as picked and, beside it, the same basket with Healthier Choice swaps, each with the
 cheapest store, a per-store breakdown, unpriced items and savings against the other stores.
 Prices are the daily averages stored by the nightly price-aggregator job.
+
+Reads per request: one Scan of `product` (validation, product details, Healthier Choice candidates by
+category, and pricesUpdated), one Scan of `retailer` (three rows; validation needs the full list),
+and BatchGetItem on `retailer-price` for exactly the (product, store) pairs needed.
 """
 
 from datetime import datetime, timezone
@@ -12,7 +16,7 @@ from common import db
 from common.basket import compare, exact_choices
 from common.healthier import candidate_ids, extra_cost, healthier_choices
 from common.http import api_handler, parse_json_body, response
-from common.pricing import max_age_days, stored_prices
+from common.pricing import latest_price_update, max_age_days, prices_by_key
 from common.validation import validate_basket
 
 
@@ -26,7 +30,7 @@ def handler(event, context):
 
     max_age = max_age_days()
     product_ids = [line["productId"] for line in lines] + candidate_ids(lines, products)
-    prices, prices_updated = stored_prices(product_ids, retailer_ids, datetime.now(timezone.utc), max_age)
+    prices = prices_by_key(product_ids, retailer_ids, datetime.now(timezone.utc), max_age)
 
     basket = compare(lines, products, retailers, exact_choices(lines, products, prices, retailer_ids))
     healthier = None
@@ -36,7 +40,7 @@ def handler(event, context):
         healthier["swaps"] = swaps
     return response(200, {
         "priceMaxAgeDays": max_age,
-        "pricesUpdated": prices_updated,
+        "pricesUpdated": latest_price_update(products.values()),
         "basket": basket,
         "healthierBasket": healthier,
         "healthierExtra": extra_cost(basket, healthier),

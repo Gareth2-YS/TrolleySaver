@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import time
 from decimal import Decimal
 
 import boto3
@@ -109,22 +110,47 @@ def transact_write(actions):
     _dynamodb_client().transact_write_items(TransactItems=prepared)
 
 
-def batch_get(table, key_name, keys, attributes=None):
-    """Fetch items by key from one table, returning {key: item}."""
-    unique = list(dict.fromkeys(k for k in keys if k))
-    found = {}
-    for start in range(0, len(unique), 100):
-        request = {"Keys": [{key_name: k} for k in unique[start:start + 100]]}
+# BatchGetItem takes at most 100 keys per request. Keys DynamoDB leaves unprocessed (when the table is
+# throttled) are sent again after 50, 100, 200, 400 and 800 ms; still unprocessed after that, the call
+# fails rather than answering with items silently missing.
+BATCH_GET_LIMIT = 100
+BATCH_GET_ATTEMPTS = 6
+BATCH_GET_BACKOFF_SECONDS = 0.05
+
+
+def batch_get_items(table, keys, attributes=None):
+    """Fetch items from one table by their full keys (dicts, e.g. {"productId": p, "retailerId": r}).
+
+    Returns the items found, in no particular order; a key with no item is simply absent. Repeated
+    keys are fetched once. `attributes` limits what comes back (a projection). Raises a 503 ApiError
+    if DynamoDB still hasn't processed some keys after BATCH_GET_ATTEMPTS requests.
+    """
+    unique = list({tuple(sorted(key.items())): key for key in keys}.values())
+    items = []
+    for start in range(0, len(unique), BATCH_GET_LIMIT):
+        request = {"Keys": unique[start:start + BATCH_GET_LIMIT]}
         if attributes:
             request["ProjectionExpression"] = ", ".join(f"#a{i}" for i in range(len(attributes)))
             request["ExpressionAttributeNames"] = {f"#a{i}": a for i, a in enumerate(attributes)}
         pending = {table.name: request}
-        while pending:
+        for attempt in range(BATCH_GET_ATTEMPTS):
+            if attempt:
+                time.sleep(BATCH_GET_BACKOFF_SECONDS * 2 ** (attempt - 1))
             result = _dynamodb().batch_get_item(RequestItems=pending)
-            for item in result["Responses"].get(table.name, []):
-                found[item[key_name]] = item
+            items.extend(result["Responses"].get(table.name, []))
+            # Unprocessed keys come back with the request's projection, ready to resend as they are.
             pending = result.get("UnprocessedKeys") or {}
-    return found
+            if not pending:
+                break
+        else:
+            raise ApiError(503, "SERVICE_BUSY", "The service is busy right now. Please try again in a moment.")
+    return items
+
+
+def batch_get(table, key_name, keys, attributes=None):
+    """Fetch items by a single-attribute key from one table, returning {key: item}."""
+    unique = list(dict.fromkeys(k for k in keys if k))
+    return {item[key_name]: item for item in batch_get_items(table, [{key_name: k} for k in unique], attributes)}
 
 
 def scan_all(table):
