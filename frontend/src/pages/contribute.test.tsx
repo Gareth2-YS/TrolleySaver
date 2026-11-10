@@ -240,6 +240,16 @@ describe("price and image contribution workflow", () => {
     expect(await screen.findByText("Review queue is clear")).toBeInTheDocument()
   })
 
+  it("shows administrators a flagged price's photo as a thumbnail that enlarges on click", async () => {
+    const user = userEvent.setup()
+    renderContribution("admin", submissionService())
+    const name = `Price evidence for ${flaggedSubmission.productName}`
+    await user.click(await screen.findByRole("button", { name: `Enlarge image of ${name}` }))
+    const preview = screen.getByRole("dialog", { name: `Enlarged image of ${name}` })
+    expect(preview).toHaveProperty("open", true)
+    expect(within(preview).getByRole("img", { name })).toHaveAttribute("src", flaggedSubmission.photo?.previewUrl)
+  })
+
   it("allows administrators to accept flagged submissions", async () => {
     const user = userEvent.setup()
     const service = submissionService()
@@ -305,6 +315,11 @@ describe("integrated product request screens", () => {
     const approve = await screen.findByRole("button", { name: "Approve product" })
     expect(approve).toBeDisabled()
     expect(screen.getByRole("img", { name: "Price evidence for Oat milk" })).toHaveAttribute("src", requestRecord.photoUrl)
+    // Both pictures are thumbnails that enlarge on click.
+    expect(screen.getByRole("button", { name: "Enlarge image of Product picture for Oat milk" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Enlarge image of Price evidence for Oat milk" }))
+    expect(screen.getByRole("dialog", { name: "Enlarged image of Price evidence for Oat milk" })).toHaveProperty("open", true)
+    await user.keyboard("{Escape}")
     await user.clear(screen.getByLabelText("Category")); await user.type(screen.getByLabelText("Category"), "plant milk")
     await user.click(screen.getByLabelText("Healthier Choice Symbol"))
     await user.click(screen.getByRole("checkbox", { name: /I reviewed the packaging/ }))
