@@ -772,9 +772,8 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
       <ProductRequestReview service={service} />
 
       <section className="surface-card p-5 sm:p-7">
-        <div className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div><h2 className="font-display text-xl font-extrabold">Review Flagged Price Submissions</h2><p className="mt-1 text-sm text-muted-foreground">Prices for products already in the catalog that fell outside the usual range. Check each against its photo, then accept or reject it.</p></div>
-          <span className="w-fit rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold">Administrator only</span>
+        <div className="border-b border-border/70 pb-5">
+          <h2 className="font-display text-xl font-extrabold">Review Flagged Price Submissions</h2><p className="mt-1 text-sm text-muted-foreground">Prices for products already in the catalog that fell outside the usual range. Check each against its photo, then accept or reject it.</p>
         </div>
         <div className="mt-6 space-y-5" aria-live="polite">
           {loading ? (
