@@ -4,7 +4,8 @@ import { FormAlert } from "../components/auth/form-alert"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
-import { ProductImage } from "../components/product-image"
+import { ReviewCard, ReviewThumb } from "../components/contribute/review-card"
+import { RequestStatusBadge } from "../components/contribute/status-badge"
 import { packUnits, productCorrectionsSchema, reasonError, singaporeDateString, validationMessages } from "../contributions/schema"
 import { errorText, SubmissionServiceError } from "../contributions/service"
 import type { ProductCorrections, ProductFacets, ProductFields, ProductRequest, ProductRequestStatus, SubmissionService } from "../contributions/types"
@@ -12,7 +13,7 @@ import { formatCents } from "../lib/format"
 import { cn } from "../lib/utils"
 import { Select } from "../components/ui/select"
 import { RejectionReason } from "../components/contribute/rejection-reason"
-import { RefreshCw } from "lucide-react"
+import { Check, LoaderCircle, RefreshCw, X } from "lucide-react"
 import { SuggestionInput } from "../components/suggestion-input"
 import { titleCase, toSuggestions } from "../lib/suggestions"
 import hcsSymbol from "../../assets/brand/healthier-choice-symbol.png"
@@ -59,13 +60,13 @@ export function ProductEditor({ value, onChange, facets, prefix }: { value: Prod
   </div>
 }
 
-// The product picture and, if one was attached, the price evidence photo. Admins and the request's
-// own contributor get a link to the evidence; without one, the card just says it's there.
+// The product picture and the price evidence photo, as thumbnails that enlarge on click. Admins get a
+// link to the evidence; without one, the box just says it's there.
 function RequestImages({ item, refresh }: { item: ProductRequest; refresh: () => void }) {
-  return <div className="grid gap-3 sm:grid-cols-2">
-    <ProductImage url={item.productImageUrl} name={`Product picture for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} />
-    {item.photoKey && (item.photoUrl ? <ProductImage url={item.photoUrl} name={`Price evidence for ${item.name}`} className="max-h-64 w-full rounded-lg object-contain" onExpired={refresh} /> : <p className="rounded-xl border p-4 text-sm">Photo attached</p>)}
-  </div>
+  return <>
+    <ReviewThumb label="Product picture" url={item.productImageUrl} name={`Product picture for ${item.name}`} missing="Photo attached" onExpired={refresh} />
+    <ReviewThumb label="Price evidence" url={item.photoUrl} name={`Price evidence for ${item.name}`} missing={item.photoKey ? "Photo attached" : "No price evidence photo sent"} onExpired={refresh} />
+  </>
 }
 
 function RequestReviewCard({ item, service, facets, refresh, notify }: { item: ProductRequest; service: SubmissionService; facets: Facets; refresh: () => Promise<void>; notify: (message: string) => void }) {
@@ -79,7 +80,8 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
   // What's wrong with the reason, shown under its field rather than at the top of the card.
   const [reasonProblem, setReasonProblem] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  // The decision being saved, so only its button shows a spinner.
+  const [busy, setBusy] = useState<"approved" | "rejected" | null>(null)
   async function decide(decision: "approved" | "rejected") {
     setError(null)
     setReasonProblem(null)
@@ -91,7 +93,7 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
       changes = result.data
     } else if (!reason.trim()) { setReasonProblem("Enter a reason before rejecting this request."); return }
     else if (reasonError(reason)) { setReasonProblem(reasonError(reason)); return }
-    setBusy(true)
+    setBusy(decision)
     try {
       const token = await getAccessToken(); if (!token || !user) throw new Error("Sign in again and retry.")
       await service.moderateProductRequest(item.id, decision, reason, changes, { id: user.id, role: user.role }, token)
@@ -99,24 +101,33 @@ function RequestReviewCard({ item, service, facets, refresh, notify }: { item: P
     } catch (e) {
       setError(errorText(e))
       if (e instanceof SubmissionServiceError && e.code === "ALREADY_MODERATED") { await refresh(); notify(errorText(e)) }
-    } finally { setBusy(false) }
+    } finally { setBusy(null) }
   }
-  return <article className="space-y-5 rounded-xl border p-5">
-    <h3 className="font-display text-lg font-extrabold">{item.name} · {item.status}</h3>
-    <p className="text-sm">{item.submitterName ?? item.userId} {item.submitterEmail} · {item.retailerName ?? item.retailerId} · {formatCents(item.priceCents)} · observed {singaporeDateString(new Date(item.observedAt))}</p>
-    <RequestImages item={item} refresh={() => void refresh()} />
+  return <ReviewCard
+    pictures={<RequestImages item={item} refresh={() => void refresh()} />}
+    title={item.name}
+    badge={<RequestStatusBadge status={item.status} />}
+    price={formatCents(item.priceCents)}
+    store={item.retailerName ?? item.retailerId}
+    observedDate={singaporeDateString(new Date(item.observedAt))}
+    submitter={[item.submitterName ?? item.userId, item.submitterEmail].filter(Boolean).join(" · ")}
+    submittedAt={item.submittedAt}
+    rejectionReason={item.rejectionReason}
+  >
     <FormAlert message={error} />
-    {item.rejectionReason && <p>Rejection reason: {item.rejectionReason}</p>}
-    {item.status === "pending" && <fieldset disabled={busy} className="space-y-5">
+    {item.status === "pending" && <fieldset disabled={Boolean(busy)} className="mt-5 space-y-5 border-t pt-5">
       <ProductEditor value={fields} onChange={setFields} facets={facets} prefix={`review-${item.id}`} />
       <p className="text-sm text-muted-foreground">Suggested range: {item.suggestedMinCents}–{item.suggestedMaxCents} cents. Review this range before approval; it applies across stores.</p>
       <div className="grid gap-4 sm:grid-cols-2">{([["Minimum cents", min, setMin], ["Maximum cents", max, setMax]] as const).map(([label, value, set]) => <label key={label} className="space-y-2">{label}<Input type="number" min="1" max="100000" step="1" value={value || ""} onChange={(e) => set(Number(e.target.value))} /></label>)}</div>
       <label className="block space-y-2">Search terms (comma separated)<Input value={terms} maxLength={320} onChange={(e) => setTerms(e.target.value)} /></label>
       <label className="flex min-h-12 items-start gap-3 rounded-xl border bg-accent/40 p-4"><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /><span>I reviewed the packaging, product fields, HCS and dietary claims, and price range. Correct unsupported claims before approval. If evidence is unclear, leave the request pending or reject it with a reason.</span></label>
       <RejectionReason id={`reject-${item.id}`} value={reason} onChange={(next) => { setReason(next); setReasonProblem(null) }} error={reasonProblem} required="Required to reject" placeholder="Explain why it can't be added, e.g. the photo doesn't show the pack" />
-      <div className="flex flex-wrap gap-3"><Button disabled={!checked} onClick={() => void decide("approved")}>Approve product</Button><Button variant="destructive" onClick={() => void decide("rejected")}>Reject product</Button></div>
+      <div className="flex flex-wrap justify-end gap-3">
+        <Button variant="destructive" onClick={() => void decide("rejected")}>{busy === "rejected" ? <LoaderCircle className="size-4 animate-spin" /> : <X className="size-4" />}Reject product</Button>
+        <Button disabled={!checked} onClick={() => void decide("approved")}>{busy === "approved" ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}Approve product</Button>
+      </div>
     </fieldset>}
-  </article>
+  </ReviewCard>
 }
 
 export function ProductRequestReview({ service }: { service: SubmissionService }) {
