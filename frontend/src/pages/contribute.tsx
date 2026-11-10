@@ -1,11 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
-  CalendarDays,
   Camera,
   Check,
   CheckCircle2,
   Clock3,
-  Image,
   Info,
   LoaderCircle,
   Package,
@@ -13,7 +11,6 @@ import {
   Search,
   Send,
   ShieldCheck,
-  Store,
   Tag,
   X,
 } from "lucide-react"
@@ -25,6 +22,7 @@ import { FormAlert } from "../components/auth/form-alert"
 import { PhotoDrop, usePhoto } from "../components/contribute/photo-drop"
 import { RejectionReason } from "../components/contribute/rejection-reason"
 import { PriceStatusBadge } from "../components/contribute/status-badge"
+import { ReviewCard, ReviewThumb } from "../components/contribute/review-card"
 import { YourSubmissions } from "../components/contribute/your-submissions"
 import { AppShell } from "../components/layout/app-shell"
 import { PageHeader } from "../components/layout/page-header"
@@ -45,7 +43,7 @@ import {
 import { createSubmissionService, errorText, SubmissionServiceError } from "../contributions/service"
 import type { CatalogProduct, CatalogRetailer, PriceSubmission, ProductFields, SubmissionService } from "../contributions/types"
 import { getCategoryIcon } from "../lib/category-icons"
-import { formatDay, formatDollars, formatTimestamp, limitToCents, packLabel } from "../lib/format"
+import { formatDollars, limitToCents, packLabel } from "../lib/format"
 import { usePageTitle } from "../lib/use-page-title"
 import { cn } from "../lib/utils"
 import { emptyFacets, emptyProduct, ProductEditor, ProductRequestReview, type Facets } from "./product-requests"
@@ -83,53 +81,6 @@ function SectionHeading({ icon: Icon, title, description }: { icon: typeof Searc
         <h2 className="font-display text-lg font-extrabold leading-tight sm:text-xl">{title}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
       </div>
-    </div>
-  )
-}
-
-// The evidence photo beside a flagged price, for administrators.
-function PhotoView({ submission, onExpired }: { submission: PriceSubmission; onExpired?: () => void }) {
-  if (!submission.photo?.previewUrl) {
-    return (
-      <div className="grid min-h-52 place-items-center rounded-xl border border-dashed bg-secondary/50 p-3 text-center text-muted-foreground">
-        <div><Image className="mx-auto size-5" /><span className="mt-1 block text-[11px]">{submission.photo ? "Photo attached" : "No image"}</span></div>
-      </div>
-    )
-  }
-  return (
-    <figure className="min-w-0 space-y-3">
-      <figcaption className="text-sm font-semibold">Price evidence</figcaption>
-      <img
-        src={submission.photo.previewUrl}
-        alt={`Price evidence for ${submission.productName}`}
-        className="max-h-96 w-full rounded-xl border bg-secondary/40 object-contain"
-        onError={() => { if (submission.photo?.storage === "private-s3") onExpired?.() }}
-      />
-      <div className="rounded-xl border border-primary/20 bg-accent/50 p-4">
-        <p className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-5 shrink-0 text-primary" />Help shoppers trust this price</p>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Match the product name and price on the shelf label or receipt to the details beside it.</p>
-      </div>
-    </figure>
-  )
-}
-
-function SubmissionDetails({ submission }: { submission: PriceSubmission }) {
-  return (
-    <div className="min-w-0 flex-1">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h3 className="font-display font-extrabold leading-snug">{submission.productName}</h3>
-        <PriceStatusBadge status={submission.status} />
-      </div>
-      <p className="mt-2 text-2xl font-semibold tabular-nums text-primary">{formatDollars(submission.price)}</p>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5"><Store className="size-3.5" />{submission.storeName}</span>
-        <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-3.5" />Observed {formatDay(submission.observedDate)}</span>
-      </div>
-      {submission.rejectionReason && (
-        <p className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          <strong>Rejection reason:</strong> {submission.rejectionReason}
-        </p>
-      )}
     </div>
   )
 }
@@ -786,44 +737,47 @@ function AdminWorkspace({ service }: { service: SubmissionService }) {
               <p className="mt-1 text-sm text-muted-foreground">New submissions will appear here.</p>
             </div>
           ) : submissions.map((submission) => (
-            <article key={submission.id} className="grid gap-5 rounded-xl border bg-card/45 p-4 lg:grid-cols-[minmax(220px,.75fr)_minmax(0,1.25fr)] lg:p-5">
-              <PhotoView submission={submission} onExpired={() => void loadFlagged().catch(() => setError("The photo link expired and could not be refreshed."))} />
-              <div className="min-w-0">
-                <SubmissionDetails submission={submission} />
-                <dl className="mt-4 grid gap-3 rounded-xl bg-secondary/55 p-4 text-xs sm:grid-cols-2">
-                  <div><dt className="text-muted-foreground">Submitted by</dt><dd className="mt-1 font-medium">{submission.submitterName} · {submission.submitterEmail}</dd></div>
-                  <div><dt className="text-muted-foreground">Submitted at</dt><dd className="mt-1 font-medium">{formatTimestamp(submission.submittedAt)}</dd></div>
-                  {submission.photo && <div className="sm:col-span-2"><dt className="text-muted-foreground">Evidence file</dt><dd className="mt-1 break-all font-medium">{submission.photo.fileName} · {(submission.photo.sizeBytes / 1024 / 1024).toFixed(2)} MB</dd></div>}
-                </dl>
-                {rejectingId === submission.id && (
-                  <RejectionReason
-                    id={`reason-${submission.id}`}
-                    value={reason}
-                    onChange={(next) => { setReason(next); setReasonProblem(null) }}
-                    error={reasonProblem}
-                    placeholder="Explain what needs to be corrected"
-                    className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4"
-                  />
+            <ReviewCard
+              key={submission.id}
+              pictures={<ReviewThumb label="Price evidence" url={submission.photo?.previewUrl} name={`Price evidence for ${submission.productName}`} missing={submission.photo ? "Photo attached" : "No price evidence photo sent"} onExpired={() => void loadFlagged().catch(() => setError("The photo link expired and could not be refreshed."))} />}
+              title={submission.productName}
+              badge={<PriceStatusBadge status={submission.status} />}
+              price={formatDollars(submission.price)}
+              store={submission.storeName}
+              observedDate={submission.observedDate}
+              submitter={`${submission.submitterName} · ${submission.submitterEmail}`}
+              submittedAt={submission.submittedAt}
+              extra={submission.photo ? { label: "Evidence file", value: `${submission.photo.fileName} · ${(submission.photo.sizeBytes / 1024 / 1024).toFixed(2)} MB` } : undefined}
+              rejectionReason={submission.rejectionReason}
+            >
+              {rejectingId === submission.id && (
+                <RejectionReason
+                  id={`reason-${submission.id}`}
+                  value={reason}
+                  onChange={(next) => { setReason(next); setReasonProblem(null) }}
+                  error={reasonProblem}
+                  placeholder="Explain what needs to be corrected"
+                  className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4"
+                />
+              )}
+              <div className="mt-5 flex flex-wrap justify-end gap-3">
+                {rejectingId === submission.id ? (
+                  <>
+                    <Button variant="ghost" onClick={() => { setRejectingId(null); setReason(""); setReasonProblem(null); setError(null) }}>Cancel</Button>
+                    <Button variant="destructive" disabled={workingId === submission.id} onClick={() => void decide(submission, "rejected")}>
+                      {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <X className="size-4" />}Confirm rejection
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="destructive" disabled={Boolean(workingId)} onClick={() => { setRejectingId(submission.id); setReason(""); setReasonProblem(null) }}><X className="size-4" />Reject</Button>
+                    <Button disabled={Boolean(workingId)} onClick={() => void decide(submission, "accepted")}>
+                      {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}Accept
+                    </Button>
+                  </>
                 )}
-                <div className="mt-5 flex flex-wrap justify-end gap-3">
-                  {rejectingId === submission.id ? (
-                    <>
-                      <Button variant="ghost" onClick={() => { setRejectingId(null); setReason(""); setReasonProblem(null); setError(null) }}>Cancel</Button>
-                      <Button variant="destructive" disabled={workingId === submission.id} onClick={() => void decide(submission, "rejected")}>
-                        {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <X className="size-4" />}Confirm rejection
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Button variant="destructive" disabled={Boolean(workingId)} onClick={() => { setRejectingId(submission.id); setReason(""); setReasonProblem(null) }}><X className="size-4" />Reject</Button>
-                      <Button disabled={Boolean(workingId)} onClick={() => void decide(submission, "accepted")}>
-                        {workingId === submission.id ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}Accept
-                      </Button>
-                    </>
-                  )}
-                </div>
               </div>
-            </article>
+            </ReviewCard>
           ))}
         </div>
       </section>
