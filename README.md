@@ -2,7 +2,7 @@
 
 A grocery price comparison web app for Singapore. Shoppers build a basket and see what it costs at FairPrice, Sheng Siong and Cold Storage, with a Healthier Choice version beside it, or search the catalogue with filters. Signed-in contributors share shelf prices, with an optional photo, and propose products the catalogue doesn't have yet. Admins review unusual prices and new products.
 
-**Live (dev):** https://d2xn4fxnysvlr5.cloudfront.net
+**Live (dev):** https://d8baodjze1mmt.cloudfront.net/
 
 ## Tech stack
 

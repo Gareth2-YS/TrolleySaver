@@ -266,7 +266,7 @@ Found by reading the code, and not fixed yet. Each case says what should happen.
 
 ## 11. Deployed site
 
-The site on CloudFront (`SiteUrl`, currently https://d2xn4fxnysvlr5.cloudfront.net), built by `python infra\deploy.py` against the dev stack. Keep the browser's developer console open: it must show no CORS, Content-Security-Policy, mixed-content or "Failed to load resource" errors. See [docs/deployment.md](../deployment.md).
+The site on CloudFront (`SiteUrl`, currently https://d8baodjze1mmt.cloudfront.net/), built by `python infra\deploy.py` against the dev stack. Keep the browser's developer console open: it must show no CORS, Content-Security-Policy, mixed-content or "Failed to load resource" errors. See [docs/deployment.md](../deployment.md).
 
 | ID | Steps | Expected result | Key | Status | Notes |
 |---|---|---|:-:|---|---|

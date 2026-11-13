@@ -2,7 +2,7 @@
 
 How TrolleySaver gets from this repository onto AWS: what is deployed, the one command that deploys it, what each step does and why, and how continuous integration checks every change first.
 
-**Last updated:** 6 Nov 2026 · **Environment:** `dev` (stack `trolleysaver-dev`, region `ap-southeast-1`) · **Site:** https://d2xn4fxnysvlr5.cloudfront.net
+**Last updated:** 6 Nov 2026 · **Environment:** `dev` (stack `trolleysaver-dev`, region `ap-southeast-1`) · **Site:** https://d8baodjze1mmt.cloudfront.net/
 
 | Looking for | Go to |
 |---|---|
@@ -186,7 +186,7 @@ Nothing secret is stored in the frontend, the repository or GitHub. The Cognito 
 
 Browsers only let a web page read an API response from another domain if the API names that page's domain in `Access-Control-Allow-Origin`. Two sites are allowed:
 - the local dev server, `http://localhost:5173` (the `AllowedOrigin` template parameter)
-- the deployed site, `https://d2xn4fxnysvlr5.cloudfront.net`, which the template takes straight from the CloudFront distribution
+- the deployed site, `https://d8baodjze1mmt.cloudfront.net/`, which the template takes straight from the CloudFront distribution
 
 How each part enforces it:
 - **Every Lambda response** names the caller's origin only if it is one of those two ([backend/lambdas/common/http.py](../backend/lambdas/common/http.py)). A page on any other site can't read the response.

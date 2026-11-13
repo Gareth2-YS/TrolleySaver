@@ -2,7 +2,7 @@
 
 **Date:** 6 Nov 2026 · **From:** Gareth (backend) · **To:** frontend developers · **Status:** deployed to `dev` on 6 Nov; all 64 smoke checks pass, and HTTPS, security headers and deep links were checked
 
-The React app now runs on AWS at **https://d2xn4fxnysvlr5.cloudfront.net**, served by CloudFront from a private S3 bucket, against the `dev` backend. Everything about how it gets there is in [docs/deployment.md](../deployment.md).
+The React app now runs on AWS at **https://d8baodjze1mmt.cloudfront.net/**, served by CloudFront from a private S3 bucket, against the `dev` backend. Everything about how it gets there is in [docs/deployment.md](../deployment.md).
 
 ## 1. What changes for you
 
